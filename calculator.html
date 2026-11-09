@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5f1">
+  <title>Scafmetric — Beam analysis</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Main navigation">
+    <a class="brand" href="index.html" aria-label="Scafmetric home"><svg class="calc-logo" viewBox="0 0 48 48" aria-hidden="true"><rect x="1.5" y="1.5" width="45" height="45" rx="8" fill="#070c16"/><path d="M10 36V12M38 36V12M10 14H38M10 24H38M10 34H38M10 34L38 14M10 14L38 34" fill="none" stroke="#FFA41B" stroke-width="2.3"/><circle cx="24" cy="24" r="3.4" fill="#3DD9C9" stroke="#FFA41B" stroke-width="1.5"/></svg><span>scafmetric<span class="brand-dot">.</span><small>ENGINEERING WORKSPACE</small></span></a>
+    <div class="nav-label">WORKSPACE</div>
+    <nav class="nav">
+      <a class="nav-item active" href="#beam"><span class="nav-icon">▱</span> Beam analysis <span class="nav-arrow">↗</span></a>
+      <span class="nav-item disabled"><span class="nav-icon">▦</span> Wind &amp; ties <span class="soon">SOON</span></span>
+    </nav>
+    <div class="sidebar-bottom"><div class="side-note-icon">✳</div><strong>Built for clear decisions.</strong><p>Traceable calculations for the work that supports your work.</p><span>SCaffold CALCULATIONS / 01</span></div>
+  </aside>
+  <main id="top">
+    <header class="topbar"><div><span class="crumb">CALCULATORS</span><span class="crumb-divider">/</span><span>Beam analysis</span></div><div class="top-right"><span class="status-dot"></span> PRELIMINARY WORKSPACE <span class="avatar">S</span></div></header>
+    <div class="page" id="beam">
+      <div class="heading-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> STEEL BEAM / 01</div><h1>Beam analysis<span class="period">.</span></h1><p class="lede">Understand how your beam responds before the work begins.</p></div><button class="outline-button" type="button" id="report">↓ &nbsp; Export report</button></div>
+      <div class="notice"><span class="notice-icon">!</span><p><strong>For preliminary evaluation only.</strong> This analysis is not a construction approval or a complete member design. Connections, bearing, stability and scaffold-specific requirements require separate review.</p></div>
+          <section class="panel drawing-panel"><div class="panel-header inline"><div><span class="kicker">02 / VISUALIZE</span><h2>Beam arrangement</h2><p>Select a label in the drawing to jump to its input. The drawing updates as you enter your dimensions.</p></div><span class="chip">SCHEMATIC</span></div><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"><svg viewBox="0 0 720 230" role="img" aria-label="Simply supported beam with uniform load"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="8" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 0L5 10Z" fill="#c2603b"/></marker></defs><text x="360" y="28" text-anchor="middle" class="svg-label">UNIFORM LOAD · D + L + SELF-WEIGHT</text><line x1="90" y1="52" x2="630" y2="52" stroke="#c2603b" stroke-width="2"/><g stroke="#c2603b" stroke-width="2" marker-end="url(#arrow)"><path d="M90 52v43M157 52v43M225 52v43M292 52v43M360 52v43M427 52v43M495 52v43M562 52v43M630 52v43"/></g><line x1="90" y1="105" x2="630" y2="105" stroke="#1a3937" stroke-width="9"/><g fill="none" stroke="#1a3937" stroke-width="2"><path d="M90 111l-16 24h32z M630 111l-16 24h32z M68 140h44 M608 144h44 M615 137a3 3 0 1 0 0 6 M645 137a3 3 0 1 0 0 6"/><path d="M90 154v34 M630 154v34 M90 178h540" stroke="#9aa7a0"/></g><text x="360" y="202" text-anchor="middle" class="svg-dim">L · DISTANCE BETWEEN SUPPORTS</text><text x="90" y="164" text-anchor="middle" class="svg-small">A</text><text x="630" y="164" text-anchor="middle" class="svg-small">B</text></svg></div><div class="drawing-footer"><span><i class="legend-line"></i> BEAM</span><span><i class="legend-load">↓</i> APPLIED LOAD</span><span>NOT TO SCALE</span></div></section>
+      <div class="workspace">
+        <section class="panel input-panel" aria-labelledby="inputs-heading">
+          <div class="panel-header"><div><span class="kicker">01 / DEFINE</span><h2 id="inputs-heading">Beam setup</h2><p>Enter the details of your arrangement.</p></div><span class="header-icon">↗</span></div>
+          <form id="beam-form">
+            <div class="form-section"><div class="section-title"><span>01</span><h3>Project information</h3></div>
+              <label for="project">Project name <span class="optional">OPTIONAL</span></label><input id="project" type="text" placeholder="e.g. Main Street renovation">
+              <label for="preparer">Prepared by <span class="optional">OPTIONAL</span></label><input id="preparer" type="text" placeholder="Name or company">
+            </div>
+            <div class="form-section"><div class="section-title"><span>02</span><h3>Beam &amp; supports</h3></div>
+              <div class="arrangement"><div class="arrangement-icon">△ ━━━━━ △</div><div><strong>Simply supported</strong><small>One span · two end supports</small></div><span class="selected-check">✓</span></div>
+              <label for="span">Distance between supports <em>L</em></label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div><p class="field-help">Measure between the centers of the two supports.</p>
+              <label for="section">Steel beam size <em>W shape</em></label><select id="section"><option value="">Loading sections…</option></select><p class="field-help">Select an AISC wide-flange section to populate its properties.</p>
+              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div><p class="field-help">Strong-axis bending; nominal section stiffness.</p>
+              <label for="brace-locations">Lateral brace locations <em>x</em></label><div class="input-unit"><input id="brace-locations" type="text" value="0, 5, 10, 15, 20"><span>ft</span></div><p class="field-help">Comma-separated positions measured from the left support. Braces are not vertical supports.</p>
+            </div>
+            <div class="form-section"><div class="section-title"><span>03</span><h3>Loads &amp; assumptions</h3></div>
+              <div class="field-grid"><div><label for="dead-load">Dead load <em>D</em></label><div class="input-unit"><input id="dead-load" type="number" min="0" step="any" value="0.2" required><span>kip/ft</span></div></div><div><label for="live-load">Live load <em>L</em></label><div class="input-unit"><input id="live-load" type="number" min="0" step="any" value="0.8" required><span>kip/ft</span></div></div></div><p class="field-help">Uniform loads applied over the full span. Enter dead load excluding beam weight.</p>
+              <label class="check-row" for="self-weight"><input type="checkbox" id="self-weight" checked><span>Include beam self-weight <small>Added once using the selected section weight.</small></span></label>
+              <label for="stiffness-factor">Analysis stiffness factor</label><div class="input-unit"><input id="stiffness-factor" type="number" min="0.01" max="1" step="0.01" value="0.8" required><span>× EI</span></div><p class="field-help">Default 0.80 for reduced-stiffness analysis. Nominal-stiffness service deflection is shown separately.</p>
+            </div>
+            <div class="form-section acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>I understand this is a preliminary calculation and agree to the <a href="#terms">draft terms of use</a>.</span></label></div>
+            <p id="error" class="error" role="alert"></p><button id="calculate" class="primary-button" type="submit">Calculate beam <span>→</span></button><p class="button-note">Results update when you calculate.</p>
+          </form>
+        </section>
+        <div class="output-column">
+          <section class="panel results-panel"><div class="panel-header inline"><div><span class="kicker">03 / REVIEW</span><h2>Analysis results</h2><p>Responses for the load case shown above.</p></div><span class="chip orange">PRELIMINARY</span></div><div id="results" class="results"><div class="empty-results"><div class="empty-icon">↗</div><div><strong>Your results will appear here.</strong><p>Confirm your inputs and select Calculate beam to see the analysis.</p></div></div></div><div class="verification-note"><span>ⓘ</span><div><strong>Independent comparison not completed</strong><p>Member capacity and scaffold-specific checks are not evaluated by this analysis.</p></div></div></section>
+          <section class="panel chart-panel"><div class="panel-header inline"><div><span class="kicker">04 / EXPLORE</span><h2>Response diagrams</h2><p>View how forces and displacement change along the span.</p></div><span class="chip">SERVICE LOAD</span></div><div class="chart-grid"><div class="chart"><div class="chart-title"><strong>Shear force</strong><span>kips</span></div><div id="shear-chart" class="chart-area"><span>Calculate to view diagram</span></div></div><div class="chart"><div class="chart-title"><strong>Bending moment</strong><span>kip-ft</span></div><div id="moment-chart" class="chart-area"><span>Calculate to view diagram</span></div></div><div class="chart"><div class="chart-title"><strong>Deflection</strong><span>in</span></div><div id="deflection-chart" class="chart-area"><span>Calculate to view diagram</span></div></div></div></section>
+          <section class="panel properties-panel"><div class="panel-header inline"><div><span class="kicker">05 / REFERENCE</span><h2>Section properties</h2><p>AISC v15 properties from a third-party mirror; verify against the official source before use.</p></div><span class="chip">AISC v15 · mirrored</span></div><div id="section-properties" class="property-content">Select a beam size to see its section properties.</div></section>
+          <section class="terms-panel" id="terms"><strong>Terms of use · draft</strong><p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p></section>
+          <footer><span>© SCAFMETRIC &nbsp; / &nbsp; ENGINEERING WORKSPACE</span><span>CALCULATE WITH CLARITY <span class="footer-star">✳</span></span></footer>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

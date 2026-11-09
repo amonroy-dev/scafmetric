@@ -1,0 +1,9 @@
+# Reference comparison: W16×31
+
+Source documents provided by the user, retained separately from this repository: `W16x31 - TEDDS.pdf` and `W16x31 - Risa.pdf`. Source inputs and output should be checked against the original pages before claiming independent verification.
+
+The TEDDS report (pp. 1–4) identifies a simply supported 20 ft W16×31, A992 steel (E = 29,000 ksi, Fy = 50 ksi), 0.2 kip/ft dead load and 0.8 kip/ft live load plus self-weight, and braces at 0, 5, 10, 15 and 20 ft. It reports 0.354 in deflection, 10.3 kip shear, 51.6 kip-ft moment, and ASD capacities 87.5 kip shear and 134.7 kip-ft bending with Cb = 1.061. The source of the deflection difference needs confirmation; shear deformation is a possible explanation, not an established fact.
+
+RISA's detail report (pp. 1–2, 5, 7–8) lists Ix = 375 in⁴, Zx = 54 in³, A = 9.13 in², 5 ft unbraced length, shear 10.311 kip, moment magnitude 51.553 kip-ft, bending allowable 128.769 kip-ft, and shear allowable 87.45 kip. Its detail report alone does not establish global support constraints or loading. The user supplied those model assumptions and reported that switching off RISA's stiffness adjustment changed deflection from approximately 0.427 to 0.341 in. RISA pp. 5–6 state Cb = 1.000, while TEDDS p. 4 states Cb = 1.061. Differences in section data precision also affect the comparison.
+
+For the user-specified 1.031 kip/ft uniform load, closed-form simple-beam results are 10.31 kip per reaction, 51.55 kip-ft peak moment, about 0.3413 in bending deflection at nominal EI and 0.4266 in at 0.8 EI. The app's calculated values depend on the chosen self-weight and section data. RISA and TEDDS capacity results are reference values, not validation of any unimplemented capacity calculation. AISC 360-16 ASD and AISC Shapes Database edition must be identified separately.
