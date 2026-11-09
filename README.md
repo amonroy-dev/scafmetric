@@ -9,3 +9,5 @@ The section data comes from a mirrored AISC v15 workbook, not directly from AISC
 Firebase sign-in and 14-day trial code is implemented but not connected or verified with a live project; see [Firebase setup](docs/firebase-setup.md). Stripe, pricing and paid subscriptions are not configured; see [Stripe setup requirements](docs/stripe-setup.md). The visual input guide and synchronized diagrams are available in the calculator.
 
 For Vercel, the repository's `vercel.json` runs `npm run build` and publishes `dist/`. The build copies the site and its data into that directory. Set the Vercel project root to the repository root; project-level build or output overrides must agree with these settings.
+
+The optional 4/1.67 and 2.5/1.67 load comparisons are user-proposed illustrations only, not verified code combinations or member-capacity checks. Service diagrams and deflections remain on the service load. See [scaffold factors and limitations](docs/scaffold-factors.md) before interpreting them.
