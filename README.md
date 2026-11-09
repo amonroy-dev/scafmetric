@@ -6,6 +6,6 @@ The interface supports full-span downward uniform dead and live loads and option
 
 The section data comes from a mirrored AISC v15 workbook, not directly from AISC; see [source and limitations](public/data/AISC-SOURCE.md). The hash identifies the mirror only; official integrity and redistribution terms have not been independently verified. Compare properties against the official source before use. The user-supplied references and comparison caveats are summarized in [reference cases](docs/reference-cases.md). Further work is required for the full requested calculation and reporting scope.
 
-The landing page describes a future free trial. Stripe, account creation, subscriptions, pricing and trial activation are not configured. See [Stripe setup requirements](docs/stripe-setup.md). The visual input guide and synchronized diagrams are available in the calculator.
+Firebase sign-in and 14-day trial code is implemented but not connected or verified with a live project; see [Firebase setup](docs/firebase-setup.md). Stripe, pricing and paid subscriptions are not configured; see [Stripe setup requirements](docs/stripe-setup.md). The visual input guide and synchronized diagrams are available in the calculator.
 
 For Vercel, the repository's `vercel.json` runs `npm run build` and publishes `dist/`. The build copies the site and its data into that directory. Set the Vercel project root to the repository root; project-level build or output overrides must agree with these settings.
