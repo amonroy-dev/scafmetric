@@ -27,3 +27,14 @@
 @media(max-width:340px){.container{width:calc(100% - 24px)}.logo{font-size:8px}.logo svg{width:22px;height:22px}.header-actions{gap:7px}.header-button{font-size:7px;padding:9px 8px}}
 .header-button .header-cta-label,.header-button .header-cta-short{font-size:inherit;line-height:inherit}
 @media(max-width:480px){.header-button .header-cta-label{display:none}.header-button .header-cta-short{display:inline}}
+
+/* Founder introduction */
+.founder-grid{display:grid;grid-template-columns:minmax(220px,340px) minmax(0,1fr);gap:clamp(40px,8vw,100px);align-items:center}
+.founder-portrait{background:var(--orange);border:3px solid var(--orange);box-shadow:8px 8px 0 #27354c;max-width:340px}
+.founder-portrait img{display:block;width:100%;height:auto}
+.founder-copy{max-width:600px}
+.founder-copy>p:not(.eyebrow){color:var(--muted);font-size:16px;line-height:1.8;margin:24px 0 28px}
+.founder-signature{display:flex;flex-direction:column;gap:5px;padding-left:16px;border-left:3px solid var(--aqua);font-size:14px}
+.founder-signature strong{font-weight:650}.founder-signature span{font-size:12px;color:var(--muted)}
+.footer-inner p{line-height:1.7}
+@media(max-width:700px){.founder-grid{grid-template-columns:1fr;gap:34px}.founder-portrait{width:min(100%,260px)}.founder-copy>p:not(.eyebrow){font-size:15px}}
