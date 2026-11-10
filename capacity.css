@@ -31,3 +31,27 @@
 .capacity-scroll-hint { display:none; }
 @media screen and (max-width:760px) { .capacity-scroll-hint { display:block; font-size:11px; color:#aabbd0; margin:10px 0 0; } }
 .capacity-value { white-space:normal; overflow-wrap:anywhere; }
+/* Result status: prominent, with the scope of the check alongside the verdict. */
+.verdict { padding:22px 24px 0; }
+.verdict-card { border:1px solid #607083; border-left:4px solid #aab8c9; border-radius:5px; background:#101b2b; padding:18px 20px; color:#e8ecf4; }
+.verdict-pass { border-left-color:#3dd9a4; background:#102923; }
+.verdict-fail { border-left-color:#ff8c7b; background:#301d23; }
+.verdict-incomplete { border-left-color:#ffb74b; background:#262318; }
+.verdict-label { display:block; margin-bottom:6px; font-size:10px; font-weight:700; letter-spacing:.1em; color:#b9c6d6; }
+.verdict-title { display:block; font-size:21px; line-height:1.25; letter-spacing:-.02em; }
+.verdict-pass .verdict-title { color:#78e6bc; }
+.verdict-fail .verdict-title { color:#ffad9f; }
+.verdict-incomplete .verdict-title { color:#ffcc78; }
+.verdict-detail, .verdict-scope { margin:10px 0 0; color:#e2e8f0; font-size:13px; line-height:1.55; }
+.verdict-scope { color:#b9c6d6; font-size:11px; }
+@media screen and (max-width:760px) { .verdict { padding:20px 19px 0; } .verdict-title { font-size:19px; } }
+.suggestion:not(:empty) { padding:14px 24px 0; }
+.suggestion-card { padding:16px 20px; border:1px solid #3e536c; border-radius:5px; background:#111f31; }
+.suggestion-label { display:block; color:#6fe1d2; font-size:10px; letter-spacing:.09em; font-weight:700; margin-bottom:6px; }
+.suggestion-card>strong { display:block; color:#f2f6fb; font-size:19px; }
+.suggestion-card strong small { font-size:12px; color:#b8c7d9; font-weight:500; }
+.suggestion-card p { margin:9px 0; font-size:12px; line-height:1.5; color:#c1ccda; }
+.suggestion-button { margin:3px 0; padding:9px 12px; border:1px solid #f4b64e; border-radius:4px; background:#ffa41b; color:#111a2e; font-weight:700; font-size:12px; cursor:pointer; }
+.suggestion-button:hover { background:#ffbf5d; }
+.suggestion-current { display:inline-block; margin:3px 0; color:#8adccb; font-size:12px; font-weight:600; }
+@media screen and (max-width:760px) { .suggestion:not(:empty) { padding:14px 19px 0; } }

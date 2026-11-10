@@ -90,3 +90,22 @@
 }
 
 @media print { .input-explanation { display:none !important; } }
+
+/* Keep the decision and checked limits at the front of the printed report. */
+@media print {
+  .page { display: flex !important; flex-direction: column !important; }
+  .workspace, .output-column { display: contents !important; }
+  .heading-row { order: 0; }
+  .notice { order: 1; }
+  .results-panel { order: 2; }
+  .drawing-panel { order: 3; }
+  .chart-panel { order: 4; }
+  .properties-panel { order: 5; }
+  .terms-panel { order: 6; }
+  .verdict-card { color: #111 !important; background: #fff !important; border: 1.5pt solid #333 !important; box-shadow: none !important; padding: 9pt !important; margin: 0 0 12pt !important; break-inside: avoid; page-break-inside: avoid; }
+  .verdict-card * { color: #111 !important; }
+  .verdict-label { font-size: 9pt !important; }
+  .verdict-title { font-size: 17pt !important; }
+  .verdict-detail, .verdict-scope { font-size: 9pt !important; line-height: 1.4 !important; }
+}
+@media print { .results-panel { break-inside: auto !important; page-break-inside: auto !important; } }

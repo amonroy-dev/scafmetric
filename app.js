@@ -1,5 +1,7 @@
 import { analyzeBeam } from './src/beam.js';
 import { beamSelfWeight } from './src/beam-self-weight.js';
+import { summarizeChecks } from './src/check-verdict.js';
+import { suggestBeamSize } from './src/suggest-beam-size.js';
 import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
 import { strengthComparisonLoads } from './src/strength-comparison.js';
@@ -25,7 +27,9 @@ function properties() {
 function invalidate() {
  if (!record) return;
  record = null;
- $('results').innerHTML = '<p class="empty-state">Inputs changed. Run the analysis again to update results and the report.</p>';
+ $('verdict').innerHTML = '<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Inputs changed</strong><p class="verdict-detail">Calculate again to update your beam check.</p></div>';
+ $('results').innerHTML = '';
+ $('suggestion').innerHTML = '';
  $('report').disabled = true;
  clearCharts();
  for (const id of ['shear-chart','moment-chart','deflection-chart']) $(id).innerHTML = '';
@@ -139,10 +143,45 @@ function run(e) {
   const checks = memberChecks({section:s, analysis, bracesFt:br.locations, Eksi:E, dead, live, self, comparison});
   record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, span, dead, live, self, total, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); $('report').disabled = false;
+  const resultsPanel = document.querySelector('.results-panel');
+  resultsPanel.focus({preventScroll:true});
+  resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
  } catch(err) { invalidate(); $('error').textContent = err.message; }
+}
+function verdictHtml(check) {
+ const result = summarizeChecks(check);
+ const scope = '<p class="verdict-scope">These are preliminary bending and shear checks only. Bearing, connections, deflection limits, bracing and scaffold requirements need separate review.</p>';
+ if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">NOT EVALUATED</strong><p class="verdict-detail">${escape(result.detail)}</p>${scope}</div>`;
+ const item = result.governing;
+ const governing = `${escape(item.name)} · ${fmt(item.utilization * 100, 4)}% of allowable (compared without rounding)`;
+ if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — listed bending and shear checks</strong><p class="verdict-detail"><strong>${governing}</strong><br>The evaluated demand is within the allowable strength.</p>${scope}</div>`;
+}
+function renderSuggestion(r) {
+ const status = summarizeChecks(r.checks);
+ if (status.status === 'incomplete' || status.unavailable?.length) { $('suggestion').innerHTML = ''; return; }
+ let found;
+ try {
+  found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live,
+   bracesFt:r.braces.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
+   safetyFactor:r.comparison ? r.comparison.numerator : null,
+   confirmedLateralBracing:true, confirmedScope:true});
+ } catch {
+  $('suggestion').innerHTML = ''; return;
+ }
+ const scope = '<p>Screened for the listed bending and shear checks only, including any selected comparison. Verify this section’s properties. Deflection limits, depth, availability, bearing, connections, brace design and scaffold requirements are not checked.</p>';
+ if (found.status !== 'suggested') {
+  $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">SIZE SCREEN</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p>${scope}</div>`;
+  return;
+ }
+ const name = found.section.AISC_Manual_Label;
+ const button = name === r.section ? '<span class="suggestion-current">Currently selected</span>' : `<button type="button" class="suggestion-button" data-use-suggestion="${escape(name)}">Use ${escape(name)} →</button>`;
+ $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">PRELIMINARY SIZE TO CONSIDER</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}${scope}</div>`;
 }
 function render(r) {
  const a = r.analysis; const max = a.maxDeflection;
+ $('verdict').innerHTML = verdictHtml(r.checks);
+ renderSuggestion(r);
  drawSchematic();
  drawCharts(a);
  const comparisonHtml = r.comparison && r.checks.status !== 'evaluated' ? `<div class="calculation-detail"><h3>Optional load comparison — illustrative only</h3><p><strong>Not a verified OSHA or ASD load combination. Not a capacity or compliance check.</strong> The selected comparison uses the user-proposed ${fmt(r.comparison.numerator,8)} / 1.67 = ${fmt(r.comparison.multiplier,5)} multiplier on the entered live load only. It includes entered dead load and selected beam self-weight once.</p><p>1.0D + (${fmt(r.comparison.numerator,8)} / 1.67)L = ${fmt(r.dead,4)} + ${fmt(r.self,4)} + (${fmt(r.comparison.numerator,8)} / 1.67 × ${fmt(r.live,4)}) = <strong>${fmt(r.comparison.totalKipFt,4)} kip/ft</strong>. For this uniform load on a simply supported beam: reaction at each support = <strong>${fmt(r.comparison.reactionKip,3)} kip</strong>; maximum moment = <strong>${fmt(r.comparison.momentKipFt,3)} kip-ft</strong>.</p><p>The 1.67 divisor does not apply to every limit state, and the entered dead load may include applied loads that belong in the maximum intended load. The governing basis for the selected safety factor must be confirmed. Engineering review is required. The diagrams and deflections remain the separate 1.0D + 1.0L service case.</p></div>` : '';
@@ -165,7 +204,7 @@ $('beam-form').addEventListener('submit', run);
 bindSchematic();
 drawSchematic();
 $('beam-form').addEventListener('input', () => { invalidate(); drawSchematic(); });
-$('section').addEventListener('change', () => { properties(); drawSchematic(); });
+$('section').addEventListener('change', () => { $('capacity-properties').checked = false; properties(); drawSchematic(); });
 $('enable-capacity').addEventListener('change', () => { $('capacity-fields').hidden = !$('enable-capacity').checked; invalidate(); });
 $('load-comparison').addEventListener('change', () => {
  const custom = $('load-comparison').value === 'custom';
@@ -173,6 +212,18 @@ $('load-comparison').addEventListener('change', () => {
  $('custom-safety-factor').disabled = !custom;
  $('custom-safety-factor').required = custom;
  invalidate();
+});
+$('suggestion').addEventListener('click', e => {
+ const button = e.target.closest('[data-use-suggestion]');
+ if (!button) return;
+ const name = button.dataset.useSuggestion;
+ if (!sections.some(section => section.AISC_Manual_Label === name)) return;
+ $('section').value = name;
+ $('capacity-properties').checked = false;
+ properties();
+ drawSchematic();
+ $('capacity-properties').focus({preventScroll:true});
+ $('capacity-properties').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
 });
 $('report').addEventListener('click', () => { if (record) window.print(); });
 fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Section library failed to load.');return r.json();}).then(data=>{
