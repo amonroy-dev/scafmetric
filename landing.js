@@ -25,3 +25,38 @@ if (beam) {
   document.addEventListener('visibilitychange', updateMotion);
   updateMotion();
 }
+
+// The complete text is present before JavaScript runs and separately available to
+// assistive technology. Only the visual copy is progressively revealed.
+for (const element of document.querySelectorAll('[data-typewriter]')) {
+  const lines = [...element.querySelectorAll('.type-ink')];
+  const texts = lines.map(line => line.textContent);
+  const speed = Number(element.dataset.speed) || 30;
+  const pause = Number(element.dataset.pause) || 250;
+  const delay = Number(element.dataset.delay) || 0;
+  let timer;
+  const finish = () => {
+    clearTimeout(timer);
+    lines.forEach((line, index) => { line.textContent = texts[index]; });
+  };
+  if (reducedMotion.matches) continue;
+  lines.forEach(line => { line.textContent = ''; });
+  let row = 0, column = 0;
+  const cursor = document.createElement('span');
+  cursor.className = 'type-cursor';
+  function advance() {
+    if (reducedMotion.matches) { finish(); return; }
+    const line = lines[row];
+    if (column < texts[row].length) {
+      column += 1;
+      line.textContent = texts[row].slice(0, column);
+      line.append(cursor);
+      timer = setTimeout(advance, speed);
+    } else if (row < lines.length - 1) {
+      cursor.remove(); row += 1; column = 0;
+      timer = setTimeout(advance, pause);
+    }
+  }
+  timer = setTimeout(advance, delay);
+  reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) finish(); });
+}
