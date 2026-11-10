@@ -1,0 +1,90 @@
+/* Print-only presentation: vector diagrams and readable, high-contrast report. */
+@media print {
+  @page { size: letter; margin: .6in .65in; }
+  html, body, main, .app-shell, .page, .workspace, .output-column {
+    background: #fff !important;
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+  body { font: 10pt/1.4 Arial, sans-serif !important; }
+  .page { padding: 0 !important; max-width: none !important; }
+  .workspace, .output-column { display: block !important; }
+  .sidebar, .topbar, .outline-button, .input-panel, footer { display: none !important; }
+  .panel, .notice, .terms-panel {
+    color: #111 !important;
+    background: #fff !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .panel { margin: 0 0 14pt !important; overflow: visible !important; }
+  .drawing-panel, .chart-panel { break-inside: auto !important; page-break-inside: auto !important; }
+  .results-panel, .properties-panel, .chart { break-inside: avoid; page-break-inside: avoid; }
+  .panel-header, .results, .chart-grid { padding: 0 !important; }
+  .panel-header { margin: 0 0 9pt !important; }
+  .panel-header h2, .heading-row h1, .calculation-detail h3 { font-family: Arial, sans-serif !important; color: #111 !important; }
+  .panel-header h2 { font-size: 15pt !important; font-weight: 700 !important; }
+  .heading-row h1 { font-size: 20pt !important; font-weight: 700 !important; }
+  .panel-header p, .lede, .kicker, .eyebrow, .chip, .calculation-detail, .visual-intro, .visual-footnote, .terms-panel, .verification-note, .empty-state { color: #222 !important; }
+  .notice { border: 1px solid #555 !important; padding: 7pt 9pt !important; margin: 0 0 12pt !important; font-size: 9pt !important; }
+  .notice strong { color: #111 !important; }
+  .chip { background: #fff !important; padding: 0 !important; }
+  .drawing-panel .schematic { margin: 0 !important; border: 1px solid #777 !important; background: #fff !important; overflow: visible !important; }
+  .beam-visual { width: 100% !important; min-width: 0 !important; height: auto !important; }
+  .beam-visual text { fill: #111 !important; }
+  .v-beam, .v-support, .v-section, .v-load, .v-dimension, .v-brace { stroke: #111 !important; }
+  .visual-intro, .guide-item, .visual-footnote { background: #fff !important; color: #111 !important; }
+  .visual-guide { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .guide-item { padding: 5pt !important; color: #111 !important; }
+  .guide-item strong, .guide-item small, .guide-number { color: #111 !important; }
+  .guide-arrow { display: none !important; }
+  .visual-footnote { font-size: 8pt !important; }
+  .result-grid { background: #fff !important; border-color: #888 !important; }
+  .result-grid > div, .property-content > div { background: #fff !important; border: 1px solid #ccc !important; }
+  .result-grid strong, .result-grid span, .result-grid small, .property-content, .property-content strong, .property-content span, .property-content small { color: #111 !important; }
+  .calculation-detail { font-size: 9pt !important; line-height: 1.45 !important; }
+  .calculation-detail h3 { margin: 10pt 0 4pt !important; }
+  .diagram-controls { margin: 0 0 9pt !important; padding: 6pt 0 !important; background: #fff !important; border: 0 !important; color: #111 !important; }
+  .diagram-controls-header, .diagram-controls label, .diagram-controls input, .diagram-readout { display: none !important; }
+  .diagram-controls p { color: #222 !important; font-size: 9pt !important; }
+  .chart-grid { display: block !important; }
+  .chart { background: #fff !important; border-top: 1px solid #aaa !important; padding: 7pt 0 !important; }
+  .chart-title { display: flex !important; color: #111 !important; font-size: 10pt !important; }
+  .chart-title span { color: #222 !important; font-size: 9pt !important; }
+  .chart-area { display: block !important; height: auto !important; min-height: 0 !important; margin: 3pt 0 0 !important; background: #fff !important; }
+  .response-svg { display: block !important; width: 100% !important; height: auto !important; min-height: 0 !important; }
+  .response-svg text { fill: #111 !important; font-size: 15px !important; }
+  .chart-gridline { stroke: #ccc !important; }
+  .chart-zero, .chart-line, .chart-negative { stroke: #111 !important; }
+  .chart-fill { fill: #888 !important; fill-opacity: .12 !important; }
+  .chart-cursor, .chart-point { display: none !important; }
+  .property-content { background: #fff !important; margin: 0 !important; padding: 0 !important; color: #111 !important; }
+  .terms-panel { margin-top: 10pt !important; font-size: 8pt !important; }
+}
+@media print {
+  .chart-title { display: none !important; }
+  .response-heading, .response-heading h3, .response-kicker, .response-unit, .response-extrema, .response-extrema span, .response-extrema strong, .response-zero { color: #111 !important; }
+  .response-heading h3 { font: bold 11pt/1.3 Arial, sans-serif !important; }
+  .response-kicker, .response-unit { font: bold 8pt/1.3 Arial, sans-serif !important; }
+  .response-extrema div { background: #fff !important; border: 1px solid #888 !important; padding: 4pt 6pt !important; }
+  .response-extrema strong, .response-zero { font-size: 9pt !important; }
+  .response-extrema span { font-size: 8pt !important; }
+  .chart-area svg text.chart-axis, .response-svg .chart-axis { fill: #111 !important; font: 15px Arial, sans-serif !important; }
+  .chart-support-guide, .chart-tick { stroke: #555 !important; }
+  .chart-zero-mark { fill: #fff !important; stroke: #111 !important; }
+  .response-svg pattern[id^="hatch-"] line { stroke: #333 !important; opacity: .65 !important; }
+}
+@media print {
+  .drawing-panel .panel-header p, .input-guide-heading span, .input-guide-arrow { display: none !important; }
+  .input-guide-item, .input-properties button { color: #111 !important; background: #fff !important; }
+  .input-guide-item strong, .input-guide-item small, .input-guide-number, .input-properties span, .input-properties strong, .input-explanation { color: #111 !important; }
+}
+@media print {
+  .result-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  .result-grid > div { padding: 7pt 6pt !important; }
+  .result-grid strong { margin-top: 4pt !important; font-size: 15pt !important; }
+  .chart-panel { break-before: page; page-break-before: always; }
+}
+@media print {
+  .input-guide-heading, .input-guide, .input-hotspot { display: none !important; }
+}

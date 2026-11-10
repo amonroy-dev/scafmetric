@@ -1,6 +1,7 @@
 import { analyzeBeam } from './src/beam.js';
 import { requestedLoadComparison } from './src/load-comparison.js';
-import { drawSchematic, bindSchematic, drawCharts, clearCharts } from './src/visuals.js';
+import { drawSchematic, bindSchematic } from './src/input-visual.js';
+import { drawCharts, clearCharts } from './src/visuals.js';
 
 const $ = id => document.getElementById(id);
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });

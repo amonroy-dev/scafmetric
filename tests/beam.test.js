@@ -31,3 +31,13 @@ test('rejects unsupported geometry and invalid material', () => {
  assert.throws(() => analyzeBeam({ ...base, pointLocationFt: 21 }));
  assert.throws(() => analyzeBeam({ ...base, stiffnessFactor: 0 }));
 });
+test('uniform-load diagram critical points and zero-load response', () => {
+ const r = analyzeBeam(base);
+ near(r.maxShear.shearLb, 10310); near(r.maxShear.xFt, 0);
+ near(r.minShear.shearLb, -10310); near(r.minShear.xFt, 20);
+ near(r.at(10).shearLb, 0); near(r.maxMoment.xFt, 10); near(r.maxDeflection.xFt, 10);
+ const zero = analyzeBeam({ ...base, uniformLoadPlf: 0 });
+ for (const x of [0, 5, 10, 15, 20]) {
+  near(zero.at(x).shearLb, 0); near(zero.at(x).momentKipFt, 0); near(zero.at(x).reducedDeflectionIn, 0);
+ }
+});

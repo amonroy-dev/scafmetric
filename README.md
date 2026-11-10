@@ -11,3 +11,5 @@ Firebase sign-in and 14-day trial code is implemented but not connected or verif
 For Vercel, the repository's `vercel.json` runs `npm run build` and publishes `dist/`. The build copies the site and its data into that directory. Set the Vercel project root to the repository root; project-level build or output overrides must agree with these settings.
 
 The optional 4:1 preset and custom safety-factor load comparisons are user-proposed illustrations only, not verified code combinations or member-capacity checks. Service diagrams and deflections remain on the service load. See [scaffold factors and limitations](docs/scaffold-factors.md) before interpreting them.
+
+The supported beam's visual input guide links drawing labels to fields. Its response diagrams use a synchronized cursor, labeled extrema and zero shear, and a downward-positive reduced-EI deflection plot. Curves connect sampled response values; the report uses vector diagrams. The optional safety-factor comparison is separate from the service diagrams. Additional arrangements and member-capacity checks remain unimplemented.
