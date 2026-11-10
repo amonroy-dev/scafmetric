@@ -1,0 +1,33 @@
+.capacity-table-wrap { overflow-x:auto; max-width:100%; margin:14px 0 18px; }
+.capacity-table { width:100%; min-width:620px; border-collapse:collapse; text-align:right; font-size:12px; }
+.capacity-table caption { text-align:left; font-weight:600; margin-bottom:8px; }
+.capacity-table th,.capacity-table td { padding:8px 10px; border-bottom:1px solid #35455d; white-space:nowrap; }
+.capacity-table th:first-child,.capacity-table td:first-child { text-align:left; }
+.capacity-table th { font-weight:600; color:#c4d1e2; }
+@media print { .capacity-table-wrap { overflow:visible; } .capacity-table { width:100%; min-width:0; font-size:8pt; } .capacity-table th,.capacity-table td { color:#111; border-color:#aaa; padding:3pt; white-space:normal; } .capacity-table tr { break-inside:avoid; } .capacity-checks { break-inside:auto; } }
+/* Calculation sheet: labels, equations, values, and source references. */
+.capacity-checks { margin-top:24px; font-size:12px; line-height:1.45; color:#cbd3e1; }
+.capacity-checks h3 { margin:0 0 7px; font-size:14px; color:#e8ecf4; }
+.capacity-checks h4 { margin:0; font-size:13px; color:#e8ecf4; }
+.capacity-basis, .capacity-note { margin:8px 0 13px; color:#b7c3d3; font-size:11px; line-height:1.5; }
+.capacity-section { margin:20px 0 24px; }
+.capacity-heading { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.capacity-heading span { color:#c1cedc; font-size:11px; font-weight:600; }
+.capacity-row { display:grid; grid-template-columns:minmax(94px,1fr) minmax(150px,2.3fr) minmax(70px,auto) minmax(70px,auto); gap:6px 12px; align-items:baseline; padding:8px 0; border-bottom:1px solid #2c3b51; }
+.capacity-label { color:#d9e3ef; font-weight:600; }
+.capacity-equation { color:#b8c7d8; overflow-wrap:anywhere; }
+.capacity-value { text-align:right; color:#f1f5fa; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.capacity-reference { color:#aabbd0; font-size:10px; text-align:right; white-space:nowrap; }
+@media screen and (max-width:760px) {
+ .capacity-row { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:'label value' 'equation reference'; gap:4px 10px; padding:10px 0; }
+ .capacity-label { grid-area:label; } .capacity-value { grid-area:value; } .capacity-equation { grid-area:equation; } .capacity-reference { grid-area:reference; }
+}
+@media print {
+ .capacity-checks, .capacity-checks h3, .capacity-checks h4, .capacity-basis, .capacity-note, .capacity-heading span, .capacity-label, .capacity-equation, .capacity-value, .capacity-reference { color:#111 !important; }
+ .capacity-checks { margin-top:10pt; font-size:8.5pt; } .capacity-checks h3 { font-size:11pt; } .capacity-checks h4 { font-size:10pt; }
+ .capacity-section { margin:10pt 0; } .capacity-row { grid-template-columns:1fr 2.4fr auto auto; gap:4pt; padding:3pt 0; border-color:#aaa; break-inside:avoid; }
+ .capacity-basis,.capacity-note,.capacity-heading span,.capacity-reference { font-size:8pt; } .capacity-heading { break-after:avoid; }
+}
+.capacity-scroll-hint { display:none; }
+@media screen and (max-width:760px) { .capacity-scroll-hint { display:block; font-size:11px; color:#aabbd0; margin:10px 0 0; } }
+.capacity-value { white-space:normal; overflow-wrap:anywhere; }

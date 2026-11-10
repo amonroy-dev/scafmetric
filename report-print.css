@@ -88,3 +88,5 @@
 @media print {
   .input-guide-heading, .input-guide, .input-hotspot { display: none !important; }
 }
+
+@media print { .input-explanation { display:none !important; } }
