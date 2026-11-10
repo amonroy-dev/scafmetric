@@ -10,3 +10,50 @@
 @media(max-width:850px){.input-drawings{grid-template-columns:1fr}.input-elevation{border-right:0;border-bottom:1px solid #2a3a5e}.input-section{display:grid;grid-template-columns:1fr 1fr}.input-section .input-drawing-label{grid-column:1/-1}.input-properties{border-top:0;border-left:1px solid #2a3a5e}.input-section-svg{max-height:210px}}
 @media(max-width:650px){.input-beam{min-width:0}.input-beam .in-text{font-size:18px}.input-beam .in-dimtext{font-size:18px}.input-beam .in-note{font-size:16px}.input-hotspot text{font-size:16px}.input-guide{grid-template-columns:repeat(2,minmax(0,1fr))}.input-visual-header{font-size:14px}.input-guide-item{padding:9px 8px}.input-section-svg{align-self:center}.input-properties{grid-template-columns:1fr}}
 @media print{.input-visual-header,.input-guide-heading{color:#111;background:#eee;border-color:#aaa}.input-visual-header strong,.input-visual-kicker,.input-guide-heading strong{color:#111}.input-drawings,.input-section{background:white}.input-elevation,.input-section,.input-drawing-label,.input-properties,.input-properties button,.input-guide-item,.input-brace-summary{border-color:#aaa}.input-beam{min-width:0}.input-scroll{overflow:visible}.input-beam rect{fill:#fff}.input-beam text.in-text,.input-beam text.in-dimtext,.input-beam text.in-note,.input-section-svg text.in-note{fill:#111}.in-beam,.in-support,.in-load,.in-brace,.in-section-shape,.in-dim,.in-axis{stroke:#111}.in-support,.in-section-shape{fill:#fff}.in-brace-dot{fill:#111}.input-hotspot circle{fill:#fff;stroke:#111}.input-hotspot text{fill:#111}.input-properties button,.input-guide-item{background:white;color:#111;break-inside:avoid}.input-properties span,.input-properties strong,.input-guide-item small,.input-guide-arrow,.input-guide-number,.input-brace-summary strong,.input-brace-summary span,.input-drawing-label,.input-scroll-note,.input-explanation{color:#111}.input-guide-number{border-color:#111}.input-scroll-note{display:none}.input-guide{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+/* Screen presentation: a quiet drafting surface with accents reserved for
+   loads, bracing, and the selected input. Print remains independently styled. */
+@media screen {
+  .input-visual-header { padding: 17px 20px; background: #142237; border-color: #293b54; color: #a7b6ca; font: 500 11px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: .035em; }
+  .input-visual-header strong { margin-top: 4px; font: 600 14px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #f0f3f8; }
+  .input-visual-kicker { margin: 0; color: #86c9c3; font: 600 10px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: .075em; }
+  .input-drawings { background: #101b2c; }
+  .input-elevation { border-color: #293b54; }
+  .input-section { background: #111d30; }
+  .input-drawing-label { padding: 11px 16px; border-color: #293b54; color: #aabbd0; font: 600 10px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: .06em; }
+  .input-beam rect[fill^="url"] { opacity: .55; }
+  .input-beam .in-text, .input-beam .in-dimtext, .input-beam .in-note, .input-section-svg .in-note { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-beam .in-text, .input-beam .in-dimtext { fill: #e2eaf4; }
+  .input-beam .in-note, .input-section-svg .in-note { fill: #aebed1; }
+  .in-load { stroke: #efb252; }
+  .in-beam, .in-support, .in-section-shape { stroke: #d9e3ef; }
+  .in-brace { stroke: #65bdb4; }
+  .in-brace-dot { fill: #65bdb4; }
+  .input-hotspot circle { fill: #14243a; stroke: #d9a34c; stroke-width: 1.6; }
+  .input-hotspot text { fill: #f4cf8d; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; font-weight: 600; }
+  .input-hotspot:hover circle, .input-hotspot:focus circle, .input-hotspot.is-active circle { fill: #efb252; stroke: #efb252; }
+  .input-hotspot:hover text, .input-hotspot:focus text, .input-hotspot.is-active text { fill: #101b2c; }
+  .input-scroll-note, .input-explanation { padding: 12px 16px; color: #aebed0; font: 400 12px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-brace-summary { padding: 11px 16px; border-color: #293b54; font: 12px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-brace-summary strong { color: #8fcac4; font: 600 10px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: .05em; }
+  .input-properties { border-color: #293b54; }
+  .input-properties button { padding: 11px 13px; background: #142237; border-color: #293b54; }
+  .input-properties span { color: #adbed0; font: 500 10px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: .025em; }
+  .input-properties strong { color: #edf2f8; font: 600 12px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-properties button:hover, .input-properties button:focus-visible, .input-properties button.is-active,
+  .input-guide-item:hover, .input-guide-item:focus-visible, .input-guide-item.is-active { background: #1d3045; outline-color: #68c4ba; }
+  .input-guide-heading { align-items: center; padding: 13px 16px; background: #142237; border-color: #293b54; color: #aabbd0; font: 11px/1.4 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-guide-heading strong { color: #e5edf6; font: 600 12px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-guide-item { background: #111d30; border-color: #293b54; padding: 13px 15px; }
+  .input-guide-number { width: 25px; height: 25px; border-color: #6a7c8e; color: #bdc9d8; border-radius: 2px; font: 600 10px/1 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-guide-item strong { color: #e3eaf3; font: 600 11px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .input-guide-item small { color: #acbbcd; font: 400 11px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; margin-top: 3px; }
+  .input-guide-arrow { display: none; }
+}
+@media screen and (max-width: 650px) {
+  .input-visual-header { align-items: flex-start; padding: 15px; }
+  .input-visual-header > span { text-align: right; max-width: 130px; }
+  .input-guide-item { padding: 11px 10px; gap: 8px; }
+  .input-beam .in-text, .input-beam .in-dimtext { font-size: 19px; }
+  .input-beam .in-note { font-size: 17px; }
+}

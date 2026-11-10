@@ -12,7 +12,7 @@ const firebaseConfig = {
 };
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist', { recursive: true });
-for (const path of ['index.html', 'calculator.html', 'signin.html', 'app.js', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'auth.css', 'src', 'public']) {
+for (const path of ['index.html', 'calculator.html', 'signin.html', 'app.js', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'refined.css', 'auth.css', 'src', 'public']) {
   await cp(path, `dist/${path}`, { recursive: true });
 }
 await build({ entryPoints: ['src/auth/client.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/auth.js', minify: true });

@@ -12,3 +12,50 @@
 @media(max-width:650px){.response-heading h3{font-size:14px}.response-svg .chart-axis{font-size:17px!important}.response-svg .chart-x-label{font-size:15px!important}.response-extrema strong{font-size:11px}.chart-grid .chart{padding:14px 0 18px}}
 @media print{.chart{break-inside:avoid}.response-heading h3{font-size:11pt}.response-extrema div{padding:4px 7px}.response-extrema strong,.response-zero{font-size:9pt}.response-svg .chart-axis{fill:#263b35!important}}
 @media(max-width:650px){.response-svg .chart-x-tick{font-size:22px!important}.response-svg .chart-y-tick{font-size:18px!important}}
+
+/* Screen-only response plots: restrained dividers, readable annotation, and
+   a single teal response line with amber reserved for the active position. */
+@media screen {
+  .drawing-panel .schematic { background: #101b2c; border: 1px solid #293b54; border-radius: 4px; }
+  .chart-grid { padding-top: 0; }
+  .chart-grid .chart { border-top: 1px solid #293b54; padding: 23px 0 25px; }
+  .response-heading { align-items: center; margin-bottom: 13px; }
+  .response-heading h3 { margin: 4px 0 0; color: #ecf2f8; font: 600 15px/1.35 Inter, ui-sans-serif, system-ui, sans-serif; }
+  .response-kicker { color: #a5b6c9; font: 600 10px/1.3 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .06em; }
+  .response-kicker { display: none; }
+  .response-unit { color: #adbdcf; font: 500 11px/1.3 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .02em; }
+  .response-svg .chart-axis, .chart-area svg text.chart-axis { fill: #bbc9d8; font-family: Inter, ui-sans-serif, system-ui, sans-serif !important; }
+  .chart-gridline { stroke: #293b54; }
+  .chart-zero { stroke: #8393a7; stroke-width: 1.5; }
+  .chart-support-guide { stroke: #62748a; }
+  .chart-tick { stroke: #99aabd; }
+  .chart-fill { fill: #65bdb4; fill-opacity: .12; }
+  .chart-line { stroke: #74c8be; stroke-width: 3.2; }
+  .chart-negative { stroke: #efb252; }
+  .chart-cursor { stroke: #e9b566; stroke-width: 1.5; }
+  .chart-point { fill: #efb252; stroke: #101b2c; }
+  .chart-zero-mark { fill: #101b2c; stroke: #efb252; }
+  .response-extrema { gap: 0; margin-top: 10px; border-top: 1px solid #293b54; border-bottom: 1px solid #293b54; }
+  .response-extrema div { background: transparent; border: 0; padding: 10px 12px 10px 0; }
+  .response-extrema div + div { border-left: 1px solid #293b54; padding-left: 14px; }
+  .response-extrema span { color: #a9b8c9; font: 600 10px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .035em; }
+  .response-extrema strong { color: #e6edf5; font: 600 12px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .response-zero { margin: 9px 0 0; color: #b4c1d1; font: 400 12px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; }
+  .diagram-controls { padding: 18px 20px; background: #101b2c; border: 1px solid #293b54; border-radius: 4px; }
+  .diagram-controls-header span { color: #99b6bd; font: 600 10px/1.3 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: .06em; }
+  .diagram-controls-header strong { color: #e8eef6; font: 600 14px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; }
+  .diagram-controls-header output { color: #f1c578; font: 600 13px/1.3 Inter, ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .diagram-controls label { color: #d2dce8; font: 600 12px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; }
+  .diagram-controls label span, .diagram-controls p { color: #b1bfd0; font: 400 11px/1.55 Inter, ui-sans-serif, system-ui, sans-serif; }
+  .diagram-controls input[type=range] { accent-color: #eab358; }
+  .diagram-readout { gap: 0; border: 1px solid #293b54; border-radius: 3px; overflow: hidden; }
+  .diagram-readout span { background: #142237; border: 0; padding: 9px 10px; color: #e7eef6; font: 600 11px/1.3 Inter, ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .diagram-readout span + span { border-left: 1px solid #293b54; }
+}
+@media screen and (max-width:650px) {
+  .diagram-controls { padding: 15px; }
+  .diagram-readout span { padding: 9px 6px; font-size: 10px; }
+  .response-svg .chart-x-tick { font-size: 24px !important; }
+  .response-svg .chart-y-tick { font-size: 22px !important; }
+  .response-svg .chart-x-label { font-size: 18px !important; }
+}
