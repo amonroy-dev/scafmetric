@@ -76,3 +76,14 @@ test('requires supported assumptions and rejects invalid global inputs', () => {
   assert.throws(() => suggestBeamSize({ ...base, pointLoads: [{loadKip: 1, locationFt: 21}] }), /Point loads/);
   assert.throws(() => suggestBeamSize({ ...base, pointLoads: [{loadKip: -1, locationFt: 5}] }), /Point loads/);
 });
+
+test('size screening does not count bottom-flange braces as top-flange restraint', () => {
+  const input = { ...base, sections: [section('W16X31')], bracesFt: undefined };
+  const topBraced = suggestBeamSize({ ...input, topBracesFt: [0, 5, 10, 15, 20], bottomBracesFt: [0, 20] });
+  assert.equal(topBraced.status, 'suggested');
+  const bottomOnly = suggestBeamSize({ ...input, topBracesFt: [0, 20], bottomBracesFt: [0, 5, 10, 15, 20] });
+  const noInteriorBraces = suggestBeamSize({ ...input, bracesFt: [0, 20] });
+  assert.equal(bottomOnly.status, 'no_candidate');
+  assert.deepEqual(bottomOnly, noInteriorBraces);
+  assert.throws(() => suggestBeamSize({ ...input, topBracesFt: [0, 20], bottomBracesFt: [0, -1, 20] }), /bottom/);
+});

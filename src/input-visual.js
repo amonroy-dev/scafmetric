@@ -1,12 +1,13 @@
 /* Beam input illustration. The drawing is schematic; field values come from the same
    controls consumed by the analysis. Position coordinates are measured from A. */
+import { parseFlangeBracing } from './bracing.js';
 const $ = id => document.getElementById(id);
 const escapeText = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—';
 const numeric = id => { const value = $(id)?.value?.trim(); return value ? Number(value) : NaN; };
 const fields = [
  ['span','01','Distance between supports','ft'], ['dead-load','02','Dead load D','kip/ft'], ['live-load','03','Live load L','kip/ft'],
- ['brace-locations','04','Lateral brace locations','ft from A'], ['section','05','Selected W section',''], ['self-weight','06','Beam self-weight · calculated',''],
+ ['top-brace-locations','04','Top flange braces','ft from A'], ['bottom-brace-locations','12','Bottom flange braces','ft from A'], ['section','05','Selected W section',''], ['self-weight','06','Beam self-weight · calculated',''],
  ['elastic-modulus','07','Elastic modulus E','ksi'], ['inertia','08','Strong-axis inertia Iₓ','in⁴'], ['stiffness-factor','09','Stiffness factor','× EI'],
  ['load-comparison','10','Load comparison',''], ['custom-safety-factor','11','Custom safety factor',': 1']
 ];
@@ -27,22 +28,19 @@ function modelFieldId(field) {
 function editableField(id) {
  if (id === 'dead-load' || id === 'live-load') {
   const selector = id === 'dead-load' ? '.uniform-dead' : '.uniform-live';
-  return document.querySelector(`.uniform-load-row ${selector}`) || document.querySelector('.load-type') || $('add-load');
+  return document.querySelector(`.uniform-load-row ${selector}`) || $('new-load-type');
  }
  return $(id);
 }
 export function drawSchematic() {
  const container = $('schematic'); if (!container) return;
  const span = numeric('span'), validSpan = Number.isFinite(span) && span > 0;
- const rawBraces = $('brace-locations')?.value || '';
- const tokens = rawBraces.split(',').map(v => v.trim()).filter(Boolean);
- const parsed = tokens.map(Number);
- const validBraces = validSpan && parsed.every(v => Number.isFinite(v) && v >= 0 && v <= span);
- const braces = validBraces ? (tokens.length ? [...new Set(parsed)].sort((a,b)=>a-b) : [0, span]) : [];
+ let bracing = null;
+ try { bracing = parseFlangeBracing({top:$('top-brace-locations').value, bottom:$('bottom-brace-locations').value, spanFt:span}); } catch { /* Invalid inputs are identified beside the fields and validated on submit. */ }
  const x = v => 77 + v / span * 566;
- const braceTicks = braces.map(v => `<path class="in-brace" d="M${x(v)} 136v-19"/><circle class="in-brace-dot" cx="${x(v)}" cy="138" r="3.5"/>`).join('');
+ const braceTicks = bracing ? bracing.top.locations.map(v => `<path class="in-brace" d="M${x(v)} 136v-13"/><circle class="in-brace-dot" cx="${x(v)}" cy="135" r="3"/>`).join('') + bracing.bottom.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace in-brace-bottom" d="M${x(v)} 142v13"/><circle class="in-brace-dot in-brace-bottom-dot" cx="${x(v)}" cy="142" r="3"/>`).join('') : '';
  // Show positions in a separate text line; dense positions otherwise collide.
- const braceList = !validBraces ? 'Check brace locations' : !tokens.length ? `End restraints assumed at 0 and ${fmt(span)} ft` : braces.map(fmt).join(', ') + ' ft from A';
+ const braceLabel = flange => !bracing ? 'Check positions' : `${bracing[flange].locations.map(fmt).join(', ')} ft`;
  const dead = numeric('dead-load'), live = numeric('live-load');
  const loadValid = Number.isFinite(dead) && dead >= 0 && Number.isFinite(live) && live >= 0;
  const anyLoad = loadValid && (dead > 0 || live > 0 || Boolean($('section')?.value));
@@ -66,7 +64,7 @@ export function drawSchematic() {
  <path class="in-dim" d="M77 186v37M643 186v37M77 211H643M77 206v10M643 206v10"/>
  ${editTarget('span',295,219,130,35,'span',`<text class="in-dimtext" x="360" y="242" text-anchor="middle">${validSpan ? fmt(span) : '—'} ft span</text>`)}
  <text class="in-note" x="77" y="193" text-anchor="middle">A</text><text class="in-note" x="643" y="193" text-anchor="middle">B</text>
- </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} kip <small>at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><button type="button" data-field="brace-locations" class="model-restraints">${escapeText(braceList)}</button><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
+ </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} kip <small>at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
  <div class="input-section"><svg class="input-section-svg" viewBox="0 0 300 200" role="group" aria-label="Wide-flange section, major-axis bending"><path class="in-section-shape" d="M74 30H226V49H166V151H226V170H74V151H134V49H74Z"/><path class="in-axis" d="M51 100H249"/><text class="in-note" x="42" y="104">x</text><text class="in-note" x="253" y="104">x</text>${editTarget('section',65,20,170,160,'beam size')}</svg><span class="section-name">${escapeText(fieldValue('section'))}</span></div></div>`;
  const focused = modelFieldId(document.activeElement);
  container.querySelectorAll('[data-field]').forEach(el => el.classList.toggle('is-active', el.dataset.field === focused));

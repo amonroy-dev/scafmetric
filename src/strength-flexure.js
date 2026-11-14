@@ -1,3 +1,5 @@
+import { resolveFlangeBracing } from './bracing.js';
+
 /**
  * AISC 360-16 ASD F2 / B4.1b: rolled W section, major-axis flexure.
  * Units: ksi, inches, feet, kips. Strengths use nominal E and section properties;
@@ -5,8 +7,8 @@
  * This is an individual member check, not a scaffold, stability-system, bearing,
  * connection, concentrated-force, torsion, axial, or combined-force verification.
  */
-export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', Eksi = 29000, Fyksi = 50, confirmedLateralBracing = false, confirmedScope = false }) {
-  if (!confirmedLateralBracing) throw new Error('Confirm both flanges are laterally restrained at the entered brace locations.');
+export function checkFlexure({ section, analysis, bracesFt, topBracesFt, bottomBracesFt, cbMethod = 'unity', Eksi = 29000, Fyksi = 50, confirmedLateralBracing = false, confirmedScope = false }) {
+  if (!confirmedLateralBracing) throw new Error('Confirm the compression flange is laterally restrained at its entered brace locations and both supports restrain beam twist.');
   if (!confirmedScope) throw new Error('Confirm the beam meets the stated flexural-check assumptions.');
   if (Eksi !== 29000 || Fyksi !== 50) throw new Error('The implemented check is limited to A992 steel with E = 29,000 ksi and Fy = 50 ksi.');
   if (!section || section.Type !== 'W') throw new Error('The implemented check requires a rolled, doubly symmetric W section.');
@@ -18,7 +20,10 @@ export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', 
   if (!a || typeof analysis.at !== 'function' || !Number.isFinite(a.spanFt) || a.spanFt <= 0 || !Number.isFinite(a.uniformLoadPlf) || a.uniformLoadPlf < 0 || !Array.isArray(a.pointLoads) || a.pointLoads.some(p => !p || !Number.isFinite(p.loadLb) || p.loadLb < 0 || !Number.isFinite(p.locationFt) || p.locationFt < 0 || p.locationFt > a.spanFt)) throw new Error('Flexural check supports a simply supported beam under downward uniform and point loads only.');
   if (a.Eksi !== Eksi) throw new Error('Analysis and flexural-check elastic modulus must match.');
   const L = a.spanFt;
-  if (!Array.isArray(bracesFt) || bracesFt.length < 2 || bracesFt.some(x => !Number.isFinite(x)) || bracesFt[0] !== 0 || bracesFt[bracesFt.length - 1] !== L || bracesFt.some((x, i) => x < 0 || x > L || (i > 0 && x <= bracesFt[i - 1]))) throw new Error('Brace locations must increase from 0 to the span and include both end restraints.');
+  const bracing = resolveFlangeBracing({ spanFt: L, bracesFt, topBracesFt, bottomBracesFt });
+  // Downward loads on this simply supported beam produce sagging bending.
+  // Bottom-flange braces must never shorten the compression-flange Lb.
+  const compressionBracesFt = bracing.top.locations;
 
   const root = Math.sqrt(Eksi / Fyksi);
   const flangeRatio = section.bf / (2 * section.tf);
@@ -33,8 +38,8 @@ export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', 
   const LrIn = 1.95 * section.rts * Eksi / (0.7 * Fyksi) * Math.sqrt(jr + Math.sqrt(jr ** 2 + 6.76 * (0.7 * Fyksi / Eksi) ** 2));
   if (![MpKipIn, LpIn, LrIn].every(Number.isFinite) || LrIn <= LpIn) throw new Error('Section properties do not produce valid F2 limiting lengths.');
 
-  const segments = bracesFt.slice(1).map((endFt, index) => {
-    const startFt = bracesFt[index], LbFt = endFt - startFt, LbIn = LbFt * 12;
+  const segments = compressionBracesFt.slice(1).map((endFt, index) => {
+    const startFt = compressionBracesFt[index], LbFt = endFt - startFt, LbIn = LbFt * 12;
     const moment = x => Math.abs(analysis.at(x).momentKipFt);
     const breakpoints = [...new Set([startFt, ...a.pointLoads.map(p => p.locationFt).filter(x => x > startFt && x < endFt), endFt])].sort((x, y) => x - y);
     const candidates = breakpoints.map(moment);
@@ -63,5 +68,5 @@ export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', 
     return Object.freeze({ startFt, endFt, LbFt, Cb, MmaxKipFt, MaKipFt, MbKipFt, McKipFt, MnKipFt, allowableKipFt, utilization, ltbRegime, FcrKsi });
   });
   const governingSegment = segments.reduce((best, segment) => segment.utilization > best.utilization ? segment : best);
-  return Object.freeze({ compactness: Object.freeze({ flangeRatio, webRatio, flangeLimit, webLimit }), LpFt: LpIn / 12, LrFt: LrIn / 12, MpKipFt: MpKipIn / 12, omegaB: 1.67, cbMethod, segments: Object.freeze(segments), governingSegment });
+  return Object.freeze({ compactness: Object.freeze({ flangeRatio, webRatio, flangeLimit, webLimit }), LpFt: LpIn / 12, LrFt: LrIn / 12, MpKipFt: MpKipIn / 12, omegaB: 1.67, cbMethod, compressionFlange: 'top', topBracesFt: bracing.top.locations, bottomBracesFt: bracing.bottom.locations, segments: Object.freeze(segments), governingSegment });
 }

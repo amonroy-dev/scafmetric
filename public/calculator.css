@@ -277,3 +277,29 @@
   .input-panel { position:static; max-height:none; }
   #beam-form,.inspector-scroll { overflow:visible; }
 }
+
+/* Load schedule and flange restraints remain visible in the normal page flow. */
+@media screen {
+  .input-panel { position:static; max-height:none; }
+  #beam-form,.inspector-scroll { overflow:visible; }
+  .load-picker { display:flex; align-items:flex-end; gap:8px; }
+  .load-picker>div { flex:1; min-width:0; }
+  .load-picker .add-load { min-height:42px; white-space:nowrap; padding:6px 10px; font-size:10px; }
+  .load-picker-help { margin:8px 0 13px; }
+  .load-row-header { align-items:center; gap:8px; margin-bottom:12px; }
+  .load-row-header .load-number { display:inline-flex; padding:3px 5px; color:#a1e3d8; border:1px solid #6fc5c130; background:#3dd9c90a; border-radius:5px; font-size:9px; }
+  .point-load-row .load-number { color:#ffd495; border-color:#ffc66d35; background:#ffa41b09; }
+  .load-row-header .load-kind { font-size:11px; font-weight:500; color:#d0e0ed; }
+  .load-row-header .remove-load { margin:-4px -5px -4px auto; }
+  .bracing-section .section-title>span { display:inline; margin-left:auto; color:#91abc0; font-size:9px; letter-spacing:0; font-weight:400; }
+  .bracing-summary { display:block; margin-top:9px; color:#a8dad7; font-size:10px; line-height:1.6; }
+  .model-flange-braces { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; }
+  .model-restraints { max-width:100%; overflow-wrap:anywhere; line-height:1.5; }
+  .input-brace-summary>span { font-size:9px; }
+  .in-brace-bottom { stroke:#b3c6e6; }.in-brace-bottom-dot { fill:#b3c6e6; }
+}
+@media screen and (max-width:760px) {
+  .load-picker .add-load { min-height:44px; font-size:10px; }
+  .load-row-header .remove-load { margin:-6px -7px -6px auto; }
+  .bracing-section .section-title>span { font-size:8px; }
+}

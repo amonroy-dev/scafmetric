@@ -61,3 +61,18 @@ test('point loads are included in segment maximum and quarter-point Cb', () => {
  near(segment.MmaxKipFt,40); near(segment.MaKipFt,40); near(segment.MbKipFt,40); near(segment.McKipFt,40);
  near(segment.Cb,1); near(segment.utilization,40/segment.allowableKipFt);
 });
+
+test('top compression-flange braces alone control sagging-beam unbraced lengths', () => {
+ const topBraced=checkFlexure({...baseline,bracesFt:undefined,topBracesFt:[0,5,10,15,20],bottomBracesFt:[0,20]});
+ assert.equal(topBraced.compressionFlange,'top');
+ assert.deepEqual(topBraced.segments.map(s=>s.LbFt),[5,5,5,5]);
+ near(topBraced.governingSegment.allowableKipFt,128.840584,1e-5);
+ assert.deepEqual(topBraced.bottomBracesFt,[0,20]);
+ const bottomOnly=checkFlexure({...baseline,bracesFt:undefined,topBracesFt:[0,20],bottomBracesFt:[0,5,10,15,20]});
+ assert.deepEqual(bottomOnly.segments.map(s=>s.LbFt),[20]);
+ assert.equal(bottomOnly.governingSegment.ltbRegime,'elastic LTB');
+ assert.ok(bottomOnly.governingSegment.allowableKipFt<topBraced.governingSegment.allowableKipFt);
+ const unbraced=checkFlexure({...baseline,bracesFt:[0,20]});
+ near(bottomOnly.governingSegment.allowableKipFt,unbraced.governingSegment.allowableKipFt);
+ assert.throws(()=>checkFlexure({...baseline,topBracesFt:[0,20],bottomBracesFt:[0,NaN,20]}),/bottom/);
+});

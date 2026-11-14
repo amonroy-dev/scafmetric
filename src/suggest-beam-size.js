@@ -3,6 +3,7 @@ import { beamSelfWeight } from './beam-self-weight.js';
 import { checkFlexure } from './strength-flexure.js';
 import { checkMajorAxisShear } from './strength-shear.js';
 import { strengthComparisonLoads } from './strength-comparison.js';
+import { resolveFlangeBracing } from './bracing.js';
 
 /**
  * Find the lowest weight-per-foot catalogue section that meets the implemented
@@ -10,14 +11,14 @@ import { strengthComparisonLoads } from './strength-comparison.js';
  * screening, not an overall member, scaffold, deflection, or compliance design.
  * Each proposed section's properties must be independently verified.
  */
-export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, pointLoads = [], bracesFt, cbMethod = 'unity', safetyFactor = null, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
+export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, pointLoads = [], bracesFt, topBracesFt, bottomBracesFt, cbMethod = 'unity', safetyFactor = null, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
   if (!confirmedLateralBracing || !confirmedScope) throw new Error('Confirm the material, restraint and loading assumptions before suggesting a size.');
   if (Eksi !== 29000) throw new Error('Suggested sizes require E = 29,000 ksi and A992 steel.');
   if (!Number.isFinite(spanFt) || spanFt <= 0 || ![deadLoadKipFt, liveLoadKipFt].every(n => Number.isFinite(n) && n >= 0)) throw new Error('A positive span and finite nonnegative loads are required.');
   if (!Array.isArray(pointLoads) || pointLoads.some(p => !p || !Number.isFinite(p.loadKip) || p.loadKip < 0 || !Number.isFinite(p.locationFt) || p.locationFt < 0 || p.locationFt > spanFt)) throw new Error('Point loads must be nonnegative and located between the supports.');
   if (!Array.isArray(sections)) throw new Error('Section library is unavailable.');
   if (!['unity', 'quarter'].includes(cbMethod)) throw new Error('Select a supported Cb method.');
-  if (!Array.isArray(bracesFt) || bracesFt.length < 2 || bracesFt[0] !== 0 || bracesFt[bracesFt.length - 1] !== spanFt || bracesFt.some((x, i) => !Number.isFinite(x) || x < 0 || x > spanFt || (i > 0 && x <= bracesFt[i - 1]))) throw new Error('Brace locations must increase from 0 to the span and include both supports.');
+  const bracing = resolveFlangeBracing({ spanFt, bracesFt, topBracesFt, bottomBracesFt });
   if (safetyFactor !== null && (!Number.isFinite(safetyFactor) || safetyFactor < 1)) throw new Error('Safety factor must be at least 1.');
 
   let considered = 0, skipped = 0;
@@ -30,7 +31,7 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
       // Point loads are live loads. Use the complete response for both checks:
       // eccentric loads make the end reactions, and hence shear demand, unequal.
       const response = (load, pointMultiplier = 1) => analyzeBeam({ ...base, uniformLoadPlf: load * 1000, pointLoads: pointLoads.map(p => ({ loadLb: p.loadKip * pointMultiplier * 1000, locationFt: p.locationFt })) });
-      const flexure = analysis => checkFlexure({ section, analysis, bracesFt, cbMethod, Eksi, Fyksi: 50, confirmedLateralBracing: true, confirmedScope: true });
+      const flexure = analysis => checkFlexure({ section, analysis, topBracesFt: bracing.top.locations, bottomBracesFt: bracing.bottom.locations, cbMethod, Eksi, Fyksi: 50, confirmedLateralBracing: true, confirmedScope: true });
       const shear = analysis => checkMajorAxisShear({ section, Eksi, FyKsi: 50, demandKip: Math.max(Math.abs(analysis.maxShear.shearLb), Math.abs(analysis.minShear.shearLb)) / 1000 });
       const serviceLoad = deadLoadKipFt + liveLoadKipFt + self;
       const service = response(serviceLoad);

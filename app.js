@@ -8,6 +8,8 @@ import { strengthComparisonLoads } from './src/strength-comparison.js';
 import { requestedLoadComparison } from './src/load-comparison.js';
 import { drawSchematic as drawBeamSchematic, bindSchematic } from './src/input-visual.js';
 import { drawCharts, clearCharts } from './src/visuals.js';
+import { parseFlangeBracing } from './src/bracing.js';
+import { renderCalculationReport } from './src/calculation-report.js';
 
 const $ = id => document.getElementById(id);
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
@@ -21,6 +23,10 @@ function drawSchematic() {
  drawBeamSchematic();
  $('model-section').textContent = $('section').value || 'Choose a section';
  $('model-span').textContent = `${$('span').value || '—'} ft span`;
+ try {
+  const bracing = readBracing();
+  $('bracing-summary').textContent = `Max. unbraced length · Top ${fmt(Math.max(...bracing.top.segments))} ft · Bottom ${fmt(Math.max(...bracing.bottom.segments))} ft`;
+ } catch (error) { $('bracing-summary').textContent = error.message; }
 }
 function revealField(field) {
  for (let parent = field.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
@@ -36,7 +42,7 @@ function syncUniformLoads() {
  }
 }
 function setLoadType(row) {
- const isPoint = row.querySelector('.load-type').value === 'point';
+ const isPoint = row.dataset.loadType === 'point';
  row.classList.toggle('point-load-row', isPoint);
  row.classList.toggle('uniform-load-row', !isPoint);
  for (const [selector, active] of [['.uniform-fields', !isPoint], ['.point-fields', isPoint]]) {
@@ -49,11 +55,14 @@ function setLoadType(row) {
  }
 }
 function labelLoadRows() {
- document.querySelectorAll('.load-row').forEach((row, index) => {
-  const label = `Load ${index + 1}`;
+ let point = 0, uniform = 0;
+ document.querySelectorAll('.load-row').forEach(row => {
+  const isPoint = row.dataset.loadType === 'point';
+  const label = isPoint ? `P${++point}` : `U${++uniform}`;
+  row.dataset.loadId = label;
   row.querySelector('.load-number').textContent = label;
-  row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${label.toLowerCase()}`);
-  row.querySelector('.load-type').setAttribute('aria-label', `${label} type`);
+  row.querySelector('.load-kind').textContent = isPoint ? 'Point load' : 'Uniform load';
+  row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
   row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, kip per foot`);
   row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, kip per foot`);
   row.querySelector('.point-load').setAttribute('aria-label', `${label} point load, kip`);
@@ -61,10 +70,11 @@ function labelLoadRows() {
  });
 }
 let loadSequence = 0;
-function addLoad({dead = 0, live = 0} = {}) {
+function addLoad({type = 'uniform', dead = 0, live = 0} = {}) {
  const row = $('load-template').content.firstElementChild.cloneNode(true);
  const id = ++loadSequence;
- for (const name of ['load-type', 'uniform-dead', 'uniform-live', 'point-load', 'point-location']) row.querySelector(`.${name}`).id = `${name}-${id}`;
+ row.dataset.loadType = type;
+ for (const name of ['uniform-dead', 'uniform-live', 'point-load', 'point-location']) row.querySelector(`.${name}`).id = `${name}-${id}`;
  row.querySelector('.uniform-dead').value = dead;
  row.querySelector('.uniform-live').value = live;
  setLoadType(row);
@@ -102,17 +112,14 @@ function invalidate() {
  $('results').innerHTML = emptyMetrics;
  $('suggestion').innerHTML = '';
  $('report').disabled = true;
+ $('calculation-report').innerHTML = '';
  clearCharts();
  for (const [id, html] of emptyCharts) $(id).innerHTML = html;
 }
-function braces(value, span) {
- const list = value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean).map(Number) : [0, span];
- if (list.some(x => !Number.isFinite(x) || x < 0 || x > span)) throw Error('Brace locations must be numbers between 0 and the span.');
- if (!list.includes(0) || !list.includes(span)) throw Error('Confirm lateral restraints at both supports by including 0 and the span in brace locations.');
- const sorted = [...new Set(list)].sort((a,b)=>a-b);
- return { locations: sorted, segments: sorted.slice(1).map((x,i)=>x-sorted[i]) };
+function readBracing() {
+ return parseFlangeBracing({top:$('top-brace-locations').value, bottom:$('bottom-brace-locations').value, spanFt:Number($('span').value)});
 }
-function memberChecks({section, analysis, bracesFt, Eksi, dead, live, self, comparison}) {
+function memberChecks({section, analysis, topBracesFt, bottomBracesFt, Eksi, dead, live, self, comparison}) {
  if (!$('enable-capacity').checked) return { status: 'not_requested' };
  const missing = [];
  if (!$('capacity-confirmed').checked) missing.push('Confirm the steel-check assumptions for this beam.');
@@ -120,7 +127,7 @@ function memberChecks({section, analysis, bracesFt, Eksi, dead, live, self, comp
  if (missing.length) return { status:'not_evaluated', reason:missing.join(' ') };
  const demandKip = Math.max(Math.abs(analysis.maxShear.shearLb), Math.abs(analysis.minShear.shearLb))/1000;
  let flexure;
- try { flexure = { status:'evaluated', ...checkFlexure({section, analysis, bracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true}) }; }
+ try { flexure = { status:'evaluated', ...checkFlexure({section, analysis, topBracesFt, bottomBracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true}) }; }
  catch (e) { flexure = { status:'not_evaluated', reason:e instanceof Error ? e.message : 'This configuration is outside the supported bending scope.' }; }
  let shear;
  try { shear = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip}); }
@@ -134,7 +141,7 @@ function memberChecks({section, analysis, bracesFt, Eksi, dead, live, self, comp
   let bending, shearing;
   try {
    const bendingAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:bendingLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.67})) });
-   bending = { status:'evaluated', ...checkFlexure({ section, analysis:bendingAnalysis, bracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true }) };
+   bending = { status:'evaluated', ...checkFlexure({ section, analysis:bendingAnalysis, topBracesFt, bottomBracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true }) };
   } catch (e) { bending = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
   try { const shearAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:shearLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.5})) }); shearing = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip:Math.max(Math.abs(shearAnalysis.maxShear.shearLb), Math.abs(shearAnalysis.minShear.shearLb))/1000}); }
   catch (e) { shearing = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
@@ -212,13 +219,14 @@ function run(e) {
    if (load === '' || location === '') throw Error('Enter a load and location for each point load.');
    const loadKip = Number(load), locationFt = Number(location);
    if (!Number.isFinite(loadKip) || loadKip < 0 || !Number.isFinite(locationFt) || locationFt < 0 || locationFt > span) throw Error('Point loads must be nonnegative and located between the supports.');
-   return {loadKip, locationFt};
+   return {id:row.dataset.loadId, loadKip, locationFt};
   });
-  const self = beamSelfWeight(s), total = dead+live+self, br = braces($('brace-locations').value, span);
+  const uniformLoads = [...document.querySelectorAll('.uniform-load-row')].map(row => ({id:row.dataset.loadId, deadKipFt:Number(row.querySelector('.uniform-dead').value), liveKipFt:Number(row.querySelector('.uniform-live').value)}));
+  const self = beamSelfWeight(s), total = dead+live+self, br = readBracing();
   const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoads.map(p=>({loadLb:p.loadKip*1000, locationFt:p.locationFt})), Eksi:E, Iin4:I, stiffnessFactor:factor});
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
-  const checks = memberChecks({section:s, analysis, bracesFt:br.locations, Eksi:E, dead, live, self, comparison});
-  record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, span, dead, live, self, total, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
+  const checks = memberChecks({section:s, analysis, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison});
+  record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, sectionProperties:s, span, dead, live, self, total, uniformLoads, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
   resultsPanel.focus({preventScroll:true});
@@ -240,7 +248,7 @@ function renderSuggestion(r) {
  let found;
  try {
   found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
-   bracesFt:r.braces.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
+   topBracesFt:r.braces.top.locations, bottomBracesFt:r.braces.bottom.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
    safetyFactor:r.comparison ? r.comparison.numerator : null,
    confirmedLateralBracing:true, confirmedScope:true});
  } catch {
@@ -278,10 +286,15 @@ function render(r) {
  ${calculationRow('Maximum moment', `Combined loads at x = ${fmt(a.maxMoment.xFt,3)} ft`, `${fmt(a.maxMoment.momentKipFt,3)} kip-ft`, '')}
  ${calculationRow('Nominal EI deflection', 'Elastic bending', `${fmt(max.nominalDeflectionIn,4)} in`, '')}
  ${calculationRow('Adjusted EI deflection', `Nominal deflection / ${fmt(r.factor,4)}`, `${fmt(max.reducedDeflectionIn,4)} in`, '')}
- ${calculationRow('Lateral braces', 'Measured from left support; not vertical supports', `${r.braces.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
+ ${calculationRow('Top flange braces', 'Compression flange; x from left support', `${r.braces.top.locations.map(x=>fmt(x,2)).join(', ')} ft`, 'AISC F2')}
+ ${calculationRow('Bottom flange braces', 'Recorded separately; does not reduce top-flange Lb', `${r.braces.bottom.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
  <p class="capacity-note">Beam bending only; shear deformation excluded. No overall adequacy or independent verification. Bearing, connections, and scaffold-specific capacity are not evaluated. AISC v15 section data is from a third-party mirror; verify against the official source.</p>
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
  $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Left reaction</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Right reaction</span><strong>${fmt(a.reactions.rightLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Adjusted EI deflection · 0.8 EI</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
+ $('calculation-report').innerHTML = renderCalculationReport(r, {
+  schematic:$('schematic').innerHTML,
+  diagrams:['shear', 'moment', 'deflection'].map(name => ({name, html:$(`${name}-chart`).innerHTML}))
+ });
 }
 $('report').disabled = true;
 // A verified account's current acceptance covers the general preliminary-use
@@ -295,9 +308,10 @@ fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ?
 addLoad({dead: 0.2, live: 0.8});
 updateSafetyFactor();
 $('add-load').addEventListener('click', () => {
- const row = addLoad();
+ const type = $('new-load-type').value;
+ const row = addLoad({type});
  $('capacity-confirmed').checked = false;
- invalidate(); drawSchematic(); row.querySelector('.load-type').focus();
+ invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-load' : '.uniform-dead').focus();
 });
 $('load-rows').addEventListener('click', e => {
  const button = e.target.closest('.remove-load');
@@ -307,11 +321,8 @@ $('load-rows').addEventListener('click', e => {
  $('capacity-confirmed').checked = false;
  invalidate(); drawSchematic(); $('add-load').focus();
 });
-$('load-rows').addEventListener('change', e => {
- if (!e.target.matches('.load-type')) return;
- setLoadType(e.target.closest('.load-row'));
- $('capacity-confirmed').checked = false;
- invalidate(); drawSchematic();
+$('new-load-type').addEventListener('change', () => {
+ $('add-load').textContent = $('new-load-type').value === 'point' ? '+ Add point load' : '+ Add uniform load';
 });
 $('beam-form').addEventListener('submit', run);
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
@@ -335,10 +346,10 @@ for (const [index, tab] of responseTabs.entries()) {
 
 bindSchematic();
 drawSchematic();
-const confirmationInputs = new Set(['span', 'section', 'brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
+const confirmationInputs = new Set(['span', 'section', 'top-brace-locations', 'bottom-brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
 $('beam-form').addEventListener('input', e => {
- if (e.target.matches('.load-type')) setLoadType(e.target.closest('.load-row'));
- if (confirmationInputs.has(e.target.id) || e.target.matches('.load-type, .uniform-dead, .uniform-live, .point-load, .point-location')) $('capacity-confirmed').checked = false;
+ if (e.target.id === 'new-load-type') return;
+ if (confirmationInputs.has(e.target.id) || e.target.matches('.uniform-dead, .uniform-live, .point-load, .point-location')) $('capacity-confirmed').checked = false;
  invalidate(); drawSchematic();
 });
 $('section').addEventListener('change', () => { $('capacity-confirmed').checked = false; properties(); drawSchematic(); });
@@ -366,9 +377,6 @@ $('suggestion').addEventListener('click', e => {
  $('capacity-confirmed').focus({preventScroll:true});
  $('capacity-confirmed').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
 });
-let printDetails = null;
-window.addEventListener('beforeprint', () => { if (printDetails !== null) return; printDetails = [...document.querySelectorAll('.output-column details')].filter(el => !el.open); printDetails.forEach(el => { el.open = true; }); });
-window.addEventListener('afterprint', () => { if (printDetails === null) return; printDetails.forEach(el => { el.open = false; }); printDetails = null; });
 $('report').addEventListener('click', () => { if (record) window.print(); });
 fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Section library failed to load.');return r.json();}).then(data=>{
  sections = data.sort((a,b)=>a.AISC_Manual_Label.localeCompare(b.AISC_Manual_Label,undefined,{numeric:true}));

@@ -1,111 +1,91 @@
-/* Print-only presentation: vector diagrams and readable, high-contrast report. */
+/* A separate calculation snapshot is printed; screen panels never act as report pages. */
+@media screen {
+  #calculation-report { display:none; }
+}
 @media print {
-  @page { size: letter; margin: .6in .65in; }
-  html, body, main, .app-shell, .page, .workspace, .output-column {
-    background: #fff !important;
-    color: #111 !important;
-    box-shadow: none !important;
+  @page {
+    size:letter;
+    margin:0.62in 0.6in 0.65in;
+    @top-right { content:'Scafmetric · Beam calculation'; font:8pt Arial,sans-serif; color:#555; }
+    @bottom-right { content:'Page ' counter(page) ' of ' counter(pages); font:8pt Arial,sans-serif; color:#555; }
   }
-  body { font: 10pt/1.4 Arial, sans-serif !important; }
-  .page { padding: 0 !important; max-width: none !important; }
-  .workspace, .output-column { display: block !important; }
-  .sidebar, .topbar, .outline-button, .input-panel, footer { display: none !important; }
-  .panel, .notice, .terms-panel {
-    color: #111 !important;
-    background: #fff !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-  }
-  .panel { margin: 0 0 14pt !important; overflow: visible !important; }
-  .drawing-panel, .chart-panel { break-inside: auto !important; page-break-inside: auto !important; }
-  .results-panel, .properties-panel, .chart { break-inside: avoid; page-break-inside: avoid; }
-  .panel-header, .results, .chart-grid { padding: 0 !important; }
-  .panel-header { margin: 0 0 9pt !important; }
-  .panel-header h2, .heading-row h1, .calculation-detail h3 { font-family: Arial, sans-serif !important; color: #111 !important; }
-  .panel-header h2 { font-size: 15pt !important; font-weight: 700 !important; }
-  .heading-row h1 { font-size: 20pt !important; font-weight: 700 !important; }
-  .panel-header p, .lede, .kicker, .eyebrow, .chip, .calculation-detail, .visual-intro, .visual-footnote, .terms-panel, .verification-note, .empty-state { color: #222 !important; }
-  .notice { border: 1px solid #555 !important; padding: 7pt 9pt !important; margin: 0 0 12pt !important; font-size: 9pt !important; }
-  .notice strong { color: #111 !important; }
-  .chip { background: #fff !important; padding: 0 !important; }
-  .drawing-panel .schematic { margin: 0 !important; border: 1px solid #777 !important; background: #fff !important; overflow: visible !important; }
-  .beam-visual { width: 100% !important; min-width: 0 !important; height: auto !important; }
-  .beam-visual text { fill: #111 !important; }
-  .v-beam, .v-support, .v-section, .v-load, .v-dimension, .v-brace { stroke: #111 !important; }
-  .visual-intro, .guide-item, .visual-footnote { background: #fff !important; color: #111 !important; }
-  .visual-guide { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-  .guide-item { padding: 5pt !important; color: #111 !important; }
-  .guide-item strong, .guide-item small, .guide-number { color: #111 !important; }
-  .guide-arrow { display: none !important; }
-  .visual-footnote { font-size: 8pt !important; }
-  .result-grid { background: #fff !important; border-color: #888 !important; }
-  .result-grid > div, .property-content > div { background: #fff !important; border: 1px solid #ccc !important; }
-  .result-grid strong, .result-grid span, .result-grid small, .property-content, .property-content strong, .property-content span, .property-content small { color: #111 !important; }
-  .calculation-detail { font-size: 9pt !important; line-height: 1.45 !important; }
-  .calculation-detail h3 { margin: 10pt 0 4pt !important; }
-  .diagram-controls { margin: 0 0 9pt !important; padding: 6pt 0 !important; background: #fff !important; border: 0 !important; color: #111 !important; }
-  .diagram-controls-header, .diagram-controls label, .diagram-controls input, .diagram-readout { display: none !important; }
-  .diagram-controls p { color: #222 !important; font-size: 9pt !important; }
-  .chart-grid { display: block !important; }
-  .chart { background: #fff !important; border-top: 1px solid #aaa !important; padding: 7pt 0 !important; }
-  .chart-title { display: flex !important; color: #111 !important; font-size: 10pt !important; }
-  .chart-title span { color: #222 !important; font-size: 9pt !important; }
-  .chart-area { display: block !important; height: auto !important; min-height: 0 !important; margin: 3pt 0 0 !important; background: #fff !important; }
-  .response-svg { display: block !important; width: 100% !important; height: auto !important; min-height: 0 !important; }
-  .response-svg text { fill: #111 !important; font-size: 15px !important; }
-  .chart-gridline { stroke: #ccc !important; }
-  .chart-zero, .chart-line, .chart-negative { stroke: #111 !important; }
-  .chart-fill { fill: #888 !important; fill-opacity: .12 !important; }
-  .chart-cursor, .chart-point { display: none !important; }
-  .property-content { background: #fff !important; margin: 0 !important; padding: 0 !important; color: #111 !important; }
-  .terms-panel { margin-top: 10pt !important; font-size: 8pt !important; }
+  html,body { margin:0!important; padding:0!important; background:#fff!important; color:#111!important; }
+  body { font:9pt/1.38 Arial,Helvetica,sans-serif!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body::before,.app-shell { display:none!important; }
+  #calculation-report { display:block!important; width:auto; margin:0; padding:0; color:#111; background:#fff; font:9pt/1.38 Arial,Helvetica,sans-serif; }
+  #calculation-report *,#calculation-report *::before,#calculation-report *::after { box-sizing:border-box; text-shadow:none!important; box-shadow:none!important; filter:none!important; animation:none!important; transition:none!important; }
+  #calculation-report h1,#calculation-report h2,#calculation-report h3,#calculation-report h4 { color:#111; font-family:Arial,Helvetica,sans-serif; letter-spacing:normal; break-after:avoid; page-break-after:avoid; }
+  #calculation-report h1 { font-size:20pt; line-height:1.15; margin:5pt 0 9pt; overflow-wrap:anywhere; }
+  #calculation-report h2 { font-size:13pt; border-bottom:1pt solid #283445; padding-bottom:5pt; margin:17pt 0 9pt; }
+  #calculation-report h3 { font-size:11pt; margin:15pt 0 7pt; }
+  #calculation-report h4 { font-size:9pt; margin:0 0 4pt; }
+  #calculation-report p { margin:5pt 0 8pt; orphans:3; widows:3; }
+  #calculation-report strong { color:#111; }
+  #calculation-report .report-header { border-bottom:2pt solid #283445; padding-bottom:8pt; margin-bottom:12pt; break-inside:avoid; }
+  #calculation-report .report-brand { color:#344356; font-size:8pt; font-weight:700; letter-spacing:1pt; }
+  #calculation-report .report-meta { display:flex; flex-wrap:wrap; justify-content:space-between; gap:5pt 14pt; font-size:8pt; overflow-wrap:anywhere; }
+  #calculation-report .report-status { border:1pt solid #777; background:#f4f5f7; padding:8pt 10pt; margin:9pt 0 12pt; break-inside:avoid; }
+  #calculation-report .report-status p:last-child { margin-bottom:0; }
+  #calculation-report .report-status>strong { font-size:10pt; }
+  #calculation-report .report-section { display:block; break-inside:auto; }
+  #calculation-report .report-major { break-before:page; page-break-before:always; }
+  #calculation-report .report-note { color:#3c4650; font-size:8pt; line-height:1.4; }
+  #calculation-report .report-table { display:table; border-collapse:collapse; width:100%; margin:9pt 0 12pt; table-layout:fixed; font:8pt/1.35 Arial,Helvetica,sans-serif; }
+  #calculation-report .report-table caption { caption-side:top; text-align:left; font-weight:700; font-size:8.5pt; padding-bottom:5pt; break-after:avoid; }
+  #calculation-report .report-table thead { display:table-header-group; }
+  #calculation-report .report-table tr { break-inside:avoid; page-break-inside:avoid; }
+  #calculation-report .report-table th,#calculation-report .report-table td { padding:5pt; border:0.6pt solid #acb4bd; text-align:left; vertical-align:top; white-space:normal; overflow-wrap:anywhere; color:#111; }
+  #calculation-report .report-table th { font-weight:700; background:#eef1f4; }
+  #calculation-report .report-table tbody tr:nth-child(even) td { background:#fafbfc; }
+  #calculation-report .report-equation { position:relative; border-left:1.5pt solid #c3cbd2; padding:5pt 8pt; margin:7pt 0; break-inside:avoid; page-break-inside:avoid; overflow-wrap:anywhere; }
+  #calculation-report .report-formula { font-size:9pt; margin-bottom:3pt; }
+  #calculation-report .report-substitution { font-size:8.5pt; color:#303b46; margin:3pt 0; }
+  #calculation-report .report-answer { font-size:9pt; font-weight:700; margin:4pt 0 2pt; }
+  #calculation-report .report-reference { display:block; color:#4b5662; font-size:7.5pt; margin-top:3pt; }
+  #calculation-report .report-segment { margin:14pt 0 18pt; border-top:1pt solid #7d8997; padding-top:8pt; }
+  #calculation-report .report-segment>h4 { font-size:10pt; }
+  #calculation-report sub { font-size:75%; }
+  #calculation-report ul { margin:5pt 0 10pt; padding-left:17pt; }
+  #calculation-report li { margin-bottom:6pt; orphans:3; widows:3; }
+  #calculation-report figure { margin:11pt 0 16pt; }
+  #calculation-report figcaption { color:#111; font-size:9pt; font-weight:700; margin:0 0 6pt; text-transform:none; }
+  #calculation-report .report-diagram { break-inside:avoid; page-break-inside:avoid; }
+  #calculation-report .report-model { break-inside:avoid; page-break-inside:avoid; }
+  #calculation-report .report-diagram .response-heading { display:none; }
+  #calculation-report .report-diagram svg { display:block; width:100%!important; height:auto!important; min-height:0!important; max-height:2.7in!important; overflow:visible; }
+  #calculation-report .report-diagram .response-extrema { display:flex; gap:12pt; margin-top:6pt; color:#111; }
+  #calculation-report .report-diagram .response-extrema>div { flex:1; padding:5pt; border:0.5pt solid #aaa; background:#fff; }
+  #calculation-report .report-diagram .response-extrema span { display:block; font:7.5pt Arial,sans-serif; color:#333; }
+  #calculation-report .report-diagram .response-extrema strong { display:block; font:8.5pt Arial,sans-serif; margin-top:3pt; }
+  #calculation-report .response-zero { color:#333; font-size:8pt; }
+  #calculation-report .response-svg text { fill:#111!important; stroke:none!important; font-family:Arial,Helvetica,sans-serif!important; font-size:15px!important; }
+  #calculation-report .chart-gridline { stroke:#d5d9de!important; }
+  #calculation-report .chart-line { stroke:#173f4c!important; stroke-width:2!important; }
+  #calculation-report .chart-negative { stroke:#67451e!important; stroke-width:2!important; }
+  #calculation-report .chart-fill { fill:#b4c9cf!important; fill-opacity:0.35!important; }
+  #calculation-report .chart-zero,#calculation-report .chart-axis,#calculation-report .chart-support-guide,#calculation-report .chart-tick { stroke:#55616d!important; }
+  #calculation-report .chart-cursor,#calculation-report .chart-point { display:none!important; }
+  #calculation-report .chart-zero-mark { fill:#fff!important; stroke:#111!important; }
+  #calculation-report .response-svg pattern line { stroke:#6c7680!important; opacity:0.45!important; }
+  #calculation-report .input-drawings { display:grid; grid-template-columns:minmax(0,1fr) 1in; gap:9pt; border:0; background:#fff; }
+  #calculation-report .input-elevation,#calculation-report .input-scroll,#calculation-report .input-section { display:block; min-width:0; padding:0; border:0; background:#fff; }
+  #calculation-report .input-beam { display:block; width:100%; min-width:0; height:auto; max-height:1.9in; }
+  #calculation-report .input-section-svg { display:block; width:100%; height:auto; margin-top:15pt; }
+  #calculation-report .input-section .section-name { display:block; text-align:center; font:8pt Arial,sans-serif; color:#111; }
+  #calculation-report .input-beam rect { fill:transparent!important; }
+  #calculation-report .input-beam text,#calculation-report .input-section-svg text { fill:#111!important; stroke:none!important; font-family:Arial,sans-serif; }
+  #calculation-report .input-beam .in-text,#calculation-report .input-beam .in-dimtext { font-size:16px; }
+  #calculation-report .input-beam .in-note { font-size:13px; }
+  #calculation-report .input-hotspot { display:initial!important; }
+  #calculation-report .input-hit-area { fill:none!important; stroke:none!important; }
+  #calculation-report .in-beam,#calculation-report .in-support,#calculation-report .in-section-shape { stroke:#222!important; fill:none!important; }
+  #calculation-report .in-load,#calculation-report .in-brace { stroke:#285461!important; }
+  #calculation-report .in-dim,#calculation-report .in-axis { stroke:#65717a!important; }
+  #calculation-report .in-brace-dot { fill:#285461!important; }
+  #calculation-report .input-brace-summary { display:flex; flex-wrap:wrap; gap:5pt; padding:3pt 0; font:7pt Arial,sans-serif; color:#222; border:0; }
+  #calculation-report .input-brace-summary button { font:7pt Arial,sans-serif; color:#222; border:0; padding:0; background:none; }
+  #calculation-report .model-flange-braces { display:flex; flex-direction:column; gap:3pt; }
+  #calculation-report .model-point-list { display:flex; flex-wrap:wrap; gap:5pt; margin:0 0 5pt; padding:0; }
+  #calculation-report .model-point-list button { border:0.5pt solid #aeb8c2; padding:3pt 5pt; border-radius:0; background:#fff; color:#111; font:7pt Arial,sans-serif; }
+  #calculation-report .model-point-list button span,#calculation-report .model-point-list button small { color:#111; font:inherit; }
 }
-@media print {
-  .chart-title { display: none !important; }
-  .response-heading, .response-heading h3, .response-kicker, .response-unit, .response-extrema, .response-extrema span, .response-extrema strong, .response-zero { color: #111 !important; }
-  .response-heading h3 { font: bold 11pt/1.3 Arial, sans-serif !important; }
-  .response-kicker, .response-unit { font: bold 8pt/1.3 Arial, sans-serif !important; }
-  .response-extrema div { background: #fff !important; border: 1px solid #888 !important; padding: 4pt 6pt !important; }
-  .response-extrema strong, .response-zero { font-size: 9pt !important; }
-  .response-extrema span { font-size: 8pt !important; }
-  .chart-area svg text.chart-axis, .response-svg .chart-axis { fill: #111 !important; font: 15px Arial, sans-serif !important; }
-  .chart-support-guide, .chart-tick { stroke: #555 !important; }
-  .chart-zero-mark { fill: #fff !important; stroke: #111 !important; }
-  .response-svg pattern[id^="hatch-"] line { stroke: #333 !important; opacity: .65 !important; }
-}
-@media print {
-  .drawing-panel .panel-header p, .input-guide-heading span, .input-guide-arrow { display: none !important; }
-  .input-guide-item, .input-properties button { color: #111 !important; background: #fff !important; }
-  .input-guide-item strong, .input-guide-item small, .input-guide-number, .input-properties span, .input-properties strong, .input-explanation { color: #111 !important; }
-}
-@media print {
-  .result-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
-  .result-grid > div { padding: 7pt 6pt !important; }
-  .result-grid strong { margin-top: 4pt !important; font-size: 15pt !important; }
-  .chart-panel { break-before: page; page-break-before: always; }
-}
-@media print {
-  .input-guide-heading, .input-guide, .input-hotspot { display: none !important; }
-}
-
-@media print { .input-explanation { display:none !important; } }
-
-/* Keep the decision and checked limits at the front of the printed report. */
-@media print {
-  .page { display: flex !important; flex-direction: column !important; }
-  .workspace, .output-column { display: contents !important; }
-  .heading-row { order: 0; }
-  .notice { order: 1; }
-  .results-panel { order: 2; }
-  .drawing-panel { order: 3; }
-  .chart-panel { order: 4; }
-  .properties-panel { order: 5; }
-  .terms-panel { order: 6; }
-  .verdict-card { color: #111 !important; background: #fff !important; border: 1.5pt solid #333 !important; box-shadow: none !important; padding: 9pt !important; margin: 0 0 12pt !important; break-inside: avoid; page-break-inside: avoid; }
-  .verdict-card * { color: #111 !important; }
-  .verdict-label { font-size: 9pt !important; }
-  .verdict-title { font-size: 17pt !important; }
-  .verdict-detail, .verdict-scope { font-size: 9pt !important; line-height: 1.4 !important; }
-}
-@media print { .results-panel { break-inside: auto !important; page-break-inside: auto !important; } }
