@@ -56,7 +56,7 @@ export function drawSchematic() {
 }
 export function bindSchematic() {
  const container=$('schematic'); if (!container) return;
- const activate=target=>{const marker=target.closest('[data-field]'); if(!marker) return; const field=$(marker.dataset.field); if(field && !field.disabled) field.focus();};
+ const activate=target=>{const marker=target.closest('[data-field]'); if(!marker) return; const field=$(marker.dataset.field); if(field && !field.disabled) { const details=field.closest('details'); if(details) details.open=true; field.focus(); }};
  container.addEventListener('click',e=>activate(e.target));
  container.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.closest('.input-hotspot')){e.preventDefault();activate(e.target);}});
  document.addEventListener('focusin',e=>container.querySelectorAll('[data-field]').forEach(el=>el.classList.toggle('is-active',el.dataset.field===e.target.id)));

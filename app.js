@@ -151,7 +151,7 @@ function run(e) {
 function verdictHtml(check) {
  const result = summarizeChecks(check);
  const scope = '<p class="verdict-scope">These are preliminary bending and shear checks only. Bearing, connections, deflection limits, bracing and scaffold requirements need separate review.</p>';
- if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">NOT EVALUATED</strong><p class="verdict-detail">${escape(result.detail)}</p>${scope}</div>`;
+ if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">NOT EVALUATED</strong><p class="verdict-detail">Open Steel strength checks to confirm material and bracing assumptions.</p></div>`;
  const item = result.governing;
  const governing = `${escape(item.name)} · ${fmt(item.utilization * 100, 4)}% of allowable (compared without rounding)`;
  if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
@@ -197,7 +197,7 @@ function render(r) {
  ${calculationRow('Lateral braces', 'Measured from left support; not vertical supports', `${r.braces.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
  <p class="capacity-note">Beam bending only; shear deformation excluded. No overall adequacy or independent verification. Bearing, connections, and scaffold-specific capacity are not evaluated. AISC v15 section data is from a third-party mirror; verify against the official source.</p>
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
- $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Support reaction · each</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Reduced EI deflection</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}${memberChecksHtml(r.checks)}${basis}`;
+ $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Support reaction · each</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Reduced EI deflection</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
 }
 $('report').disabled = true;
 $('beam-form').addEventListener('submit', run);
@@ -222,9 +222,13 @@ $('suggestion').addEventListener('click', e => {
  $('capacity-properties').checked = false;
  properties();
  drawSchematic();
+ $('capacity-properties').closest('details').open = true;
  $('capacity-properties').focus({preventScroll:true});
  $('capacity-properties').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
 });
+let printDetails = [];
+window.addEventListener('beforeprint', () => { printDetails = [...document.querySelectorAll('.output-column details')].filter(el => !el.open); printDetails.forEach(el => { el.open = true; }); });
+window.addEventListener('afterprint', () => { printDetails.forEach(el => { el.open = false; }); printDetails = []; });
 $('report').addEventListener('click', () => { if (record) window.print(); });
 fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Section library failed to load.');return r.json();}).then(data=>{
  sections = data.sort((a,b)=>a.AISC_Manual_Label.localeCompare(b.AISC_Manual_Label,undefined,{numeric:true}));
