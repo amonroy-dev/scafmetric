@@ -19,6 +19,18 @@ function fieldValue(id) {
 function editTarget(id, x, y, width, height, label, content = '') {
  return `<g class="input-hotspot input-edit-target" data-field="${id}" tabindex="0" role="button" aria-label="Edit ${escapeText(label)}"><title>Edit ${escapeText(label)}</title><rect class="input-hit-area" x="${x}" y="${y}" width="${width}" height="${height}" rx="5" fill="transparent" stroke="none"/>${content}</g>`;
 }
+function modelFieldId(field) {
+ if (field?.matches('.uniform-dead')) return 'dead-load';
+ if (field?.matches('.uniform-live')) return 'live-load';
+ return field?.id;
+}
+function editableField(id) {
+ if (id === 'dead-load' || id === 'live-load') {
+  const selector = id === 'dead-load' ? '.uniform-dead' : '.uniform-live';
+  return document.querySelector(`.uniform-load-row ${selector}`) || document.querySelector('.load-type') || $('add-load');
+ }
+ return $(id);
+}
 export function drawSchematic() {
  const container = $('schematic'); if (!container) return;
  const span = numeric('span'), validSpan = Number.isFinite(span) && span > 0;
@@ -56,14 +68,14 @@ export function drawSchematic() {
  <text class="in-note" x="77" y="193" text-anchor="middle">A</text><text class="in-note" x="643" y="193" text-anchor="middle">B</text>
  </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} kip <small>at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><button type="button" data-field="brace-locations" class="model-restraints">${escapeText(braceList)}</button><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
  <div class="input-section"><svg class="input-section-svg" viewBox="0 0 300 200" role="group" aria-label="Wide-flange section, major-axis bending"><path class="in-section-shape" d="M74 30H226V49H166V151H226V170H74V151H134V49H74Z"/><path class="in-axis" d="M51 100H249"/><text class="in-note" x="42" y="104">x</text><text class="in-note" x="253" y="104">x</text>${editTarget('section',65,20,170,160,'beam size')}</svg><span class="section-name">${escapeText(fieldValue('section'))}</span></div></div>`;
- const focused = document.activeElement?.id;
+ const focused = modelFieldId(document.activeElement);
  container.querySelectorAll('[data-field]').forEach(el => el.classList.toggle('is-active', el.dataset.field === focused));
 }
 export function bindSchematic() {
  const container=$('schematic'); if (!container) return;
- const activate=target=>{const marker=target.closest('[data-field], [data-point-index]'); if(!marker) return; const field=marker.hasAttribute('data-point-index') ? document.querySelectorAll('.point-load-row')[Number(marker.dataset.pointIndex)]?.querySelector('.point-load') : $(marker.dataset.field); if(field && !field.disabled) { for(let parent=field.parentElement;parent;parent=parent.parentElement) if(parent.tagName==='DETAILS') parent.open=true; field.focus(); }};
+ const activate=target=>{const marker=target.closest('[data-field], [data-point-index]'); if(!marker) return; const field=marker.hasAttribute('data-point-index') ? document.querySelectorAll('.point-load-row')[Number(marker.dataset.pointIndex)]?.querySelector('.point-load') : editableField(marker.dataset.field); if(field && !field.disabled) { for(let parent=field.parentElement;parent;parent=parent.parentElement) if(parent.tagName==='DETAILS') parent.open=true; field.focus(); }};
  container.addEventListener('click',e=>activate(e.target));
  container.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.closest('.input-hotspot')){e.preventDefault();activate(e.target);}});
- document.addEventListener('focusin',e=>container.querySelectorAll('[data-field]').forEach(el=>el.classList.toggle('is-active',el.dataset.field===e.target.id)));
- document.addEventListener('focusout',e=>{if(fields.some(field=>field[0]===e.target.id)) container.querySelectorAll('.is-active').forEach(el=>el.classList.remove('is-active'));});
+ document.addEventListener('focusin',e=>container.querySelectorAll('[data-field]').forEach(el=>el.classList.toggle('is-active',el.dataset.field===modelFieldId(e.target))));
+ document.addEventListener('focusout',e=>{if(fields.some(field=>field[0]===modelFieldId(e.target))) container.querySelectorAll('.is-active').forEach(el=>el.classList.remove('is-active'));});
 }

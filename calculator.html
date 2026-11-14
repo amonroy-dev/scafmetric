@@ -22,25 +22,36 @@
     <section class="panel input-panel" aria-labelledby="inputs-heading">
       <div class="panel-header"><h2 id="inputs-heading">Configure beam</h2><span class="inspector-unit">US units</span></div>
       <form id="beam-form">
-        <div class="inspector-scroll"><div class="essential-fields">            <div class="form-section"><div class="section-title"><h3>Beam</h3></div>
+        <div class="inspector-scroll"><div class="essential-fields">
+            <div class="form-section project-info"><div class="section-title"><h3>Project info</h3><span class="optional">Report details</span></div>
+              <div class="field-grid"><div><label for="project">Project name</label><input id="project" type="text" placeholder="Project name" autocomplete="off"></div>
+              <div><label for="preparer">Prepared by</label><input id="preparer" type="text" placeholder="Name or company" autocomplete="name"></div></div>
+            </div>
+            <div class="form-section">
 
               <div class="field-grid beam-fields"><div><label for="section">Beam size</label><select id="section"><option value="">Loading…</option></select></div><div><label for="span">Span</label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div></div></div>
 
             </div>
-            <div class="form-section"><div class="section-title"><h3>Uniform loads</h3></div><p class="input-hint">Beam weight is included automatically.</p>
-              <div class="field-grid"><div><label for="dead-load">Dead load <em>D</em></label><div class="input-unit"><input id="dead-load" type="number" min="0" step="any" value="0.2" required><span>kip/ft</span></div></div><div><label for="live-load">Live load <em>L</em></label><div class="input-unit"><input id="live-load" type="number" min="0" step="any" value="0.8" required><span>kip/ft</span></div></div></div>
-              <div class="self-weight-info"><strong>Beam self-weight <span>Auto</span></strong><output id="self-weight">Select a beam section</output></div>
-              <div class="point-load-header"><h4>Point loads</h4><button type="button" id="add-point-load" class="add-point-load">+ Add load</button></div>
-              <p class="field-help">Downward live loads. Measure each location from the left support.</p>
-              <div id="point-loads"></div>
-              <template id="point-load-template"><div class="point-load-row">
-                <label>Load <span class="input-unit"><input class="point-load" type="number" min="0" step="any" aria-label="Point load magnitude"><span>kip</span></span></label>
-                <label>Location <em>x</em> <span class="input-unit"><input class="point-location" type="number" min="0" step="any" aria-label="Point load location from left support"><span>ft</span></span></label>
-                <button class="remove-point-load" type="button" aria-label="Remove point load">×</button>
+            <div class="form-section loads-section"><div class="section-title"><h3>Loads</h3><button type="button" id="add-load" class="add-load">+ Add load</button></div>
+              <input id="dead-load" type="hidden" value="0.2"><input id="live-load" type="hidden" value="0.8">
+              <div id="load-rows"></div>
+              <template id="load-template"><div class="load-row">
+                <div class="load-row-header"><span class="load-number">Load 1</span><label>Load type<select class="load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select></label><button class="remove-load" type="button" aria-label="Remove load">×</button></div>
+                <div class="uniform-fields field-grid">
+                  <label>Dead load <em>D</em><span class="input-unit"><input class="uniform-dead" type="number" min="0" step="any" value="0" required><span>kip/ft</span></span></label>
+                  <label>Live load <em>L</em><span class="input-unit"><input class="uniform-live" type="number" min="0" step="any" value="0" required><span>kip/ft</span></span></label>
+                </div>
+                <div class="point-fields field-grid" hidden>
+                  <label>Load <em>P</em><span class="input-unit"><input class="point-load" type="number" min="0" step="any" placeholder="0" disabled><span>kip</span></span></label>
+                  <label>Position <em>x</em><span class="input-unit"><input class="point-location" type="number" min="0" step="any" placeholder="0" disabled><span>ft</span></span></label>
+                  <p class="field-help point-load-help">Downward live load · x from the left support.</p>
+                </div>
               </div></template>
-              <label for="load-comparison">Safety factor comparison</label><select id="load-comparison"><option value="none">None — service load only</option><option value="four">4:1 safety factor — illustrative</option><option value="custom">Enter a custom safety factor</option></select>
-              <div id="custom-safety-row" hidden><label for="custom-safety-factor">Custom safety factor <em>SF : 1</em></label><div class="input-unit"><input id="custom-safety-factor" type="number" min="1" step="any" placeholder="e.g. 2.5" disabled><span>: 1</span></div><p class="field-help">Enter the first number of the ratio. For 2.5:1, enter 2.5.</p></div>
-              <p class="field-help">Illustrative only. Does not establish OSHA compliance.</p>
+              <div class="self-weight-info"><strong>Beam self-weight <span>Auto</span></strong><output id="self-weight">Select a beam section</output></div>
+              <div class="safety-factor-control"><label for="load-comparison">Safety factor</label><select id="load-comparison" aria-describedby="safety-factor-note"><option value="none">ASD</option><option value="four">OSHA</option><option value="custom">Other</option></select>
+                <div id="custom-safety-row" hidden><label for="custom-safety-factor">Custom factor</label><div class="input-unit"><input id="custom-safety-factor" type="number" min="1" step="any" placeholder="2.5" disabled><span>: 1</span></div></div>
+                <p id="safety-factor-note" class="field-help">AISC ASD · service loads, no additional factor.</p>
+              </div>
             </div>
 </div>
         <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary><details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div><p class="field-help">Strong-axis bending; nominal section stiffness.</p>
@@ -60,11 +71,7 @@
               </div>
             </div>
 </details></details>
-        <details class="input-details"><summary>Report details</summary>            <div class="form-section">
-              <label for="project">Project name <span class="optional">OPTIONAL</span></label><input id="project" type="text" placeholder="e.g. Main Street renovation">
-              <label for="preparer">Prepared by <span class="optional">OPTIONAL</span></label><input id="preparer" type="text" placeholder="Name or company">
-            </div>
-</details></div>
+        </div>
         <div class="action-bar">            <div class="form-section acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
             <p id="error" class="error" role="alert"></p><button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
       </form>

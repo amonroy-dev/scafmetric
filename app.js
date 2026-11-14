@@ -17,12 +17,72 @@ let sections = [], record = null;
 const emptyMetrics = $('results').innerHTML;
 const emptyCharts = new Map(['shear-chart', 'moment-chart', 'deflection-chart'].map(id => [id, $(id).innerHTML]));
 function drawSchematic() {
+ syncUniformLoads();
  drawBeamSchematic();
  $('model-section').textContent = $('section').value || 'Choose a section';
  $('model-span').textContent = `${$('span').value || '—'} ft span`;
 }
 function revealField(field) {
  for (let parent = field.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+}
+function syncUniformLoads() {
+ for (const [field, selector] of [['dead-load', '.uniform-dead'], ['live-load', '.uniform-live']]) {
+  const values = [...document.querySelectorAll('.uniform-load-row')].map(row => {
+   const value = row.querySelector(selector).value.trim();
+   return value === '' ? NaN : Number(value);
+  });
+  // Invalid rows stay invalid even if another row would offset their value.
+  $(field).value = values.every(value => Number.isFinite(value) && value >= 0) ? values.reduce((sum, value) => sum + value, 0) : 'NaN';
+ }
+}
+function setLoadType(row) {
+ const isPoint = row.querySelector('.load-type').value === 'point';
+ row.classList.toggle('point-load-row', isPoint);
+ row.classList.toggle('uniform-load-row', !isPoint);
+ for (const [selector, active] of [['.uniform-fields', !isPoint], ['.point-fields', isPoint]]) {
+  const fields = row.querySelector(selector);
+  fields.hidden = !active;
+  for (const input of fields.querySelectorAll('input')) {
+   input.disabled = !active;
+   input.required = active;
+  }
+ }
+}
+function labelLoadRows() {
+ document.querySelectorAll('.load-row').forEach((row, index) => {
+  const label = `Load ${index + 1}`;
+  row.querySelector('.load-number').textContent = label;
+  row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${label.toLowerCase()}`);
+  row.querySelector('.load-type').setAttribute('aria-label', `${label} type`);
+  row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, kip per foot`);
+  row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, kip per foot`);
+  row.querySelector('.point-load').setAttribute('aria-label', `${label} point load, kip`);
+  row.querySelector('.point-location').setAttribute('aria-label', `${label} position from left support, feet`);
+ });
+}
+let loadSequence = 0;
+function addLoad({dead = 0, live = 0} = {}) {
+ const row = $('load-template').content.firstElementChild.cloneNode(true);
+ const id = ++loadSequence;
+ for (const name of ['load-type', 'uniform-dead', 'uniform-live', 'point-load', 'point-location']) row.querySelector(`.${name}`).id = `${name}-${id}`;
+ row.querySelector('.uniform-dead').value = dead;
+ row.querySelector('.uniform-live').value = live;
+ setLoadType(row);
+ $('load-rows').append(row);
+ labelLoadRows();
+ return row;
+}
+function updateSafetyFactor() {
+ const selection = $('load-comparison').value;
+ const custom = selection === 'custom';
+ $('custom-safety-row').hidden = !custom;
+ $('custom-safety-factor').disabled = !custom;
+ $('custom-safety-factor').required = custom;
+ $('safety-factor-note').textContent = {
+  none: 'AISC ASD · service loads, no additional factor.',
+  four: '4:1 illustrative comparison. Does not establish OSHA compliance.',
+  custom: 'Custom live-load comparison, shown alongside AISC ASD.'
+ }[selection];
 }
 
 const propUnits = { W:'lb/ft', A:'in²', d:'in', bf:'in', tw:'in', tf:'in', Ix:'in⁴', Sx:'in³', Zx:'in³', Iy:'in⁴', Sy:'in³', Zy:'in³', J:'in⁴', Cw:'in⁶', rx:'in', ry:'in', rts:'in', ho:'in' };
@@ -144,6 +204,7 @@ function run(e) {
  try {
   if (!$('acknowledgement').checked) throw Error('Please acknowledge the preliminary-use notice before calculating.');
   const s = selected(); if (!s) throw Error('Select a beam section.');
+  syncUniformLoads();
   const span=Number($('span').value), dead=Number($('dead-load').value), live=Number($('live-load').value), E=Number($('elastic-modulus').value), I=Number($('inertia').value), factor=Number($('stiffness-factor').value);
   if (dead < 0 || live < 0 || !Number.isFinite(dead+live)) throw Error('Loads must be finite, nonnegative numbers.');
   const pointLoads = [...document.querySelectorAll('.point-load-row')].map(row => {
@@ -231,24 +292,26 @@ fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ?
   $('acknowledgement').closest('.acknowledgement').hidden = true;
  }
 }).catch(() => {});
-let pointLoadSequence = 0;
-$('add-point-load').addEventListener('click', () => {
- const row = $('point-load-template').content.firstElementChild.cloneNode(true);
- const id = ++pointLoadSequence;
- row.querySelector('.point-load').id = `point-load-${id}`;
- row.querySelector('.point-location').id = `point-location-${id}`;
- row.querySelector('.point-load').setAttribute('aria-label', `Point load ${id}, kip`);
- row.querySelector('.point-location').setAttribute('aria-label', `Point load ${id} location from left support, feet`);
- $('point-loads').append(row);
+addLoad({dead: 0.2, live: 0.8});
+updateSafetyFactor();
+$('add-load').addEventListener('click', () => {
+ const row = addLoad();
  $('capacity-confirmed').checked = false;
- invalidate(); drawSchematic(); row.querySelector('.point-load').focus();
+ invalidate(); drawSchematic(); row.querySelector('.load-type').focus();
 });
-$('point-loads').addEventListener('click', e => {
- const button = e.target.closest('.remove-point-load');
+$('load-rows').addEventListener('click', e => {
+ const button = e.target.closest('.remove-load');
  if (!button) return;
- button.closest('.point-load-row').remove();
+ button.closest('.load-row').remove();
+ labelLoadRows();
  $('capacity-confirmed').checked = false;
- invalidate(); drawSchematic(); $('add-point-load').focus();
+ invalidate(); drawSchematic(); $('add-load').focus();
+});
+$('load-rows').addEventListener('change', e => {
+ if (!e.target.matches('.load-type')) return;
+ setLoadType(e.target.closest('.load-row'));
+ $('capacity-confirmed').checked = false;
+ invalidate(); drawSchematic();
 });
 $('beam-form').addEventListener('submit', run);
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
@@ -274,17 +337,16 @@ bindSchematic();
 drawSchematic();
 const confirmationInputs = new Set(['span', 'section', 'brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
 $('beam-form').addEventListener('input', e => {
- if (confirmationInputs.has(e.target.id) || e.target.matches('.point-load, .point-location')) $('capacity-confirmed').checked = false;
+ if (e.target.matches('.load-type')) setLoadType(e.target.closest('.load-row'));
+ if (confirmationInputs.has(e.target.id) || e.target.matches('.load-type, .uniform-dead, .uniform-live, .point-load, .point-location')) $('capacity-confirmed').checked = false;
  invalidate(); drawSchematic();
 });
 $('section').addEventListener('change', () => { $('capacity-confirmed').checked = false; properties(); drawSchematic(); });
 $('enable-capacity').addEventListener('change', () => { $('capacity-fields').hidden = !$('enable-capacity').checked; invalidate(); });
 $('load-comparison').addEventListener('change', () => {
- const custom = $('load-comparison').value === 'custom';
- $('custom-safety-row').hidden = !custom;
- $('custom-safety-factor').disabled = !custom;
- $('custom-safety-factor').required = custom;
- invalidate();
+ updateSafetyFactor();
+ $('capacity-confirmed').checked = false;
+ invalidate(); drawSchematic();
 });
 $('verdict').addEventListener('click', e => {
  if (!e.target.closest('[data-open-checks]')) return;
