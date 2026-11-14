@@ -15,7 +15,7 @@ export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', 
   if (section.d <= 2 * section.kdes || section.d <= 2 * section.tf || section.Zx < section.Sx) throw new Error('Selected W section has invalid section dimensions or moduli.');
   if (!['unity', 'quarter'].includes(cbMethod)) throw new Error('Select a supported Cb method.');
   const a = analysis?.input;
-  if (!a || typeof analysis.at !== 'function' || !Number.isFinite(a.spanFt) || a.spanFt <= 0 || a.pointLoadLb !== 0 || !Number.isFinite(a.uniformLoadPlf) || a.uniformLoadPlf < 0) throw new Error('Flexural check supports a simply supported beam under full-span downward uniform load only.');
+  if (!a || typeof analysis.at !== 'function' || !Number.isFinite(a.spanFt) || a.spanFt <= 0 || !Number.isFinite(a.uniformLoadPlf) || a.uniformLoadPlf < 0 || !Array.isArray(a.pointLoads) || a.pointLoads.some(p => !p || !Number.isFinite(p.loadLb) || p.loadLb < 0 || !Number.isFinite(p.locationFt) || p.locationFt < 0 || p.locationFt > a.spanFt)) throw new Error('Flexural check supports a simply supported beam under downward uniform and point loads only.');
   if (a.Eksi !== Eksi) throw new Error('Analysis and flexural-check elastic modulus must match.');
   const L = a.spanFt;
   if (!Array.isArray(bracesFt) || bracesFt.length < 2 || bracesFt.some(x => !Number.isFinite(x)) || bracesFt[0] !== 0 || bracesFt[bracesFt.length - 1] !== L || bracesFt.some((x, i) => x < 0 || x > L || (i > 0 && x <= bracesFt[i - 1]))) throw new Error('Brace locations must increase from 0 to the span and include both end restraints.');
@@ -36,8 +36,14 @@ export function checkFlexure({ section, analysis, bracesFt, cbMethod = 'unity', 
   const segments = bracesFt.slice(1).map((endFt, index) => {
     const startFt = bracesFt[index], LbFt = endFt - startFt, LbIn = LbFt * 12;
     const moment = x => Math.abs(analysis.at(x).momentKipFt);
-    const candidates = [moment(startFt), moment(endFt)];
-    if (analysis.maxMoment.xFt > startFt && analysis.maxMoment.xFt < endFt) candidates.push(moment(analysis.maxMoment.xFt));
+    const breakpoints = [...new Set([startFt, ...a.pointLoads.map(p => p.locationFt).filter(x => x > startFt && x < endFt), endFt])].sort((x, y) => x - y);
+    const candidates = breakpoints.map(moment);
+    // Between point loads, shear varies linearly under the uniform load.
+    // A zero-shear location is a possible moment extremum within that interval.
+    if (a.uniformLoadPlf > 0) for (let i = 0; i < breakpoints.length - 1; i++) {
+      const x = breakpoints[i] + analysis.at(breakpoints[i], 'right').shearLb / a.uniformLoadPlf;
+      if (x > breakpoints[i] && x < breakpoints[i + 1]) candidates.push(moment(x));
+    }
     const MmaxKipFt = Math.max(...candidates);
     const MaKipFt = moment(startFt + LbFt / 4), MbKipFt = moment(startFt + LbFt / 2), McKipFt = moment(startFt + 3 * LbFt / 4);
     // A zero-moment interval has no meaningful moment-gradient factor; use 1.0.

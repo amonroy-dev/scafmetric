@@ -35,7 +35,7 @@ function invalidate() {
  for (const id of ['shear-chart','moment-chart','deflection-chart']) $(id).innerHTML = '';
 }
 function braces(value, span) {
- const list = value.split(',').map(s => s.trim()).filter(Boolean).map(Number);
+ const list = value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean).map(Number) : [0, span];
  if (list.some(x => !Number.isFinite(x) || x < 0 || x > span)) throw Error('Brace locations must be numbers between 0 and the span.');
  if (!list.includes(0) || !list.includes(span)) throw Error('Confirm lateral restraints at both supports by including 0 and the span in brace locations.');
  const sorted = [...new Set(list)].sort((a,b)=>a-b);
@@ -44,10 +44,7 @@ function braces(value, span) {
 function memberChecks({section, analysis, bracesFt, Eksi, dead, live, self, comparison}) {
  if (!$('enable-capacity').checked) return { status: 'not_requested' };
  const missing = [];
- if (!$('capacity-material').checked) missing.push('Confirm ASTM A992 steel and Fy = 50 ksi.');
- if (!$('capacity-bracing').checked) missing.push('Confirm adequate lateral and twist restraint at the supports and every listed brace.');
- if (!$('capacity-scope').checked) missing.push('Confirm major-axis loading with no axial force or torsion.');
- if (!$('capacity-properties').checked) missing.push('Verify the selected section properties against an authoritative source.');
+ if (!$('capacity-confirmed').checked) missing.push('Confirm the steel-check assumptions for this beam.');
  if (Eksi !== 29000) missing.push('Set E to 29,000 ksi for this AISC check.');
  if (missing.length) return { status:'not_evaluated', reason:missing.join(' ') };
  const demandKip = Math.max(Math.abs(analysis.maxShear.shearLb), Math.abs(analysis.minShear.shearLb))/1000;
@@ -65,10 +62,10 @@ function memberChecks({section, analysis, bracesFt, Eksi, dead, live, self, comp
   const shearLoad = comparisonLoads.shear;
   let bending, shearing;
   try {
-   const bendingAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:bendingLoad * 1000 });
+   const bendingAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:bendingLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.67})) });
    bending = { status:'evaluated', ...checkFlexure({ section, analysis:bendingAnalysis, bracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true }) };
   } catch (e) { bending = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
-  try { shearing = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip:shearLoad * analysis.input.spanFt / 2}); }
+  try { const shearAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:shearLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.5})) }); shearing = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip:Math.max(Math.abs(shearAnalysis.maxShear.shearLb), Math.abs(shearAnalysis.minShear.shearLb))/1000}); }
   catch (e) { shearing = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
   extra = {sf, bendingLoad, shearLoad, bending, shearing};
  }
@@ -122,10 +119,11 @@ function memberChecksHtml(check) {
   const shearRows = vs.status === 'evaluated' ? calculationRow('Shear ratio', `${fmt(vs.demandKip,3)} / ${fmt(vs.allowableKip,3)} kip`, ratio(vs.utilization), 'AISC G2.1(a)') : `<p class="capacity-note">Shear not evaluated: ${escape(vs.reason || 'Outside supported scope.')}</p>`;
   extraHtml = `<div class="capacity-section"><h4>ASD — ${check.comparisonSelection === 'four' ? '4:1' : 'custom factor'} comparison</h4><p class="capacity-note"><strong>Illustrative only.</strong> Not a verified OSHA or ASD load combination; maximum intended load and failure-capacity basis require review.</p>
   ${calculationRow('Bending load', `D + self-weight + (SF / 1.67)L = ${fmt(check.dead,4)} + ${fmt(check.self,4)} + (${fmt(x.sf,8)} / 1.67 × ${fmt(check.live,4)})`, `${fmt(x.bendingLoad,4)} kip/ft`, '')}
-  ${fb.status === 'evaluated' ? calculationRow('Moment demand', `max[w x(L − x) / 2], segment ${fmt(fb.governingSegment.startFt,3)}–${fmt(fb.governingSegment.endFt,3)} ft`, `${fmt(fb.governingSegment.MmaxKipFt,3)} kip-ft`, '') : ''}
+  ${fb.status === 'evaluated' ? calculationRow('Moment demand', `Peak combined moment, segment ${fmt(fb.governingSegment.startFt,3)}–${fmt(fb.governingSegment.endFt,3)} ft`, `${fmt(fb.governingSegment.MmaxKipFt,3)} kip-ft`, '') : ''}
   ${bendRows}
+  <p class="capacity-note">Point loads are treated as live loads and multiplied by SF / 1.67 for bending and SF / 1.50 for shear.</p>
   ${calculationRow('Shear load', `D + self-weight + (SF / 1.50)L = ${fmt(check.dead,4)} + ${fmt(check.self,4)} + (${fmt(x.sf,8)} / 1.50 × ${fmt(check.live,4)})`, `${fmt(x.shearLoad,4)} kip/ft`, '')}
-  ${vs.status === 'evaluated' ? calculationRow('Shear demand', `wL / 2 = ${fmt(x.shearLoad,4)} × ${fmt(check.spanFt,3)} / 2`, `${fmt(vs.demandKip,3)} kip`, '') : ''}
+  ${vs.status === 'evaluated' ? calculationRow('Shear demand', 'Peak combined shear', `${fmt(vs.demandKip,3)} kip`, '') : ''}
   ${shearRows}</div>`;
  }
  return `<div class="capacity-checks"><h3>ASD — no additional factor</h3><p class="capacity-basis">AISC 360-16 ASD · A992 F<sub>y</sub> = 50 ksi · nominal E = 29,000 ksi · service 1.0D + 1.0L · C<sub>b</sub> ${check.cbMethod === 'quarter' ? 'quarter-point' : '= 1.0'}</p>${flex}${shear}${extraHtml}<p class="capacity-note"><strong>Not evaluated:</strong> bearing, local web forces, connections, axial force, torsion, deflection limits, brace design, and scaffold-specific requirements. No overall adequacy is determined; verify section data independently.</p></div>`;
@@ -137,11 +135,18 @@ function run(e) {
   const s = selected(); if (!s) throw Error('Select a beam section.');
   const span=Number($('span').value), dead=Number($('dead-load').value), live=Number($('live-load').value), E=Number($('elastic-modulus').value), I=Number($('inertia').value), factor=Number($('stiffness-factor').value);
   if (dead < 0 || live < 0 || !Number.isFinite(dead+live)) throw Error('Loads must be finite, nonnegative numbers.');
+  const pointLoads = [...document.querySelectorAll('.point-load-row')].map(row => {
+   const load = row.querySelector('.point-load').value, location = row.querySelector('.point-location').value;
+   if (load === '' || location === '') throw Error('Enter a load and location for each point load.');
+   const loadKip = Number(load), locationFt = Number(location);
+   if (!Number.isFinite(loadKip) || loadKip < 0 || !Number.isFinite(locationFt) || locationFt < 0 || locationFt > span) throw Error('Point loads must be nonnegative and located between the supports.');
+   return {loadKip, locationFt};
+  });
   const self = beamSelfWeight(s), total = dead+live+self, br = braces($('brace-locations').value, span);
-  const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, Eksi:E, Iin4:I, stiffnessFactor:factor});
+  const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoads.map(p=>({loadLb:p.loadKip*1000, locationFt:p.locationFt})), Eksi:E, Iin4:I, stiffnessFactor:factor});
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
   const checks = memberChecks({section:s, analysis, bracesFt:br.locations, Eksi:E, dead, live, self, comparison});
-  record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, span, dead, live, self, total, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
+  record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, span, dead, live, self, total, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
   resultsPanel.focus({preventScroll:true});
@@ -162,7 +167,7 @@ function renderSuggestion(r) {
  if (status.status === 'incomplete' || status.unavailable?.length) { $('suggestion').innerHTML = ''; return; }
  let found;
  try {
-  found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live,
+  found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
    bracesFt:r.braces.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
    safetyFactor:r.comparison ? r.comparison.numerator : null,
    confirmedLateralBracing:true, confirmedScope:true});
@@ -184,27 +189,65 @@ function render(r) {
  renderSuggestion(r);
  drawSchematic();
  drawCharts(a);
- const comparisonHtml = r.comparison && r.checks.status !== 'evaluated' ? `<div class="calculation-detail"><h3>Optional load comparison — illustrative only</h3><p><strong>Not a verified OSHA or ASD load combination. Not a capacity or compliance check.</strong> The selected comparison uses the user-proposed ${fmt(r.comparison.numerator,8)} / 1.67 = ${fmt(r.comparison.multiplier,5)} multiplier on the entered live load only. It includes entered dead load and selected beam self-weight once.</p><p>1.0D + (${fmt(r.comparison.numerator,8)} / 1.67)L = ${fmt(r.dead,4)} + ${fmt(r.self,4)} + (${fmt(r.comparison.numerator,8)} / 1.67 × ${fmt(r.live,4)}) = <strong>${fmt(r.comparison.totalKipFt,4)} kip/ft</strong>. For this uniform load on a simply supported beam: reaction at each support = <strong>${fmt(r.comparison.reactionKip,3)} kip</strong>; maximum moment = <strong>${fmt(r.comparison.momentKipFt,3)} kip-ft</strong>.</p><p>The 1.67 divisor does not apply to every limit state, and the entered dead load may include applied loads that belong in the maximum intended load. The governing basis for the selected safety factor must be confirmed. Engineering review is required. The diagrams and deflections remain the separate 1.0D + 1.0L service case.</p></div>` : '';
+ let comparisonHtml = '';
+ if (r.comparison && r.checks.status !== 'evaluated') {
+  const multiplier = r.comparison.multiplier;
+  const compared = analyzeBeam({ ...a.input, uniformLoadPlf:r.comparison.totalKipFt * 1000, pointLoads:a.input.pointLoads.map(p => ({ ...p, loadLb:p.loadLb * multiplier })) });
+  comparisonHtml = `<div class="calculation-detail"><h3>Safety factor comparison · illustrative</h3><p>Live uniform and point loads × ${fmt(multiplier,5)} (SF / 1.67). Left reaction ${fmt(compared.reactions.leftLb/1000)} kip; right reaction ${fmt(compared.reactions.rightLb/1000)} kip; maximum moment ${fmt(compared.maxMoment.momentKipFt)} kip-ft.</p><p>Not a verified OSHA combination or capacity check. Service diagrams remain unfactored.</p></div>`;
+ }
  const lenIn = r.span * 12;
  const basis = `<div class="capacity-checks analysis-basis"><h3>Service analysis</h3>
  ${calculationRow('Section', `${escape(r.section)} · E = ${fmt(r.E,3)} ksi`, `I<sub>x</sub> = ${fmt(r.I,3)} in⁴`, '')}
  ${calculationRow('Beam self-weight', `Section weight / 1,000 = ${fmt(r.self * 1000,4)} / 1,000`, `${fmt(r.self,7)} kip/ft`, '')}
  ${calculationRow('Uniform load', `D + self-weight + L = ${fmt(r.dead,5)} + ${fmt(r.self,5)} + ${fmt(r.live,5)}`, `${fmt(r.total,5)} kip/ft`, '')}
- ${calculationRow('Reaction at each support', `wL / 2 = ${fmt(r.total,5)} × ${fmt(r.span,3)} / 2`, `${fmt(a.reactions.leftLb/1000,3)} kip`, '')}
- ${calculationRow('Maximum moment', `wL² / 8 = ${fmt(r.total,5)} × ${fmt(r.span,3)}² / 8`, `${fmt(a.maxMoment.momentKipFt,3)} kip-ft`, '')}
- ${calculationRow('Nominal EI deflection', `5wL⁴ / (384EI) = 5 × (${fmt(r.total,5)} / 12) × ${fmt(lenIn,3)}⁴ / (384 × ${fmt(r.E,3)} × ${fmt(r.I,3)})`, `${fmt(max.nominalDeflectionIn,4)} in`, '')}
- ${calculationRow('Reduced EI deflection', `δ<sub>nominal</sub> / ${fmt(r.factor,4)}`, `${fmt(max.reducedDeflectionIn,4)} in`, '')}
+ ${calculationRow('Point loads', 'Live loads; positions measured from left support', r.pointLoads.length ? r.pointLoads.map(p=>`${fmt(p.loadKip,3)} kip at ${fmt(p.locationFt,3)} ft`).join('; ') : 'None', '')}
+ ${calculationRow('Left reaction', 'Combined loads', `${fmt(a.reactions.leftLb/1000,3)} kip`, '')}
+ ${calculationRow('Right reaction', 'Combined loads', `${fmt(a.reactions.rightLb/1000,3)} kip`, '')}
+ ${calculationRow('Maximum moment', `Combined loads at x = ${fmt(a.maxMoment.xFt,3)} ft`, `${fmt(a.maxMoment.momentKipFt,3)} kip-ft`, '')}
+ ${calculationRow('Nominal EI deflection', 'Elastic bending', `${fmt(max.nominalDeflectionIn,4)} in`, '')}
+ ${calculationRow('Adjusted EI deflection', `Nominal deflection / ${fmt(r.factor,4)}`, `${fmt(max.reducedDeflectionIn,4)} in`, '')}
  ${calculationRow('Lateral braces', 'Measured from left support; not vertical supports', `${r.braces.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
  <p class="capacity-note">Beam bending only; shear deformation excluded. No overall adequacy or independent verification. Bearing, connections, and scaffold-specific capacity are not evaluated. AISC v15 section data is from a third-party mirror; verify against the official source.</p>
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
- $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Support reaction · each</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Reduced EI deflection</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
+ $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Left reaction</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Right reaction</span><strong>${fmt(a.reactions.rightLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Adjusted EI deflection · 0.8 EI</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
 }
 $('report').disabled = true;
+// A verified account's current acceptance covers the general preliminary-use
+// notice. Guests and unavailable sessions retain the on-page acknowledgment.
+fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ? response.json() : null).then(session => {
+ if (session?.authenticated === true && session.termsAccepted === true) {
+  $('acknowledgement').checked = true;
+  $('acknowledgement').closest('.acknowledgement').hidden = true;
+ }
+}).catch(() => {});
+let pointLoadSequence = 0;
+$('add-point-load').addEventListener('click', () => {
+ const row = $('point-load-template').content.firstElementChild.cloneNode(true);
+ const id = ++pointLoadSequence;
+ row.querySelector('.point-load').id = `point-load-${id}`;
+ row.querySelector('.point-location').id = `point-location-${id}`;
+ row.querySelector('.point-load').setAttribute('aria-label', `Point load ${id}, kip`);
+ row.querySelector('.point-location').setAttribute('aria-label', `Point load ${id} location from left support, feet`);
+ $('point-loads').append(row);
+ $('capacity-confirmed').checked = false;
+ invalidate(); drawSchematic(); row.querySelector('.point-load').focus();
+});
+$('point-loads').addEventListener('click', e => {
+ const button = e.target.closest('.remove-point-load');
+ if (!button) return;
+ button.closest('.point-load-row').remove();
+ $('capacity-confirmed').checked = false;
+ invalidate(); drawSchematic(); $('add-point-load').focus();
+});
 $('beam-form').addEventListener('submit', run);
 bindSchematic();
 drawSchematic();
-$('beam-form').addEventListener('input', () => { invalidate(); drawSchematic(); });
-$('section').addEventListener('change', () => { $('capacity-properties').checked = false; properties(); drawSchematic(); });
+const confirmationInputs = new Set(['span', 'section', 'brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
+$('beam-form').addEventListener('input', e => {
+ if (confirmationInputs.has(e.target.id) || e.target.matches('.point-load, .point-location')) $('capacity-confirmed').checked = false;
+ invalidate(); drawSchematic();
+});
+$('section').addEventListener('change', () => { $('capacity-confirmed').checked = false; properties(); drawSchematic(); });
 $('enable-capacity').addEventListener('change', () => { $('capacity-fields').hidden = !$('enable-capacity').checked; invalidate(); });
 $('load-comparison').addEventListener('change', () => {
  const custom = $('load-comparison').value === 'custom';
@@ -219,12 +262,12 @@ $('suggestion').addEventListener('click', e => {
  const name = button.dataset.useSuggestion;
  if (!sections.some(section => section.AISC_Manual_Label === name)) return;
  $('section').value = name;
- $('capacity-properties').checked = false;
+ $('capacity-confirmed').checked = false;
  properties();
  drawSchematic();
- $('capacity-properties').closest('details').open = true;
- $('capacity-properties').focus({preventScroll:true});
- $('capacity-properties').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
+ $('capacity-confirmed').closest('details').open = true;
+ $('capacity-confirmed').focus({preventScroll:true});
+ $('capacity-confirmed').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
 });
 let printDetails = [];
 window.addEventListener('beforeprint', () => { printDetails = [...document.querySelectorAll('.output-column details')].filter(el => !el.open); printDetails.forEach(el => { el.open = true; }); });

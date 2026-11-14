@@ -1,9 +1,12 @@
 // Server-created, server-owned trial record. The start is derived only from
 // Firebase Auth's authoritative creationTime, matching the Copious trial basis.
 export const TRIAL_MS = 14 * 24 * 60 * 60 * 1000;
+import { TERMS_VERSION } from '../src/terms.js';
+export { TERMS_VERSION } from '../src/terms.js';
 const collection = 'scafmetricAccounts';
 export async function ensureAccount(db, input) {
-  const { uid, email, creationTime } = input;
+  const { uid, email, creationTime, acceptTermsVersion } = input;
+  if (acceptTermsVersion != null && acceptTermsVersion !== TERMS_VERSION) throw new Error('Terms version is no longer current');
   const normalized = typeof email === 'string' ? email.trim().toLowerCase() : '';
   const created = Date.parse(creationTime);
   if (typeof uid !== 'string' || !uid || uid.includes('/') || !normalized || !Number.isFinite(created) || created > Date.now() + 60_000) throw new Error('Invalid verified identity');
@@ -13,9 +16,14 @@ export async function ensureAccount(db, input) {
     if (snap.exists) {
       const data = snap.data();
       if (!data || data.uid !== uid || data.email !== normalized || data.active !== true || data.trialStartedAt !== new Date(created).toISOString() || data.trialEndsAt !== new Date(created + TRIAL_MS).toISOString()) throw new Error('Account record is invalid or disabled');
+      if (acceptTermsVersion === TERMS_VERSION && (data.termsVersion !== TERMS_VERSION || !Number.isFinite(Date.parse(data.termsAcceptedAt)))) {
+        const terms = { termsVersion: TERMS_VERSION, termsAcceptedAt: new Date().toISOString() };
+        tx.update(ref, terms);
+        return { ...data, ...terms };
+      }
       return data;
     }
-    const data = { uid, email: normalized, active: true, trialStartedAt: new Date(created).toISOString(), trialEndsAt: new Date(created + TRIAL_MS).toISOString() };
+    const data = { uid, email: normalized, active: true, trialStartedAt: new Date(created).toISOString(), trialEndsAt: new Date(created + TRIAL_MS).toISOString(), ...(acceptTermsVersion === TERMS_VERSION ? { termsVersion: TERMS_VERSION, termsAcceptedAt: new Date().toISOString() } : {}) };
     tx.create(ref, data);
     return data;
   });
@@ -28,5 +36,5 @@ export async function readAccount(db, user) {
   if (!data || data.uid !== user.uid || data.email !== user.email.trim().toLowerCase() || data.active !== true) return null;
   const start = Date.parse(data.trialStartedAt), end = Date.parse(data.trialEndsAt);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end - start !== TRIAL_MS) return null;
-  return { trialStartedAt: data.trialStartedAt, trialEndsAt: data.trialEndsAt, trialActive: Date.now() < end };
+  return { trialStartedAt: data.trialStartedAt, trialEndsAt: data.trialEndsAt, trialActive: Date.now() < end, termsAccepted: data.termsVersion === TERMS_VERSION && Number.isFinite(Date.parse(data.termsAcceptedAt)) };
 }

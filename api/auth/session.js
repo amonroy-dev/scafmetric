@@ -1,7 +1,7 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
-import { ensureAccount, readAccount } from '../../server/account.js';
+import { ensureAccount, readAccount, TERMS_VERSION } from '../../server/account.js';
 import { COOKIE_NAME, cookieFor, getSessionCookie, issueSession, sameOrigin, verifySession } from '../../server/session-core.js';
 
 let adminAuth;
@@ -45,7 +45,7 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
       if (!configured || !user) return send(res, 200, { configured, authenticated: false });
       try {
         const trial = await accountStatus(user);
-        return send(res, 200, trial ? { configured, authenticated: true, user, trial } : { configured, authenticated: false });
+        return send(res, 200, trial ? { configured, authenticated: true, user, trial, termsAccepted: trial.termsAccepted === true, termsVersion: TERMS_VERSION } : { configured, authenticated: false });
       } catch { return send(res, 503, { configured, authenticated: false, error: 'Account storage is unavailable.' }); }
     }
     if (!['POST', 'DELETE'].includes(req.method)) {
@@ -70,15 +70,16 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
       catch { return send(res, 400, { error: 'Invalid JSON body.' }); }
     }
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.idToken !== 'string' || !body.idToken || Buffer.byteLength(body.idToken) > 12000) return send(res, 400, { error: 'A Firebase ID token is required.' });
+    if (body.acceptTermsVersion != null && body.acceptTermsVersion !== TERMS_VERSION) return send(res, 409, { error: 'Terms have changed. Please review them again.', termsVersion: TERMS_VERSION });
     if (!isConfigured(env)) return send(res, 503, { error: 'Sign-in is temporarily unavailable.' });
     let decoded;
     try { decoded = await verifyToken(body.idToken, env); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
     if (!decoded || decoded.email_verified !== true || typeof decoded.uid !== 'string' || !decoded.uid || typeof decoded.email !== 'string' || !decoded.email) return send(res, 401, { error: 'ID token could not be verified.' });
     try {
-      await accountFor({ uid: decoded.uid, email: decoded.email, creationTime: decoded.creationTime });
+      const account = await accountFor({ uid: decoded.uid, email: decoded.email, creationTime: decoded.creationTime, acceptTermsVersion: body.acceptTermsVersion });
       const { token, expiresAt } = issueSession({ uid: decoded.uid, email: decoded.email, name: typeof decoded.name === 'string' && decoded.name ? decoded.name : decoded.email }, env);
       res.setHeader('Set-Cookie', cookieFor(token, expiresAt, env));
-      return send(res, 200, { ok: true, expiresAt: expiresAt.toISOString() });
+      return send(res, 200, { ok: true, expiresAt: expiresAt.toISOString(), termsAccepted: account?.termsVersion === TERMS_VERSION && Number.isFinite(Date.parse(account?.termsAcceptedAt)), termsVersion: TERMS_VERSION });
     } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
   };
 }

@@ -1,8 +1,9 @@
+import { TERMS_VERSION } from '../terms.js';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, updateProfile, signOut } from 'firebase/auth';
 
 const $ = id => document.getElementById(id);
-let auth, view = 'signin', busy = false;
+let auth, view = 'signin', busy = false, pendingTermsUser = null, pendingTermsVersion = null;
 const settings = () => ({ url: `${location.origin}/signin.html`, handleCodeInApp: false });
 const notify = (message = '') => { $('auth-status').textContent = message; $('auth-status').hidden = !message; };
 const errors = {
@@ -12,27 +13,44 @@ const errors = {
  'auth/network-request-failed': "We couldn't reach the server. Check your connection and try again.", 'auth/unauthorized-domain': "Sign-in isn't enabled for this web address.",
  'auth/operation-not-allowed': "This sign-in method isn't available right now.", 'auth/user-disabled': 'This account has been disabled.'
 };
-const failure = e => notify(errors[e?.code] || 'Something went wrong. Please try again.');
+const failure = e => notify(e?.message === 'The terms have changed. Reload this page to review them.' ? e.message : errors[e?.code] || 'Something went wrong. Please try again.');
 function setBusy(value) {
  busy = value; $('auth-fields').disabled = value; $('google-signin').disabled = value;
  $('check-verified').disabled = value; $('resend-verification').disabled = value;
+ $('accept-terms').disabled = value; $('decline-terms').disabled = value;
 }
 function setView(next) {
  view = next; notify(); $('password').value = ''; $('password').type = 'password'; $('show-password').textContent = 'Show'; $('show-password').setAttribute('aria-pressed', 'false');
- const signup = next === 'signup', reset = next === 'reset', verify = next === 'verify';
- $('auth-form').hidden = verify; $('verify-view').hidden = !verify;
- $('signin-tab').parentElement.hidden = reset; $('name-row').hidden = !signup; $('password-row').hidden = reset; $('terms-row').hidden = !signup;
+ const signup = next === 'signup', reset = next === 'reset', verify = next === 'verify', terms = next === 'terms';
+ $('auth-form').hidden = verify || terms; $('verify-view').hidden = !verify; $('terms-view').hidden = !terms;
+ $('google-signin').hidden = terms; document.querySelector('.divider').hidden = terms;
+ $('signin-tab').parentElement.hidden = reset; $('name-row').hidden = !signup; $('password-row').hidden = reset;
  $('forgot-password').hidden = signup; $('back-to-signin').hidden = !reset;
  $('signin-tab').setAttribute('aria-selected', String(next === 'signin')); $('signup-tab').setAttribute('aria-selected', String(signup));
  $('password').autocomplete = signup ? 'new-password' : 'current-password';
  $('submit-auth').textContent = reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in';
 }
-async function finish(user) {
+async function finish(user, acceptTermsVersion) {
  const idToken = await user.getIdToken(true);
- const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken}) });
+ const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken, acceptTermsVersion}) });
+ if (response.status === 409) throw new Error('The terms have changed. Reload this page to review them.');
  if (!response.ok) throw new Error('Session could not be created.');
+ const session=await response.json();
+ if (session.termsVersion !== TERMS_VERSION) { notify('The terms have changed. Reload this page to review them.'); return; }
+ if (!session.termsAccepted) { pendingTermsUser=user; pendingTermsVersion=session.termsVersion; setView('terms'); return; }
+ pendingTermsUser=null; pendingTermsVersion=null;
  location.replace('/calculator.html');
 }
+$('accept-terms').addEventListener('click', async () => {
+ if (busy || !pendingTermsUser || !pendingTermsVersion) return;
+ notify(); setBusy(true);
+ try { await finish(pendingTermsUser, pendingTermsVersion); } catch (e) { failure(e); } finally { setBusy(false); }
+});
+$('decline-terms').addEventListener('click', async () => {
+ if (busy) return; setBusy(true);
+ try { const response=await fetch('/api/auth/session', { method:'DELETE' }); if (!response.ok) throw new Error('Sign out failed'); if (auth) await signOut(auth); pendingTermsUser=null; pendingTermsVersion=null; setView('signin'); }
+ catch (e) { failure(e); } finally { setBusy(false); }
+});
 $('signin-tab').addEventListener('click', () => setView('signin'));
 $('signup-tab').addEventListener('click', () => setView('signup'));
 $('forgot-password').addEventListener('click', () => setView('reset'));
@@ -43,7 +61,7 @@ $('google-signin').addEventListener('click', async () => {
  try { const provider=new GoogleAuthProvider(); provider.setCustomParameters({prompt:'select_account'}); let result;
   try { result=await signInWithPopup(auth,provider); } catch(e) { if (['auth/popup-blocked','auth/operation-not-supported-in-this-environment'].includes(e.code)) { await signInWithRedirect(auth,provider); return; } throw e; }
   await finish(result.user);
- } catch(e) { if (!['auth/popup-closed-by-user','auth/cancelled-popup-request'].includes(e.code)) failure(e); setBusy(false); }
+ } catch(e) { if (!['auth/popup-closed-by-user','auth/cancelled-popup-request'].includes(e.code)) failure(e); } finally { setBusy(false); }
 });
 $('auth-form').addEventListener('submit', async e => {
  e.preventDefault(); if (busy || !auth) return; notify(); const email=$('email').value.trim().toLowerCase(), password=$('password').value;
@@ -53,7 +71,6 @@ $('auth-form').addEventListener('submit', async e => {
   if (!$('name').value.trim()) return notify('Enter your name.');
   if (password.length<8 || password.length>128 || /^(.)\1+$/.test(password) || ['password','password1','password123','12345678','qwerty123','welcome123'].includes(password.toLowerCase())) return notify('Choose a stronger password of 8 to 128 characters.');
   const local=email.split('@')[0]; if (local.length>=4 && password.toLowerCase().includes(local)) return notify("Your password shouldn't contain your email name.");
-  if (!$('terms').checked) return notify('Please agree to the terms of use to create an account.');
  }
  setBusy(true);
  try {
@@ -72,7 +89,7 @@ async function initialize() {
   const config=await configResponse.json(), server=await serverResponse.json();
   if(!config.apiKey || !config.authDomain || !config.projectId || !server.configured) return;
   auth=getAuth(initializeApp(config)); $('config-notice').hidden=true; setBusy(false);
-  const result=await getRedirectResult(auth); if(result?.user) {setBusy(true);await finish(result.user)}
+  const result=await getRedirectResult(auth); if(result?.user) {setBusy(true);try { await finish(result.user); } finally { setBusy(false); }}
  } catch(e) { if(auth) { failure(e); setBusy(false); } }
 }
 initialize();

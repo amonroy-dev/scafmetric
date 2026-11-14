@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { TERMS_VERSION } from '../server/account.js';
 import { createSessionHandler, isConfigured } from '../api/auth/session.js';
 
 const env = { NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://example.com', FIREBASE_PROJECT_ID: 'project', FIREBASE_CLIENT_EMAIL: 'service@example.com', FIREBASE_PRIVATE_KEY: 'test', SESSION_SECRET: 'a strong sufficiently long secret for testing' };
@@ -31,4 +32,19 @@ test('unverified users, cross-origin requests, missing configuration, or unavail
   r=response(); await unavailable(req('POST',{idToken:'x'}),r); assert.equal(r.statusCode,503); assert.equal(r.headers['Set-Cookie'],undefined);
   const missing=createSessionHandler({ env: { ...env, SESSION_SECRET:'' }, verifyToken:async () => decoded });
   r=response(); await missing(req('POST',{idToken:'x'}),r); assert.equal(r.statusCode,503);
+});
+
+
+test('session reports acceptance and stores it only when current terms are explicitly accepted', async () => {
+  let account = {};
+  const handler = createSessionHandler({ env, verifyToken: async () => decoded,
+    accountFor: async data => { if (data.acceptTermsVersion) account = { termsVersion:data.acceptTermsVersion, termsAcceptedAt:new Date().toISOString() }; return account; },
+    accountStatus: async () => ({ trialActive:false, termsAccepted:account.termsVersion === TERMS_VERSION }) });
+  let r=response(); await handler(req('POST',{ idToken:'good' }),r);
+  assert.equal(r.body.termsAccepted,false); assert.equal(r.body.termsVersion,TERMS_VERSION);
+  const cookie=r.headers['Set-Cookie'].split(';')[0];
+  r=response(); await handler(req('GET',null,{cookie}),r); assert.equal(r.body.termsAccepted,false);
+  r=response(); await handler(req('POST',{ idToken:'good', acceptTermsVersion:'old' }),r); assert.equal(r.statusCode,409); assert.deepEqual(account,{});
+  r=response(); await handler(req('POST',{ idToken:'good', acceptTermsVersion:TERMS_VERSION }),r); assert.equal(r.body.termsAccepted,true);
+  r=response(); await handler(req('GET',null,{cookie}),r); assert.equal(r.body.termsAccepted,true);
 });

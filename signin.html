@@ -30,6 +30,13 @@
           <button type="button" class="submit-button" id="check-verified" disabled>I've verified my email <span aria-hidden="true">→</span></button>
           <div class="verification-actions"><button type="button" id="resend-verification" class="text-button" disabled>Resend the email</button><button type="button" id="start-over" class="text-button">Use a different email</button></div>
         </section>
+        <section id="terms-view" class="verification" aria-labelledby="terms-title" hidden>
+          <h3 id="terms-title">Terms of use · draft</h3>
+          <p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p>
+          <p>By continuing, you acknowledge this preliminary-use limitation and agree to the <a href="calculator.html#terms" target="_blank" rel="noopener">draft terms of use</a>.</p>
+          <button type="button" class="submit-button" id="accept-terms">I agree and continue</button>
+          <button type="button" class="text-button" id="decline-terms">Cancel</button>
+        </section>
         <form id="auth-form" novalidate>
           <fieldset id="auth-fields" disabled>
             <div class="tabs" role="tablist" aria-label="Email sign-in">
@@ -39,7 +46,6 @@
             <div class="field" id="name-row" hidden><label for="name">Your name</label><input id="name" name="name" type="text" autocomplete="name" placeholder="Alex Rivera" maxlength="80"></div>
             <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required></div>
             <div class="field" id="password-row"><div class="label-row"><label for="password">Password</label><button id="forgot-password" class="text-button" type="button">Forgot password?</button></div><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Your password" required><button type="button" id="show-password" class="show-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
-            <div class="terms-row" id="terms-row" hidden><input id="terms" type="checkbox"><label for="terms">I agree to the <a href="calculator.html#terms" target="_blank" rel="noopener">draft terms of use</a>.</label></div>
             <button class="submit-button" id="submit-auth" type="submit">Sign in <span aria-hidden="true">→</span></button>
             <button class="text-button back-button" id="back-to-signin" type="button" hidden>Back to sign in</button>
           </fieldset>

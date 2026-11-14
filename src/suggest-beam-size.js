@@ -10,10 +10,11 @@ import { strengthComparisonLoads } from './strength-comparison.js';
  * screening, not an overall member, scaffold, deflection, or compliance design.
  * Each proposed section's properties must be independently verified.
  */
-export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, bracesFt, cbMethod = 'unity', safetyFactor = null, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
+export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, pointLoads = [], bracesFt, cbMethod = 'unity', safetyFactor = null, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
   if (!confirmedLateralBracing || !confirmedScope) throw new Error('Confirm the material, restraint and loading assumptions before suggesting a size.');
   if (Eksi !== 29000) throw new Error('Suggested sizes require E = 29,000 ksi and A992 steel.');
   if (!Number.isFinite(spanFt) || spanFt <= 0 || ![deadLoadKipFt, liveLoadKipFt].every(n => Number.isFinite(n) && n >= 0)) throw new Error('A positive span and finite nonnegative loads are required.');
+  if (!Array.isArray(pointLoads) || pointLoads.some(p => !p || !Number.isFinite(p.loadKip) || p.loadKip < 0 || !Number.isFinite(p.locationFt) || p.locationFt < 0 || p.locationFt > spanFt)) throw new Error('Point loads must be nonnegative and located between the supports.');
   if (!Array.isArray(sections)) throw new Error('Section library is unavailable.');
   if (!['unity', 'quarter'].includes(cbMethod)) throw new Error('Select a supported Cb method.');
   if (!Array.isArray(bracesFt) || bracesFt.length < 2 || bracesFt[0] !== 0 || bracesFt[bracesFt.length - 1] !== spanFt || bracesFt.some((x, i) => !Number.isFinite(x) || x < 0 || x > spanFt || (i > 0 && x <= bracesFt[i - 1]))) throw new Error('Brace locations must increase from 0 to the span and include both supports.');
@@ -26,16 +27,20 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
       if (section?.Type !== 'W' || typeof section.AISC_Manual_Label !== 'string' || !section.AISC_Manual_Label || !Number.isFinite(section.Ix) || section.Ix <= 0) throw new Error('Invalid W section.');
       const self = beamSelfWeight(section);
       const base = { spanFt, Eksi, Iin4: section.Ix, stiffnessFactor: 1 };
-      const flexure = load => checkFlexure({ section, analysis: analyzeBeam({ ...base, uniformLoadPlf: load * 1000 }), bracesFt, cbMethod, Eksi, Fyksi: 50, confirmedLateralBracing: true, confirmedScope: true });
-      const shear = load => checkMajorAxisShear({ section, Eksi, FyKsi: 50, demandKip: load * spanFt / 2 });
+      // Point loads are live loads. Use the complete response for both checks:
+      // eccentric loads make the end reactions, and hence shear demand, unequal.
+      const response = (load, pointMultiplier = 1) => analyzeBeam({ ...base, uniformLoadPlf: load * 1000, pointLoads: pointLoads.map(p => ({ loadLb: p.loadKip * pointMultiplier * 1000, locationFt: p.locationFt })) });
+      const flexure = analysis => checkFlexure({ section, analysis, bracesFt, cbMethod, Eksi, Fyksi: 50, confirmedLateralBracing: true, confirmedScope: true });
+      const shear = analysis => checkMajorAxisShear({ section, Eksi, FyKsi: 50, demandKip: Math.max(Math.abs(analysis.maxShear.shearLb), Math.abs(analysis.minShear.shearLb)) / 1000 });
       const serviceLoad = deadLoadKipFt + liveLoadKipFt + self;
-      const bending = flexure(serviceLoad), shearing = shear(serviceLoad);
+      const service = response(serviceLoad);
+      const bending = flexure(service), shearing = shear(service);
       if (shearing.status !== 'evaluated') throw new Error(shearing.reason);
       let comparisonBendingRatio = null, comparisonShearRatio = null;
       if (safetyFactor !== null) {
         const loads = strengthComparisonLoads({ dead: deadLoadKipFt, live: liveLoadKipFt, self, safetyFactor });
-        comparisonBendingRatio = flexure(loads.bending).governingSegment.utilization;
-        const comparisonShear = shear(loads.shear);
+        comparisonBendingRatio = flexure(response(loads.bending, safetyFactor / 1.67)).governingSegment.utilization;
+        const comparisonShear = shear(response(loads.shear, safetyFactor / 1.5));
         if (comparisonShear.status !== 'evaluated') throw new Error(comparisonShear.reason);
         comparisonShearRatio = comparisonShear.utilization;
       }

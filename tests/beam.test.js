@@ -41,3 +41,30 @@ test('uniform-load diagram critical points and zero-load response', () => {
   near(zero.at(x).shearLb, 0); near(zero.at(x).momentKipFt, 0); near(zero.at(x).reducedDeflectionIn, 0);
  }
 });
+test('multiple point loads satisfy equilibrium, superposition and individual shear jumps', () => {
+ const pointLoads = [{loadLb:4000,locationFt:4},{loadLb:6000,locationFt:14},{loadLb:2000,locationFt:4}];
+ const combined = analyzeBeam({ ...base, pointLoads });
+ const singles = pointLoads.map(p => analyzeBeam({ ...base, uniformLoadPlf:0, pointLoadLb:p.loadLb, pointLocationFt:p.locationFt }));
+ const uniform = analyzeBeam(base);
+ near(combined.reactions.leftLb, 10310 + 6000*16/20 + 6000*6/20);
+ near(combined.reactions.rightLb, 10310 + 6000*4/20 + 6000*14/20);
+ near(combined.at(4,'left').shearLb - combined.at(4,'right').shearLb,6000);
+ near(combined.at(14,'left').shearLb - combined.at(14,'right').shearLb,6000);
+ for (const x of [0,4,8,14,20]) for (const key of ['shearLb','momentLbIn','nominalDeflectionIn']) near(combined.at(x)[key], uniform.at(x)[key] + singles.reduce((sum,p) => sum + p.at(x)[key],0), 1e-6);
+ near(combined.equilibrium.forceResidualLb,0); near(combined.equilibrium.momentResidualLbIn,0);
+ const expectedRoot=(combined.reactions.leftLb-6000)/1031;
+ near(combined.maxMoment.xFt,expectedRoot);
+ near(combined.at(expectedRoot).shearLb,0);
+});
+test('point loads at supports transfer directly into support reactions', () => {
+ const r=analyzeBeam({...base,uniformLoadPlf:0,pointLoads:[{loadLb:5000,locationFt:0},{loadLb:3000,locationFt:20}]});
+ near(r.reactions.leftLb,5000);near(r.reactions.rightLb,3000);
+ for(const x of [0,5,10,15,20]) { near(r.at(x).momentKipFt,0); near(r.at(x).nominalDeflectionIn,0); }
+ near(r.maxShear.shearLb,0); near(r.minShear.shearLb,0);
+});
+test('point-load arrays reject invalid inputs and conflicting legacy input', () => {
+ assert.throws(()=>analyzeBeam({...base,pointLoads:[{loadLb:1,locationFt:21}]}));
+ assert.throws(()=>analyzeBeam({...base,pointLoads:[{loadLb:-1,locationFt:1}]}));
+ assert.throws(()=>analyzeBeam({...base,pointLoads:[{loadLb:NaN,locationFt:1}]}));
+ assert.throws(()=>analyzeBeam({...base,pointLoadLb:1,pointLoads:[{loadLb:1,locationFt:1}]}));
+});

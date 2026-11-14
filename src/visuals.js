@@ -1,33 +1,39 @@
 /* Data-driven visual explanations and synchronized response diagrams. */
 const $ = id => document.getElementById(id);
 const num = (n, d=2) => Number.isFinite(n) ? Number(n).toLocaleString('en-US', {maximumFractionDigits:d}) : '—';
-// Plot ordinate values in the units shown on each panel. The active web UI
-// currently supplies a simply supported full-span uniform load; the point-load
-// discontinuity is retained here for the engine's existing point-load case.
+// Plot ordinate values in the units shown on each panel.
 const specs = [
   ['shear-chart', 'shearLb', 'Shear force', 'V', 'kip'],
   ['moment-chart', 'momentKipFt', 'Bending moment', 'M', 'kip-ft'],
   ['deflection-chart', 'reducedDeflectionIn', 'Bending deflection', 'δ', 'in']
 ];
 function valueAt(point, key) { return key === 'shearLb' ? point[key] / 1000 : point[key]; }
-function graphSamples(analysis, key) {
-  const L = analysis.input.spanFt, a = analysis.input.pointLocationFt;
-  const xs = Array.from({length: 161}, (_, i) => L * i / 160);
-  if (analysis.input.pointLoadLb > 0 && a > 0 && a < L) xs.push(a);
-  return [...new Set(xs)].sort((x,y) => x-y).flatMap(x => {
-    if (key === 'shearLb' && analysis.input.pointLoadLb > 0 && x === a && a > 0 && a < L) {
-      return [analysis.at(x, 'left'), analysis.at(x, 'right')];
-    }
-    return [analysis.at(x, x === L ? 'left' : 'right')];
-  });
+// Keep the older single-load analysis interface usable as well.
+function pointPositions(analysis) {
+  const input = analysis.input, L = input.spanFt;
+  const loads = input.pointLoads ?? [{ loadLb: input.pointLoadLb, locationFt: input.pointLocationFt }];
+  return [...new Set(loads.filter(p => p.loadLb > 0 && p.locationFt > 0 && p.locationFt < L).map(p => p.locationFt))].sort((a,b) => a-b);
 }
 function shearZeros(analysis) {
-  const {spanFt:L, uniformLoadPlf:w, pointLoadLb:P, pointLocationFt:a} = analysis.input;
+  const { spanFt:L, uniformLoadPlf:w } = analysis.input;
   if (w === 0) return [];
-  const roots = [analysis.reactions.leftLb / w];
-  if (P > 0) roots.push((analysis.reactions.leftLb - P) / w);
-  return roots.filter((x,i) => x >= 0 && x <= L && (P === 0 || (i === 0 ? x <= a : x >= a)))
-    .filter((x,i,all) => all.findIndex(y => Math.abs(x-y) < 1e-9) === i);
+  const bounds = [0, ...pointPositions(analysis), L], roots = [];
+  for (let i=0; i<bounds.length-1; i++) {
+    const start = bounds[i], end = bounds[i+1];
+    // Use the right-hand shear immediately after the previous concentrated load.
+    const root = start + analysis.at(start, 'right').shearLb / w;
+    if (root >= start && root <= end) roots.push(root);
+  }
+  return roots.filter((x,i,all) => all.findIndex(y => Math.abs(x-y) < 1e-9) === i);
+}
+function graphSamples(analysis, key) {
+  const L = analysis.input.spanFt, positions = pointPositions(analysis);
+  const xs = Array.from({length: 161}, (_, i) => L * i / 160);
+  xs.push(...positions, ...shearZeros(analysis), analysis.maxMoment.xFt, analysis.maxDeflection.xFt);
+  return [...new Set(xs)].sort((x,y) => x-y).flatMap(x => {
+    if (key === 'shearLb' && positions.includes(x)) return [analysis.at(x, 'left'), analysis.at(x, 'right')];
+    return [analysis.at(x, x === L ? 'left' : 'right')];
+  });
 }
 function extremes(analysis, key) {
   const zero = analysis.at(0);
@@ -73,7 +79,7 @@ export function drawCharts(analysis) {
  const panel=$('shear-chart').closest('.chart-grid');
  let control=$('diagram-controls');
  if(!control){control=document.createElement('div');control.id='diagram-controls';control.className='diagram-controls';panel.before(control);}
- control.innerHTML=`<div class="diagram-controls-header"><div><span>EXPLORE THE RESPONSE</span><strong>One position, three diagrams</strong></div><output id="diagram-position">x = 0 ft</output></div><label for="diagram-slider">Move along the beam <span>Drag, use arrow keys, or tap a diagram</span></label><input type="range" id="diagram-slider" min="0" max="${analysis.input.spanFt}" step="${analysis.input.spanFt/1000}" value="0" aria-describedby="diagram-instructions"><div class="diagram-readout" aria-live="polite"><span id="read-shear"></span><span id="read-moment"></span><span id="read-deflection"></span></div><p id="diagram-instructions">Service loads only. Positive shear equals the left reaction minus downward loads to the left of the cut; positive moment is sagging. Deflection is downward and uses reduced EI. Negative values use dashed lines and hatching. Curves connect sampled values from the response equations.</p>`;
+ control.innerHTML=`<div class="diagram-controls-header"><div><span>EXPLORE THE RESPONSE</span><strong>One position, three diagrams</strong></div><output id="diagram-position">x = 0 ft</output></div><label for="diagram-slider">Move along the beam <span>Drag, use arrow keys, or tap a diagram</span></label><input type="range" id="diagram-slider" min="0" max="${analysis.input.spanFt}" step="${analysis.input.spanFt/1000}" value="0" aria-describedby="diagram-instructions"><div class="diagram-readout" aria-live="polite"><span id="read-shear"></span><span id="read-moment"></span><span id="read-deflection"></span></div><p id="diagram-instructions">Service loads only. Positive shear equals the left reaction minus downward loads to the left of the cut; positive moment is sagging. Deflection is downward. At a point load the shear readout shows the value just to its right. Negative values use dashed lines and hatching. Curves connect sampled values from the response equations.</p>`;
  const charts=specs.map(s=>makeChart(analysis,...s)); const slider=$('diagram-slider');
  function update(x) {
    x=Math.max(0,Math.min(analysis.input.spanFt,x)); slider.value=x;

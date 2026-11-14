@@ -51,6 +51,13 @@ test('rejects unsupported material, geometry, loading, section or unconfirmed co
  assert.throws(()=>checkFlexure({...baseline,section:{...w16x31,tf:.1}}),/not compact/);
  assert.throws(()=>checkFlexure({...baseline,section:{...w16x31,rts:undefined}}),/missing/);
  assert.throws(()=>checkFlexure({...baseline,bracesFt:[0,10,9,20]}),/Brace/);
- const point=analyzeBeam({spanFt:20,uniformLoadPlf:0,pointLoadLb:1000,pointLocationFt:10,Eksi:29000,Iin4:375});
- assert.throws(()=>checkFlexure({...baseline,analysis:point}),/uniform load/);
+
+});
+
+test('point loads are included in segment maximum and quarter-point Cb', () => {
+ const point=analyzeBeam({spanFt:20, uniformLoadPlf:0, pointLoads:[{loadLb:10000,locationFt:4},{loadLb:10000,locationFt:16}], Eksi:29000,Iin4:375});
+ const result=checkFlexure({...baseline, analysis:point, bracesFt:[0,20], cbMethod:'quarter'});
+ const segment=result.segments[0];
+ near(segment.MmaxKipFt,40); near(segment.MaKipFt,40); near(segment.MbKipFt,40); near(segment.McKipFt,40);
+ near(segment.Cb,1); near(segment.utilization,40/segment.allowableKipFt);
 });

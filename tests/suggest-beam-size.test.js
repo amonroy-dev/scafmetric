@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { suggestBeamSize } from '../src/suggest-beam-size.js';
+import { checkMajorAxisShear } from '../src/strength-shear.js';
 
 const all = JSON.parse(readFileSync(new URL('../public/data/aisc-w-shapes-v15.json', import.meta.url)));
 const section = name => all.find(s => s.AISC_Manual_Label === name);
@@ -36,6 +37,26 @@ test('selected additional comparison must pass along with the service checks', (
   assert.ok(lowerLoad.comparisonShearRatio > lowerLoad.shearRatio);
 });
 
+test('eccentric point loads contribute to the governing shear and the separate comparisons', () => {
+  // Point loads of 4 kip at 2 ft and 2 kip at 15 ft produce 4.1 kip
+  // of left reaction (plus half of the beam's self-weight). The right
+  // reaction is smaller, so equal-reaction uniform-load formulas are wrong.
+  const beam = section('W16X31');
+  const result = suggestBeamSize({ ...base, sections: [beam], liveLoadKipFt: 0,
+    pointLoads: [{loadKip: 4, locationFt: 2}, {loadKip: 2, locationFt: 15}], safetyFactor: 4 });
+  assert.equal(result.status, 'suggested');
+  const allowable = checkMajorAxisShear({ section: beam, Eksi: 29000, FyKsi: 50, demandKip: 0 }).allowableKip;
+  const selfReaction = 0.031 * 20 / 2;
+  assert.ok(Math.abs(result.shearRatio - (selfReaction + 4.1) / allowable) < 1e-12);
+  assert.ok(Math.abs(result.comparisonShearRatio - (selfReaction + 4.1 * 4 / 1.5) / allowable) < 1e-12);
+  // With Cb=1 the flexural capacity is the same for both load cases; the
+  // entire applied point load is multiplied by 4/1.67, but self-weight is not.
+  const selfOnly = suggestBeamSize({ ...base, sections: [beam], liveLoadKipFt: 0 });
+  assert.ok(result.comparisonBendingRatio > result.bendingRatio);
+  assert.ok(result.comparisonBendingRatio < result.bendingRatio * 4 / 1.67);
+  assert.ok(result.bendingRatio > selfOnly.bendingRatio);
+});
+
 test('unsupported sections are skipped and do not receive a passing result', () => {
   const missing = { ...section('W16X31'), AISC_Manual_Label:'MISSING', rts:undefined, W:1 };
   const result = suggestBeamSize({ ...base, sections: [missing, section('W16X36')] });
@@ -52,4 +73,6 @@ test('requires supported assumptions and rejects invalid global inputs', () => {
   assert.throws(() => suggestBeamSize({ ...base, bracesFt: [0, 10] }), /Brace/);
   assert.throws(() => suggestBeamSize({ ...base, safetyFactor: 0.5 }), /factor/);
   assert.throws(() => suggestBeamSize({ ...base, liveLoadKipFt: NaN }), /loads/);
+  assert.throws(() => suggestBeamSize({ ...base, pointLoads: [{loadKip: 1, locationFt: 21}] }), /Point loads/);
+  assert.throws(() => suggestBeamSize({ ...base, pointLoads: [{loadKip: -1, locationFt: 5}] }), /Point loads/);
 });

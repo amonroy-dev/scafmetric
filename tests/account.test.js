@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureAccount, readAccount, TRIAL_MS } from '../server/account.js';
+import { ensureAccount, readAccount, TRIAL_MS, TERMS_VERSION } from '../server/account.js';
 
 function fakeDatabase() {
   const docs = new Map(); let queue = Promise.resolve();
@@ -9,7 +9,7 @@ function fakeDatabase() {
     docs,
     collection: () => ({ doc: ref }),
     runTransaction: operation => {
-      const result = queue.then(() => operation({ get: r => r.get(), create: (r, value) => { if (docs.has(r.id)) throw Error('Already exists'); docs.set(r.id, value); } }));
+      const result = queue.then(() => operation({ get: r => r.get(), create: (r, value) => { if (docs.has(r.id)) throw Error('Already exists'); docs.set(r.id, value); }, update: (r, value) => { if (!docs.has(r.id)) throw Error('Missing'); docs.set(r.id, { ...docs.get(r.id), ...value }); } }));
       queue = result.catch(() => {}); return result;
     },
   };
@@ -41,4 +41,25 @@ test('invalid, missing, and disabled account data fail closed', async () => {
   assert.equal(await readAccount(db, identity), null);
   await assert.rejects(ensureAccount(db, identity));
   await assert.rejects(ensureAccount({ ...db, runTransaction: async () => { throw Error('unavailable'); } }, identity));
+});
+
+
+test('acceptance is explicit, versioned and persists without extending trial', async () => {
+  const db = fakeDatabase();
+  const before = await ensureAccount(db, identity);
+  assert.equal((await readAccount(db, identity)).termsAccepted, false);
+  await assert.rejects(ensureAccount(db, { ...identity, acceptTermsVersion: 'old' }));
+  const accepted = await ensureAccount(db, { ...identity, acceptTermsVersion: TERMS_VERSION });
+  assert.equal(accepted.termsVersion, TERMS_VERSION);
+  assert.ok(Number.isFinite(Date.parse(accepted.termsAcceptedAt)));
+  assert.equal(accepted.trialEndsAt, before.trialEndsAt);
+  assert.equal((await readAccount(db, identity)).termsAccepted, true);
+  const repeat = await ensureAccount(db, identity);
+  assert.equal(repeat.termsAcceptedAt, accepted.termsAcceptedAt);
+  db.docs.get(identity.uid).termsAcceptedAt = 'invalid';
+  assert.equal((await readAccount(db, identity)).termsAccepted, false);
+  await ensureAccount(db, { ...identity, acceptTermsVersion: TERMS_VERSION });
+  assert.equal((await readAccount(db, identity)).termsAccepted, true);
+  db.docs.get(identity.uid).termsVersion = 'older-version';
+  assert.equal((await readAccount(db, identity)).termsAccepted, false);
 });
