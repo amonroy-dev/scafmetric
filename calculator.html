@@ -14,20 +14,22 @@
   <link rel="stylesheet" href="report-print.css" media="print">
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell"><main id="top">
+<header class="topbar"><a class="workspace-brand" href="index.html" aria-label="Scafmetric home"><svg class="workspace-logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#ffa41b" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3dd9c9"/></svg><span>scafmetric<span class="brand-accent">.</span></span></a><span class="workspace-title">Beam workspace</span><a class="account-nav" href="signin.html" id="account-link">Sign in</a></header>
+<div class="page" id="beam">
+  <div class="heading-row"><div><h1>Beam analysis</h1><span class="model-caption">Simply supported · Steel W section</span></div><button class="outline-button" type="button" id="report">Export PDF <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
+  <div class="workspace">
+    <section class="panel input-panel" aria-labelledby="inputs-heading">
+      <div class="panel-header"><h2 id="inputs-heading">Configure beam</h2><span class="inspector-unit">US units</span></div>
+      <form id="beam-form">
+        <div class="inspector-scroll"><div class="essential-fields">            <div class="form-section"><div class="section-title"><h3>Beam</h3></div>
 
-  <main id="top">
-    <header class="topbar"><a class="workspace-brand" href="index.html" aria-label="Scafmetric home"><svg class="workspace-logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#ffa41b" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3dd9c9"/></svg><span>scafmetric<span class="brand-accent">.</span></span></a><span class="workspace-title">Beam analysis</span><a class="account-nav" href="signin.html" id="account-link">Sign in</a></header>
-    <div class="page" id="beam">
-      <div class="heading-row"><div><div class="workspace-eyebrow"><span></span> BEAM CALCULATOR</div><h1>Beam analysis</h1><span class="model-caption">Simply supported · Uniform and point loads</span></div><button class="outline-button" type="button" id="report">Export PDF <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
+              <div class="field-grid beam-fields"><div><label for="section">Beam size</label><select id="section"><option value="">Loading…</option></select></div><div><label for="span">Span</label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div></div></div>
 
-      <div class="workspace">
-        <section class="panel input-panel" aria-labelledby="inputs-heading">
-          <div class="panel-header"><div><span class="panel-kicker">01 / SETUP</span><h2 id="inputs-heading">Beam inputs</h2></div><span class="header-icon">↗</span></div>
-          <form id="beam-form">
-            <div class="form-section"><div class="section-title"><h3>Loads</h3></div><p class="input-hint">Full-span loads. Dead load excludes beam weight.</p>
+            </div>
+            <div class="form-section"><div class="section-title"><h3>Uniform loads</h3></div><p class="input-hint">Beam weight is included automatically.</p>
               <div class="field-grid"><div><label for="dead-load">Dead load <em>D</em></label><div class="input-unit"><input id="dead-load" type="number" min="0" step="any" value="0.2" required><span>kip/ft</span></div></div><div><label for="live-load">Live load <em>L</em></label><div class="input-unit"><input id="live-load" type="number" min="0" step="any" value="0.8" required><span>kip/ft</span></div></div></div>
-              <div class="self-weight-info"><strong>Beam self-weight <span>Included automatically</span></strong><output id="self-weight">Select a beam section</output></div>
+              <div class="self-weight-info"><strong>Beam self-weight <span>Auto</span></strong><output id="self-weight">Select a beam section</output></div>
               <div class="point-load-header"><h4>Point loads</h4><button type="button" id="add-point-load" class="add-point-load">+ Add load</button></div>
               <p class="field-help">Downward live loads. Measure each location from the left support.</p>
               <div id="point-loads"></div>
@@ -38,19 +40,14 @@
               </div></template>
               <label for="load-comparison">Safety factor comparison</label><select id="load-comparison"><option value="none">None — service load only</option><option value="four">4:1 safety factor — illustrative</option><option value="custom">Enter a custom safety factor</option></select>
               <div id="custom-safety-row" hidden><label for="custom-safety-factor">Custom safety factor <em>SF : 1</em></label><div class="input-unit"><input id="custom-safety-factor" type="number" min="1" step="any" placeholder="e.g. 2.5" disabled><span>: 1</span></div><p class="field-help">Enter the first number of the ratio. For 2.5:1, enter 2.5.</p></div>
-              <p class="field-help">Illustrative comparison only; not a verified OSHA load combination or compliance check. Separate steel checks are available below.</p>
+              <p class="field-help">Illustrative only. Does not establish OSHA compliance.</p>
             </div>
-            <div class="form-section"><div class="section-title"><h3>Beam</h3></div>
-
-              <label for="span">Span <em>L</em></label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div>
-              <label for="section">Beam size <em>W shape</em></label><select id="section"><option value="">Loading sections…</option></select>
-              <label for="brace-locations">Lateral braces <em>x</em></label><div class="input-unit"><input id="brace-locations" type="text" placeholder="Ends only (optional)"><span>ft</span></div>
-            </div>
-<details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div><p class="field-help">Strong-axis bending; nominal section stiffness.</p>
+</div>
+        <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary><details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div><p class="field-help">Strong-axis bending; nominal section stiffness.</p>
               <input id="stiffness-factor" type="hidden" value="0.8">
             </div></details><details class="input-details"><summary>Steel strength checks <span>AISC 360-16 · ASD</span></summary>            <div class="form-section" id="member-check-setup">
               <label class="check-row" for="enable-capacity"><input type="checkbox" id="enable-capacity" checked><span>Evaluate selected AISC member checks <small>AISC 360-16, ASD, ASTM A992 steel (F<sub>y</sub> = 50 ksi); service load 1.0D + 1.0L.</small></span></label>
-              <div id="capacity-fields">
+              <div id="capacity-fields"><label for="brace-locations">Lateral braces <em>x</em></label><div class="input-unit"><input id="brace-locations" type="text" placeholder="Ends only (optional)"><span>ft</span></div>
                 <label for="cb-method">Moment-gradient factor <em>C<sub>b</sub></em></label><select id="cb-method"><option value="unity">Use Cb = 1.0</option><option value="quarter">Calculate Cb for each unbraced segment</option></select><p class="field-help">The specified brace locations define the unbraced segments; braces are not vertical supports.</p>
                 <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
                   <li>ASTM A992 steel, F<sub>y</sub> = 50 ksi and E = 29,000 ksi.</li>
@@ -62,26 +59,26 @@
                 <p class="field-help">The no-factor ASD checks use service load. If selected, the safety-factor comparison is also shown separately. Bearing, connections, concentrated forces, and scaffold-specific requirements remain separate.</p>
               </div>
             </div>
-</details><details class="input-details"><summary>Report details</summary>            <div class="form-section">
+</details></details>
+        <details class="input-details"><summary>Report details</summary>            <div class="form-section">
               <label for="project">Project name <span class="optional">OPTIONAL</span></label><input id="project" type="text" placeholder="e.g. Main Street renovation">
               <label for="preparer">Prepared by <span class="optional">OPTIONAL</span></label><input id="preparer" type="text" placeholder="Name or company">
             </div>
-</details>            <div class="form-section acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
-            <p id="error" class="error" role="alert"></p><button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
-          </form>
-        </section>
-        <div class="output-column">          <section class="panel drawing-panel"><div class="panel-header inline"><div><span class="panel-kicker">02 / MODEL</span><h2>Beam model</h2></div><span class="chip">Live preview</span></div><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"><svg viewBox="0 0 720 230" role="img" aria-label="Simply supported beam with uniform load"><defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="8" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 0L5 10Z" fill="#c2603b"/></marker></defs><text x="360" y="28" text-anchor="middle" class="svg-label">UNIFORM LOAD · D + L + SELF-WEIGHT</text><line x1="90" y1="52" x2="630" y2="52" stroke="#c2603b" stroke-width="2"/><g stroke="#c2603b" stroke-width="2" marker-end="url(#arrow)"><path d="M90 52v43M157 52v43M225 52v43M292 52v43M360 52v43M427 52v43M495 52v43M562 52v43M630 52v43"/></g><line x1="90" y1="105" x2="630" y2="105" stroke="#1a3937" stroke-width="9"/><g fill="none" stroke="#1a3937" stroke-width="2"><path d="M90 111l-16 24h32z M630 111l-16 24h32z M68 140h44 M608 144h44 M615 137a3 3 0 1 0 0 6 M645 137a3 3 0 1 0 0 6"/><path d="M90 154v34 M630 154v34 M90 178h540" stroke="#9aa7a0"/></g><text x="360" y="202" text-anchor="middle" class="svg-dim">L · DISTANCE BETWEEN SUPPORTS</text><text x="90" y="164" text-anchor="middle" class="svg-small">A</text><text x="630" y="164" text-anchor="middle" class="svg-small">B</text></svg></div></section>
-          <section class="panel results-panel" tabindex="-1"><div class="panel-header inline"><div><span class="panel-kicker">03 / ANALYSIS</span><h2>Results</h2></div><span class="chip orange">PRELIMINARY</span></div><div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">Ready to analyze</strong><p class="verdict-detail">Set your loads and beam, then run analysis.</p></div></div><div id="suggestion" class="suggestion"></div><div id="results" class="results"></div></section>
-          <section class="panel chart-panel"><div class="panel-header inline"><div><span class="panel-kicker">04 / DIAGRAMS</span><h2>Beam response</h2></div><span class="chip">SERVICE LOAD</span></div><div class="chart-grid"><div class="chart"><div class="chart-title"><strong>Shear force</strong><span>kips</span></div><div id="shear-chart" class="chart-area"><span>Calculate to view diagram</span></div></div><div class="chart"><div class="chart-title"><strong>Bending moment</strong><span>kip-ft</span></div><div id="moment-chart" class="chart-area"><span>Calculate to view diagram</span></div></div><div class="chart"><div class="chart-title"><strong>Deflection</strong><span>in</span></div><div id="deflection-chart" class="chart-area"><span>Calculate to view diagram</span></div></div></div></section>
-          <details class="panel properties-panel"><summary>Section properties <span>AISC v15 · mirrored</span></summary><div id="section-properties" class="property-content">Select a beam size.</div></details>
-          <section class="terms-panel" id="terms"><strong>Terms of use · draft</strong><p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p></section>
-
-        </div>
-      </div>
+</details></div>
+        <div class="action-bar">            <div class="form-section acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
+            <p id="error" class="error" role="alert"></p><button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
+      </form>
+    </section>
+    <div class="output-column">
+      <section class="panel drawing-panel"><div class="panel-header inline"><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div><span class="chip"><i></i>Live model</span></div><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"></div><div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span>Click a marker to edit</span></div></section>
+      <section class="panel results-panel" tabindex="-1" aria-label="Analysis results"><div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div><div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">Ready when you are</strong><p class="verdict-detail">Set the beam and loads, then run analysis.</p></div></div><div id="suggestion" class="suggestion"></div><div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>kip</small></strong></div><div><span>Right reaction</span><strong>— <small>kip</small></strong></div><div><span>Max. moment</span><strong>— <small>kip-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div></section>
+      <section class="panel chart-panel" aria-label="Response diagrams"><div class="response-toolbar"><div class="response-tabs" role="tablist" aria-label="Response diagram"><button type="button" role="tab" id="tab-shear" aria-controls="panel-shear" aria-selected="true" tabindex="0" data-response-tab="shear">Shear</button><button type="button" role="tab" id="tab-moment" aria-controls="panel-moment" aria-selected="false" tabindex="-1" data-response-tab="moment">Moment</button><button type="button" role="tab" id="tab-deflection" aria-controls="panel-deflection" aria-selected="false" tabindex="-1" data-response-tab="deflection">Deflection</button></div><span>Service load</span></div><div class="chart-grid"><div class="chart is-active" id="panel-shear" data-response-panel="shear" role="tabpanel" aria-labelledby="tab-shear" tabindex="0"><div id="shear-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the shear diagram</span></div></div></div><div class="chart " id="panel-moment" data-response-panel="moment" role="tabpanel" aria-labelledby="tab-moment" tabindex="0"><div id="moment-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the moment diagram</span></div></div></div><div class="chart " id="panel-deflection" data-response-panel="deflection" role="tabpanel" aria-labelledby="tab-deflection" tabindex="0"><div id="deflection-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the deflection diagram</span></div></div></div></div></section>
+      <details class="panel properties-panel"><summary>Section properties <span>AISC v15</span></summary><div id="section-properties" class="property-content">Select a beam size.</div></details>
+      <section class="terms-panel" id="terms"><strong>Terms of use · draft</strong><p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p></section>
     </div>
-  </main>
+  </div>
 </div>
+</main></div>
 <script type="module" src="app.js"></script>
 <script type="module" src="account.js"></script>
-</body>
-</html>
+</body></html>

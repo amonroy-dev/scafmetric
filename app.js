@@ -6,7 +6,7 @@ import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
 import { strengthComparisonLoads } from './src/strength-comparison.js';
 import { requestedLoadComparison } from './src/load-comparison.js';
-import { drawSchematic, bindSchematic } from './src/input-visual.js';
+import { drawSchematic as drawBeamSchematic, bindSchematic } from './src/input-visual.js';
 import { drawCharts, clearCharts } from './src/visuals.js';
 
 const $ = id => document.getElementById(id);
@@ -14,6 +14,17 @@ const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFracti
 const ratio = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const escape = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let sections = [], record = null;
+const emptyMetrics = $('results').innerHTML;
+const emptyCharts = new Map(['shear-chart', 'moment-chart', 'deflection-chart'].map(id => [id, $(id).innerHTML]));
+function drawSchematic() {
+ drawBeamSchematic();
+ $('model-section').textContent = $('section').value || 'Choose a section';
+ $('model-span').textContent = `${$('span').value || '—'} ft span`;
+}
+function revealField(field) {
+ for (let parent = field.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+}
+
 const propUnits = { W:'lb/ft', A:'in²', d:'in', bf:'in', tw:'in', tf:'in', Ix:'in⁴', Sx:'in³', Zx:'in³', Iy:'in⁴', Sy:'in³', Zy:'in³', J:'in⁴', Cw:'in⁶', rx:'in', ry:'in', rts:'in', ho:'in' };
 function selected() { return sections.find(s => s.AISC_Manual_Label === $('section').value); }
 function properties() {
@@ -28,11 +39,11 @@ function invalidate() {
  if (!record) return;
  record = null;
  $('verdict').innerHTML = '<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Inputs changed</strong><p class="verdict-detail">Calculate again to update your beam check.</p></div>';
- $('results').innerHTML = '';
+ $('results').innerHTML = emptyMetrics;
  $('suggestion').innerHTML = '';
  $('report').disabled = true;
  clearCharts();
- for (const id of ['shear-chart','moment-chart','deflection-chart']) $(id).innerHTML = '';
+ for (const [id, html] of emptyCharts) $(id).innerHTML = html;
 }
 function braces(value, span) {
  const list = value.trim() ? value.split(',').map(s => s.trim()).filter(Boolean).map(Number) : [0, span];
@@ -150,13 +161,13 @@ function run(e) {
   render(record); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
   resultsPanel.focus({preventScroll:true});
-  resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
+  if (window.matchMedia('(max-width: 760px)').matches) resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
  } catch(err) { invalidate(); $('error').textContent = err.message; }
 }
 function verdictHtml(check) {
  const result = summarizeChecks(check);
  const scope = '<p class="verdict-scope">These are preliminary bending and shear checks only. Bearing, connections, deflection limits, bracing and scaffold requirements need separate review.</p>';
- if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">NOT EVALUATED</strong><p class="verdict-detail">Open Steel strength checks to confirm material and bracing assumptions.</p></div>`;
+ if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p><button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
  const item = result.governing;
  const governing = `${escape(item.name)} · ${fmt(item.utilization * 100, 4)}% of allowable (compared without rounding)`;
  if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
@@ -240,6 +251,25 @@ $('point-loads').addEventListener('click', e => {
  invalidate(); drawSchematic(); $('add-point-load').focus();
 });
 $('beam-form').addEventListener('submit', run);
+$('beam-form').addEventListener('invalid', e => revealField(e.target), true);
+const responseTabs = [...document.querySelectorAll('[data-response-tab]')];
+function selectResponse(name, focus = false) {
+ for (const tab of responseTabs) {
+  const active = tab.dataset.responseTab === name;
+  tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
+  document.getElementById(tab.getAttribute('aria-controls')).classList.toggle('is-active', active);
+  if (active && focus) tab.focus();
+ }
+}
+for (const [index, tab] of responseTabs.entries()) {
+ tab.addEventListener('click', () => selectResponse(tab.dataset.responseTab));
+ tab.addEventListener('keydown', e => {
+  const target = e.key === 'ArrowRight' ? (index + 1) % responseTabs.length : e.key === 'ArrowLeft' ? (index + responseTabs.length - 1) % responseTabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? responseTabs.length - 1 : null;
+  if (target === null) return;
+  e.preventDefault(); selectResponse(responseTabs[target].dataset.responseTab, true);
+ });
+}
+
 bindSchematic();
 drawSchematic();
 const confirmationInputs = new Set(['span', 'section', 'brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
@@ -256,6 +286,11 @@ $('load-comparison').addEventListener('change', () => {
  $('custom-safety-factor').required = custom;
  invalidate();
 });
+$('verdict').addEventListener('click', e => {
+ if (!e.target.closest('[data-open-checks]')) return;
+ revealField($('capacity-confirmed'));
+ $('capacity-confirmed').focus();
+});
 $('suggestion').addEventListener('click', e => {
  const button = e.target.closest('[data-use-suggestion]');
  if (!button) return;
@@ -265,13 +300,13 @@ $('suggestion').addEventListener('click', e => {
  $('capacity-confirmed').checked = false;
  properties();
  drawSchematic();
- $('capacity-confirmed').closest('details').open = true;
+ revealField($('capacity-confirmed'));
  $('capacity-confirmed').focus({preventScroll:true});
  $('capacity-confirmed').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
 });
-let printDetails = [];
-window.addEventListener('beforeprint', () => { printDetails = [...document.querySelectorAll('.output-column details')].filter(el => !el.open); printDetails.forEach(el => { el.open = true; }); });
-window.addEventListener('afterprint', () => { printDetails.forEach(el => { el.open = false; }); printDetails = []; });
+let printDetails = null;
+window.addEventListener('beforeprint', () => { if (printDetails !== null) return; printDetails = [...document.querySelectorAll('.output-column details')].filter(el => !el.open); printDetails.forEach(el => { el.open = true; }); });
+window.addEventListener('afterprint', () => { if (printDetails === null) return; printDetails.forEach(el => { el.open = false; }); printDetails = null; });
 $('report').addEventListener('click', () => { if (record) window.print(); });
 fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Section library failed to load.');return r.json();}).then(data=>{
  sections = data.sort((a,b)=>a.AISC_Manual_Label.localeCompare(b.AISC_Manual_Label,undefined,{numeric:true}));
