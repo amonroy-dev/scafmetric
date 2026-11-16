@@ -235,7 +235,7 @@ function memberChecksHtml(check) {
   const x = check.extra, fb = x.bending, vs = x.shearing;
   const bendRows = fb.status === 'evaluated' ? calculationRow('Moment ratio', `${lb(fb.governingSegment.MmaxKipFt)} / ${lb(fb.governingSegment.allowableKipFt)} lb-ft`, ratio(fb.governingSegment.utilization), fb.flangeLocalBuckling ? 'AISC F3' : 'AISC F2') : `<p class="capacity-note">Bending not evaluated: ${escape(fb.reason || 'Outside supported scope.')}</p>`;
   const shearRows = vs.status === 'evaluated' ? calculationRow('Shear ratio', `${lb(vs.demandKip)} / ${lb(vs.allowableKip)} lbs`, ratio(vs.utilization), 'AISC G2.1(a)') : `<p class="capacity-note">Shear not evaluated: ${escape(vs.reason || 'Outside supported scope.')}</p>`;
-  extraHtml = `<div class="capacity-section"><h4>ASD — ${check.comparisonSelection === 'four' ? '4:1' : 'custom factor'} comparison</h4><p class="capacity-note"><strong>Illustrative only.</strong> Not a verified OSHA or ASD load combination; maximum intended load and failure-capacity basis require review.</p>
+  extraHtml = `<div class="capacity-section"><h4>ASD — ${check.comparisonSelection === 'four' ? '4:1' : 'custom factor'} comparison</h4>
   ${deadLoadRows(check)}
   ${comparisonLoadRows(check, x.sf, 1.67, 'Bending')}
   ${fb.status === 'evaluated' ? calculationRow('Moment demand', `Peak combined moment, segment ${fmt(fb.governingSegment.startFt,3)}–${fmt(fb.governingSegment.endFt,3)} ft`, `${lb(fb.governingSegment.MmaxKipFt)} lb-ft`, '') : ''}
@@ -305,7 +305,7 @@ function verdictHtml(check) {
   const extra = deflectionFails ? `<br><strong>Deflection also fails.</strong> ${sagText(d)}` : '';
   return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong>${extra}</p>${meters}${notEvaluated}</div>`;
  }
- return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong><br>Bending and shear are within the allowable strength, and the sag (${fmt(d.deflectionIn,4)} in) is within the L/${d.limitRatio} limit of ${fmt(d.allowableIn,4)} in.</p>${meters}</div>`;
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong></p>${meters}</div>`;
 }
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
@@ -361,7 +361,7 @@ function render(r) {
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
  const kpi = (label, value, digits, unit, note = '', state = '') => `<div${state ? ` class="kpi-${state}"` : ''}><span>${label}</span><strong><span class="kpi-value" data-value="${value}" data-digits="${digits}">${fmt(value, digits)}</span> <small>${unit}</small></strong>${note}</div>`;
  const limitNote = dl ? `<em class="kpi-limit">${dl.meets ? 'Within' : 'Exceeds'} L/${dl.limitRatio} = ${fmt(dl.allowableIn,4)} in · ${formatUtilization(dl.utilization)}</em>` : '';
- $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid">${kpi('Left reaction', a.reactions.leftLb, 0, 'lbs')}${kpi('Right reaction', a.reactions.rightLb, 0, 'lbs')}${kpi('Maximum moment', a.maxMoment.momentKipFt * 1000, 0, 'lb-ft')}${kpi('Nominal EI deflection', max.nominalDeflectionIn, 4, 'in')}${kpi(`Adjusted EI deflection · ${fmt(r.factor,2)} EI`, max.reducedDeflectionIn, 4, 'in', limitNote, dl ? (dl.meets ? 'within' : 'over') : '')}</div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
+ $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid">${kpi('Left reaction', a.reactions.leftLb, 0, 'lbs')}${kpi('Right reaction', a.reactions.rightLb, 0, 'lbs')}${kpi('Maximum moment', a.maxMoment.momentKipFt * 1000, 0, 'lb-ft')}${kpi('Nominal EI deflection', max.nominalDeflectionIn, 4, 'in')}${kpi(`Adjusted EI deflection · ${fmt(r.factor,2)} EI`, max.reducedDeflectionIn, 4, 'in', limitNote, dl ? (dl.meets ? 'within' : 'over') : '')}</div>${comparisonHtml}<details class="result-details" open><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
  $('calculation-report').innerHTML = renderCalculationReport(r, {
   schematic:$('schematic').innerHTML,
   diagrams:['shear', 'moment', 'deflection'].map(name => ({name, html:$(`${name}-chart`).innerHTML}))
