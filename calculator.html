@@ -66,13 +66,14 @@
                 </div>
               </div></template>
               <div class="self-weight-info"><strong>Beam self-weight <span>Auto</span></strong><output id="self-weight">Select a beam section</output></div>
-              <div class="safety-factor-control"><label for="load-comparison">Safety factor</label><select id="load-comparison" aria-describedby="safety-factor-note"><option value="none">1.67 - ASD</option><option value="four">4 - OSHA</option><option value="custom">Other</option></select>
+              <div class="safety-factor-control"><label for="load-comparison">Safety factor</label><select id="load-comparison" aria-describedby="safety-factor-note"><option value="none">1.67 - ASD</option><option value="four" selected>4 - OSHA</option><option value="custom">Other</option></select>
                 <div id="custom-safety-row" hidden><label for="custom-safety-factor">Custom factor</label><div class="input-unit"><input id="custom-safety-factor" type="number" min="1" step="any" placeholder="2.5" disabled><span>: 1</span></div></div>
-                <p id="safety-factor-note" class="field-help">AISC ASD · service loads, no additional factor.</p>
+                <p id="safety-factor-note" class="field-help">4:1 illustrative comparison. Does not establish OSHA compliance.</p>
               </div>
             </div>
             <div class="form-section bracing-section">
               <div class="section-title"><span class="step" aria-hidden="true">04</span><h3>Lateral bracing</h3><span>From left support</span></div>
+              <p id="brace-cleared" class="brace-cleared" role="status"></p>
               <label for="top-brace-locations">Top flange</label><input id="top-brace-locations" type="hidden"><div class="brace-editor" data-flange="top"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <label for="bottom-brace-locations">Bottom flange</label><input id="bottom-brace-locations" type="hidden"><div class="brace-editor" data-flange="bottom"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <p id="bracing-help" class="field-help">Enter each interior brace position in feet. End restraints are included. Top flange governs for downward loads.</p>
@@ -81,7 +82,7 @@
             <div class="form-section assumptions-section">
               <div class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>AISC 360-16 · ASD</span></div>
               <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
-                <li>ASTM A992 steel, F<sub>y</sub> = 50 ksi and E = 29,000 ksi.</li>
+                <li>ASTM A992 steel, F<sub>y</sub> = 50,000 psi and E = 29,000,000 psi.</li>
                 <li>Both flanges have adequate lateral and twist restraint at the supports. Each entered interior brace adequately restrains its specified flange.</li>
                 <li>Major-axis bending with no axial force, torsion, or destabilizing load-induced torsion.</li>
               </ul></div>
@@ -90,12 +91,12 @@
           </div>
           <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary>
             <details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">
-              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div>
+              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="1" step="any" value="29000000" required><span>psi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div>
               <p class="field-help">Strong-axis bending; nominal section stiffness.</p>
               <input id="stiffness-factor" type="hidden" value="0.8">
             </div></details>
             <details class="input-details"><summary>Steel strength checks <span>AISC 360-16 · ASD</span></summary><div class="form-section" id="member-check-setup">
-              <label class="check-row" for="enable-capacity"><input type="checkbox" id="enable-capacity" checked><span>Evaluate selected AISC member checks <small>AISC 360-16, ASD, ASTM A992 steel (F<sub>y</sub> = 50 ksi); service load 1.0D + 1.0L.</small></span></label>
+              <label class="check-row" for="enable-capacity"><input type="checkbox" id="enable-capacity" checked><span>Evaluate selected AISC member checks <small>AISC 360-16, ASD, ASTM A992 steel (F<sub>y</sub> = 50,000 psi); service load 1.0D + 1.0L.</small></span></label>
               <div id="capacity-fields">
                 <label for="cb-method">Moment-gradient factor <em>C<sub>b</sub></em></label><select id="cb-method"><option value="unity">Use Cb = 1.0</option><option value="quarter">Calculate Cb for each unbraced segment</option></select><p class="field-help">The specified brace locations define the unbraced segments; braces are not vertical supports.</p>
                 <p class="field-help">The no-factor ASD checks use service load. If selected, the safety-factor comparison is also shown separately. Bearing, connections, concentrated forces, and scaffold-specific requirements remain separate.</p>
@@ -114,13 +115,13 @@
       <section class="panel drawing-panel" aria-labelledby="model-heading">
         <div class="panel-header inline"><div class="model-title"><h2 id="model-heading">Model</h2><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div></div><span class="chip live-chip"><i aria-hidden="true"></i>Live</span></div>
         <div class="schematic-wrap"><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"></div><span class="scan-line" aria-hidden="true"></span></div>
-        <div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span class="deflected-key"><i class="deflected-swatch"></i>Deflected shape · exaggerated</span><span>Click a label to edit</span></div>
+        <div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span class="brace-key"><i class="brace-swatch"></i>Brace</span><span class="deflected-key"><i class="deflected-swatch"></i>Deflected shape · exaggerated</span><span>Click a label to edit</span></div>
       </section>
       <section class="panel results-panel" tabindex="-1" aria-label="Analysis results">
         <div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div>
         <div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">No analysis yet</strong><p class="verdict-detail">Set the beam and loads, then run analysis.</p></div></div>
         <div id="suggestion" class="suggestion"></div>
-        <div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>kip</small></strong></div><div><span>Right reaction</span><strong>— <small>kip</small></strong></div><div><span>Max. moment</span><strong>— <small>kip-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div>
+        <div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>lbs</small></strong></div><div><span>Right reaction</span><strong>— <small>lbs</small></strong></div><div><span>Max. moment</span><strong>— <small>lb-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div>
       </section>
       <section class="panel chart-panel" aria-label="Response diagrams">
         <div class="response-toolbar"><div class="response-tabs" role="tablist" aria-label="Response diagram"><button type="button" role="tab" id="tab-shear" aria-controls="panel-shear" aria-selected="true" tabindex="0" data-response-tab="shear">Shear</button><button type="button" role="tab" id="tab-moment" aria-controls="panel-moment" aria-selected="false" tabindex="-1" data-response-tab="moment">Moment</button><button type="button" role="tab" id="tab-deflection" aria-controls="panel-deflection" aria-selected="false" tabindex="-1" data-response-tab="deflection">Deflection</button></div><span>Service load</span></div>

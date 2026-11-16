@@ -6,9 +6,9 @@ const escapeText = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&l
 const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—';
 const numeric = id => { const value = $(id)?.value?.trim(); return value ? Number(value) : NaN; };
 const fields = [
- ['span','01','Distance between supports','ft'], ['dead-load','02','Dead load D','kip/ft'], ['live-load','03','Live load L','kip/ft'],
+ ['span','01','Distance between supports','ft'], ['dead-load','02','Dead load D','lb/ft'], ['live-load','03','Live load L','lb/ft'],
  ['top-brace-locations','04','Top flange braces','ft from A'], ['bottom-brace-locations','12','Bottom flange braces','ft from A'], ['section','05','Selected W section',''], ['self-weight','06','Beam self-weight · calculated',''],
- ['elastic-modulus','07','Elastic modulus E','ksi'], ['inertia','08','Strong-axis inertia Iₓ','in⁴'], ['stiffness-factor','09','Stiffness factor','× EI'],
+ ['elastic-modulus','07','Elastic modulus E','psi'], ['inertia','08','Strong-axis inertia Iₓ','in⁴'], ['stiffness-factor','09','Stiffness factor','× EI'],
  ['load-comparison','10','Load comparison',''], ['custom-safety-factor','11','Custom safety factor',': 1']
 ];
 function fieldValue(id) {
@@ -39,12 +39,17 @@ export function drawSchematic() {
  let bracing = null;
  try { bracing = parseFlangeBracing({top:$('top-brace-locations').value, bottom:$('bottom-brace-locations').value, spanFt:span}); } catch { /* Invalid inputs are identified beside the fields and validated on submit. */ }
  const x = v => 77 + v / span * 566;
- const braceTicks = bracing ? bracing.top.locations.map(v => `<path class="in-brace" d="M${x(v)} 136v-13"/><circle class="in-brace-dot" cx="${x(v)}" cy="135" r="3"/>`).join('') + bracing.bottom.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace in-brace-bottom" d="M${x(v)} 142v13"/><circle class="in-brace-dot in-brace-bottom-dot" cx="${x(v)}" cy="142" r="3"/>`).join('') : '';
+ // End restraints at the supports are implied, so only interior braces are marked.
+ const braceTicks = bracing ? bracing.top.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace" d="M${x(v)} 136v-13"/><circle class="in-brace-dot" cx="${x(v)}" cy="135" r="3"/>`).join('') + bracing.bottom.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace in-brace-bottom" d="M${x(v)} 142v13"/><circle class="in-brace-dot in-brace-bottom-dot" cx="${x(v)}" cy="142" r="3"/>`).join('') : '';
  // Show positions in a separate text line; dense positions otherwise collide.
  const braceLabel = flange => !bracing ? 'Check positions' : `${bracing[flange].locations.map(fmt).join(', ')} ft`;
  const dead = numeric('dead-load'), live = numeric('live-load');
  const loadValid = Number.isFinite(dead) && dead >= 0 && Number.isFinite(live) && live >= 0;
- const anyLoad = loadValid && (dead > 0 || live > 0 || Boolean($('section')?.value));
+ // The uniform load is drawn only when a uniform row carries load. Its labels stay
+ // while a value is being edited (invalid) so the entry can still be clicked.
+ const hasUniformRow = Boolean(document.querySelector('.uniform-load-row'));
+ const showUniform = hasUniformRow && (!loadValid || dead > 0 || live > 0);
+ const anyLoad = showUniform && loadValid;
  const arrows = anyLoad ? Array.from({length:11}, (_,i) => { const a=77+i*56.6;return `<path d="M${a} 64v54m-5-8 5 8 5-8"/>`; }).join('') : '';
  // Point-load arrows track the entered positions. Invalid or blank rows are
  // omitted from the preview and are validated when analysis is run.
@@ -58,8 +63,8 @@ export function drawSchematic() {
  <svg class="input-beam" viewBox="0 0 720 266" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations, schematic not to scale.">
  <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="266" fill="url(#input-grid)"/>
  <g class="in-load">${arrows}${anyLoad?'<path d="M77 64H643"/>':''}</g>${pointArrows}
- ${editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`)}
- ${editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`)}
+ ${showUniform ? editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`) : ''}
+ ${showUniform ? editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`) : ''}
  <path class="in-beam" d="M77 138H643"/><g class="in-support"><path d="M77 144l-14 23h28zM643 144l-14 23h28zM58 172h38M624 180h38"/><circle cx="634" cy="174" r="3"/><circle cx="652" cy="174" r="3"/></g>${braceTicks}
  ${editTarget('section',80,129,560,18,'beam size')}
  <path class="in-dim" d="M77 186v37M643 186v37M77 211H643M77 206v10M643 206v10"/>

@@ -137,6 +137,8 @@
   .brace-entry button:hover { border-color:rgba(255,140,123,.55); background:rgba(255,140,123,.1); color:#ffc4b9; }
   .bracing-summary { display:block; margin-top:12px; padding:9px 11px 7px; border:1px solid var(--ws-line); background:rgba(8,15,26,.5); color:var(--ws-aqua-2); font:18px/1.25 var(--term); letter-spacing:.03em; }
   .bracing-summary:empty { display:none; }
+  .brace-cleared { margin:0 0 14px; padding:8px 10px; border:1px dashed rgba(255,164,27,.55); background:rgba(255,164,27,.07); color:var(--ws-orange-2); font-size:12px; line-height:1.5; }
+  .brace-cleared:empty { display:none; }
 
   /* Steel check assumptions and check rows */
   .capacity-assumptions { margin:0 0 14px; color:var(--ws-muted); font-size:12px; line-height:1.55; }
@@ -203,8 +205,8 @@
   .in-support { fill:#0b1424; stroke:var(--ws-orange); stroke-width:1.8; }
   .in-load { stroke:var(--ws-aqua); stroke-width:2; filter:drop-shadow(0 0 4px rgba(61,217,201,.3)); }
   .input-beam .input-hotspot>path { stroke:var(--ws-aqua-2); stroke-width:3; }
-  .in-brace { stroke:var(--ws-aqua-2); stroke-width:3; }
-  .in-brace-dot { fill:var(--ws-aqua-2); }
+  .in-brace { stroke:var(--ws-text); stroke-width:3; }
+  .in-brace-dot { fill:var(--ws-text); }
   .in-brace-bottom { stroke:#b3c6e6; }
   .in-brace-bottom-dot { fill:#b3c6e6; }
   .in-dim,.in-axis { fill:none; stroke:#5d6f8c; stroke-width:1.2; stroke-dasharray:5 4; }
@@ -231,8 +233,9 @@
   .model-legend i { display:inline-block; width:14px; height:3px; background:var(--ws-orange); }
   .model-legend .load-swatch { background:var(--ws-aqua); }
   .model-legend .deflected-swatch { height:0; border-top:2px dashed var(--ws-aqua-2); background:none; }
-  .model-legend .deflected-key { display:none; }
-  .has-results .model-legend .deflected-key { display:inline-flex; }
+  .model-legend .deflected-key,.model-legend .brace-key { display:none; }
+  .has-results .model-legend .deflected-key,.drawing-panel:has(.in-brace) .model-legend .brace-key { display:inline-flex; }
+  .model-legend .brace-swatch { width:3px; height:12px; background:var(--ws-text); }
   .model-legend span:last-child { margin-left:auto; color:#6f809b; }
   .scan-line { position:absolute; top:0; bottom:0; left:-120px; z-index:2; width:110px; pointer-events:none; opacity:0; background:linear-gradient(90deg,transparent,rgba(61,217,201,.16) 70%,rgba(159,243,233,.55)); border-right:2px solid var(--ws-aqua-2); }
   .is-scanning .scan-line { animation:ws-scan .95s cubic-bezier(.45,0,.55,1); }

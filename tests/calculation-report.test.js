@@ -22,10 +22,13 @@ function tableContaining(html,caption) {
 
 test('full service report gives independently checked uniform-load results and every AISC segment',()=>{
  const html=renderCalculationReport(fixture());
- // Closed-form uniform-load benchmark: 1.031 kip/ft × 20 / 2 and wL²/8.
- assert.match(html,/10\.31 kip/);assert.match(html,/51\.55 kip-ft/);
- // Rounded W16x31 source gives 225/1.67 for Mp allowable and Lb=5 ft interpolation.
- assert.match(html,/225 kip-ft/);assert.match(html,/128\.840584/);
+ // Closed-form uniform-load benchmark: 1,031 lb/ft × 20 / 2 = 10,310 lbs and wL²/8 = 51,550 lb-ft.
+ assert.match(html,/10,310 lbs/);assert.match(html,/51,550 lb-ft/);
+ // Rounded W16x31 source gives Mp = 50,000 × 54 / 12 = 225,000 lb-ft and the Lb = 5 ft interpolation.
+ assert.match(html,/225,000 lb-ft/);assert.match(html,/128,840\.584 lb-ft/);
+ // Everything is reported in pounds; only deflections and section dimensions stay in inches.
+ assert.doesNotMatch(html,/\b(kip|kips|ksi)\b|kip-|kip\//);
+ assert.match(html,/Fy = 50,000 psi/);assert.match(html,/E = 29,000,000 psi/);
  assert.equal((html.match(/data-report-segment="Service-/g)||[]).length,4);
  for(const reference of ['Table B4.1b','F2-1','F2-2','F2-5','F2-6','G2-1','G2.1(a)']) assert.ok(html.includes(reference),reference);
  assert.match(html,/Euler–Bernoulli/);assert.match(html,/not AISC strength equations/);
@@ -38,8 +41,11 @@ test('report includes yielding, inelastic and elastic formulas and all compariso
  for(const reference of ['F1-1','F2-1','F2-2','F2-3','F2-4']) assert.ok(html.includes(reference),reference);
  assert.equal((html.match(/data-report-segment="Service-/g)||[]).length,3);
  assert.equal((html.match(/data-report-segment="Comparison-/g)||[]).length,3);
- assert.match(html,/17\.81 kip/);assert.match(html,/12\.81 kip/);
- assert.match(html,/23\.952096/);assert.match(html,/26\.666667/);
+ assert.match(html,/17,810 lbs/);assert.match(html,/12,810 lbs/);
+ assert.match(html,/23,952\.096/);assert.match(html,/26,666\.667/);
+ assert.doesNotMatch(html,/\b(kip|kips|ksi)\b|kip-|kip\//);
+ // The governing status is a percent of allowable to one decimal, rounded up.
+ assert.match(html,/demand \/ allowable = [\d,]+\.\d%/);
  assert.match(html,/Not a verified OSHA load combination/);
  assert.match(html,/Bending-comparison equilibrium/);assert.match(html,/Shear-comparison equilibrium/);
 });
@@ -69,7 +75,7 @@ test('zero-load report stays finite and does not create spurious demand',()=>{
  assert.doesNotMatch(html,/NaN|Infinity|undefined/);
  assert.match(html,/unloaded beam: δ = 0 at all stations/);
  assert.match(html,/Zero-moment interval: use Cb = 1\.0/);
- assert.match(html,/0 kip-ft at x = 0 ft/);
+ assert.match(html,/0 lb-ft at x = 0 ft/);
 });
 
 test('unconfirmed member checks show the reason and never fabricate numeric strengths or a pass',()=>{

@@ -1,3 +1,13 @@
+// Percent of allowable for display, rounded up to one decimal so a failing ratio
+// never reads as 100.0% or less. Pass/fail decisions always use the raw ratio.
+// toFixed strips binary noise first, so 0.51 shows as 51.0%, not 51.1%.
+export function formatUtilization(ratio) {
+  if (!Number.isFinite(ratio)) return '—';
+  const tenths = Math.ceil(Number((ratio * 1000).toFixed(6)));
+  if (ratio > 1 && tenths <= 1000) return '>100.0%';
+  return `${(tenths / 10).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
 // Summarize only the supported ASD checks, including a selected comparison.
 // A missing result can never produce a pass.
 export function summarizeChecks(check) {

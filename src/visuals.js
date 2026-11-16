@@ -1,13 +1,14 @@
 /* Data-driven visual explanations and synchronized response diagrams. */
 const $ = id => document.getElementById(id);
 const num = (n, d=2) => Number.isFinite(n) ? Number(n).toLocaleString('en-US', {maximumFractionDigits:d}) : '—';
-// Plot ordinate values in the units shown on each panel.
+// Plot ordinate values in the units shown on each panel: shear in lbs, moment in
+// lb-ft, deflection in inches. The analysis reports moment in kip-ft.
 const specs = [
-  ['shear-chart', 'shearLb', 'Shear force', 'V', 'kip'],
-  ['moment-chart', 'momentKipFt', 'Bending moment', 'M', 'kip-ft'],
+  ['shear-chart', 'shearLb', 'Shear force', 'V', 'lbs'],
+  ['moment-chart', 'momentKipFt', 'Bending moment', 'M', 'lb-ft'],
   ['deflection-chart', 'reducedDeflectionIn', 'Bending deflection', 'δ', 'in']
 ];
-function valueAt(point, key) { return key === 'shearLb' ? point[key] / 1000 : point[key]; }
+function valueAt(point, key) { return key === 'momentKipFt' ? point[key] * 1000 : point[key]; }
 // Keep the older single-load analysis interface usable as well.
 function pointPositions(analysis) {
   const input = analysis.input, L = input.spanFt;
@@ -40,10 +41,15 @@ function extremes(analysis, key) {
   if (key === 'shearLb') return { min: analysis.minShear, max: analysis.maxShear };
   return { min: zero, max: key === 'momentKipFt' ? analysis.maxMoment : analysis.maxDeflection };
 }
+// Forces and moments are shown to the nearest lb or lb-ft (never "-0");
+// deflections keep four decimals, with very small nonzero values in exponent form.
 function labelValue(value, key) {
-  const decimals = key === 'reducedDeflectionIn' ? 4 : 3;
-  if (Number.isFinite(value) && value !== 0 && Math.abs(value) < 0.5 * 10 ** -decimals) return value.toExponential(3);
-  return num(value, decimals);
+  if (key !== 'reducedDeflectionIn') {
+    const whole = Math.round(value);
+    return num(whole === 0 ? 0 : whole, 0);
+  }
+  if (Number.isFinite(value) && value !== 0 && Math.abs(value) < 0.00005) return value.toExponential(3);
+  return num(value, 4);
 }
 function makeChart(analysis, id, key, label, symbol, unit) {
   const L = analysis.input.spanFt, pts = graphSamples(analysis, key), ext = extremes(analysis,key);
@@ -89,7 +95,7 @@ export function drawCharts(analysis) {
  function update(x) {
    x=Math.max(0,Math.min(analysis.input.spanFt,x)); slider.value=x; for (const input of plotSliders) input.value=x;
    const p=analysis.at(x, x===analysis.input.spanFt ? 'left' : 'right');
-   $('diagram-position').textContent=`x = ${num(x,3)} ft`; $('read-shear').textContent=`V ${labelValue(p.shearLb/1000,'shearLb')} kip`; $('read-moment').textContent=`M ${labelValue(p.momentKipFt,'momentKipFt')} kip-ft`; $('read-deflection').textContent=`δ ${labelValue(p.reducedDeflectionIn,'reducedDeflectionIn')} in`;
+   $('diagram-position').textContent=`x = ${num(x,3)} ft`; $('read-shear').textContent=`V ${labelValue(p.shearLb,'shearLb')} lbs`; $('read-moment').textContent=`M ${labelValue(p.momentKipFt*1000,'momentKipFt')} lb-ft`; $('read-deflection').textContent=`δ ${labelValue(p.reducedDeflectionIn,'reducedDeflectionIn')} in`;
    for(const c of charts){const px=c.left+(c.right-c.left)*x/analysis.input.spanFt;const py=c.y(valueAt(p,c.key));const svg=$(c.id).querySelector('svg');svg.querySelector('[data-cursor-line]').setAttribute('d',`M${px} 38V193`);const dot=svg.querySelector('[data-cursor-point]');dot.setAttribute('cx',px);dot.setAttribute('cy',py);}
  }
  slider.addEventListener('input',()=>update(Number(slider.value)));
