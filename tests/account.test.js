@@ -64,12 +64,12 @@ test('acceptance is explicit, versioned and persists without extending trial', a
   assert.equal((await readAccount(db, identity)).termsAccepted, false);
 });
 
-test('an account that accepted the previous draft must accept the updated draft', async () => {
+test('an account that accepted the previous terms must accept the updated terms', async () => {
   const db = fakeDatabase();
   const account = await ensureAccount(db, identity);
-  db.docs.set(identity.uid, { ...account, termsVersion:'draft-2026-11-14', termsAcceptedAt:'2026-11-14T12:00:00.000Z' });
+  db.docs.set(identity.uid, { ...account, termsVersion:'draft-2026-11-16', termsAcceptedAt:'2026-11-16T12:00:00.000Z' });
   assert.equal((await readAccount(db, identity)).termsAccepted, false);
-  await assert.rejects(ensureAccount(db, { ...identity, acceptTermsVersion:'draft-2026-11-14' }));
+  await assert.rejects(ensureAccount(db, { ...identity, acceptTermsVersion:'draft-2026-11-16' }));
   const accepted = await ensureAccount(db, { ...identity, acceptTermsVersion:TERMS_VERSION });
   assert.equal((await readAccount(db, identity)).termsAccepted, true);
   assert.equal(accepted.trialEndsAt, account.trialEndsAt);
