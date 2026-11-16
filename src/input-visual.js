@@ -40,7 +40,8 @@ export function drawSchematic() {
  try { bracing = parseFlangeBracing({top:$('top-brace-locations').value, bottom:$('bottom-brace-locations').value, spanFt:span}); } catch { /* Invalid inputs are identified beside the fields and validated on submit. */ }
  const x = v => 77 + v / span * 566;
  // End restraints at the supports are implied, so only interior braces are marked.
- const braceTicks = bracing ? bracing.top.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace" d="M${x(v)} 136v-13"/><circle class="in-brace-dot" cx="${x(v)}" cy="135" r="3"/>`).join('') + bracing.bottom.locations.filter(v => v > 0 && v < span).map(v => `<path class="in-brace in-brace-bottom" d="M${x(v)} 142v13"/><circle class="in-brace-dot in-brace-bottom-dot" cx="${x(v)}" cy="142" r="3"/>`).join('') : '';
+ // data-x-ft marks each element's station so the deflected-shape view can move it with the beam.
+ const braceTicks = bracing ? bracing.top.locations.filter(v => v > 0 && v < span).map(v => `<g class="in-brace-mark" data-x-ft="${v}"><path class="in-brace" d="M${x(v)} 136v-13"/><circle class="in-brace-dot" cx="${x(v)}" cy="135" r="3"/></g>`).join('') + bracing.bottom.locations.filter(v => v > 0 && v < span).map(v => `<g class="in-brace-mark" data-x-ft="${v}"><path class="in-brace in-brace-bottom" d="M${x(v)} 142v13"/><circle class="in-brace-dot in-brace-bottom-dot" cx="${x(v)}" cy="142" r="3"/></g>`).join('') : '';
  // Show positions in a separate text line; dense positions otherwise collide.
  const braceLabel = flange => !bracing ? 'Check positions' : `${bracing[flange].locations.map(fmt).join(', ')} ft`;
  const dead = numeric('dead-load'), live = numeric('live-load');
@@ -50,7 +51,7 @@ export function drawSchematic() {
  const hasUniformRow = Boolean(document.querySelector('.uniform-load-row'));
  const showUniform = hasUniformRow && (!loadValid || dead > 0 || live > 0);
  const anyLoad = showUniform && loadValid;
- const arrows = anyLoad ? Array.from({length:11}, (_,i) => { const a=77+i*56.6;return `<path d="M${a} 64v54m-5-8 5 8 5-8"/>`; }).join('') : '';
+ const arrows = anyLoad ? Array.from({length:11}, (_,i) => { const a=77+i*56.6;return `<path data-x-ft="${span*i/10}" d="M${a} 64v54m-5-8 5 8 5-8"/>`; }).join('') : '';
  // Point-load arrows track the entered positions. Invalid or blank rows are
  // omitted from the preview and are validated when analysis is run.
  const pointLoads = [...document.querySelectorAll('.point-load-row')].map((row,index) => {
@@ -58,11 +59,11 @@ export function drawSchematic() {
   const location = row.querySelector('.point-location')?.value.trim();
   return { index, magnitude: magnitude === '' || magnitude == null ? NaN : Number(magnitude), location: location === '' || location == null ? NaN : Number(location) };
  }).filter(p => p.magnitude > 0 && Number.isFinite(p.magnitude) && Number.isFinite(p.location) && validSpan && p.location >= 0 && p.location <= span);
- const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}: ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft"><title>${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
+ const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" data-x-ft="${p.location}" aria-label="Edit point load ${p.index+1}: ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft"><title>${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
  container.innerHTML = `<div class="input-drawings"><div class="input-elevation"><div class="input-scroll" role="region" aria-label="Interactive beam model">
  <svg class="input-beam" viewBox="0 0 720 266" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations, schematic not to scale.">
  <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="266" fill="url(#input-grid)"/>
- <g class="in-load">${arrows}${anyLoad?'<path d="M77 64H643"/>':''}</g>${pointArrows}
+ <g class="in-load">${arrows}${anyLoad?'<path data-load-bar d="M77 64H643"/>':''}</g>${pointArrows}
  ${showUniform ? editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`) : ''}
  ${showUniform ? editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`) : ''}
  <path class="in-beam" d="M77 138H643"/><g class="in-support"><path d="M77 144l-14 23h28zM643 144l-14 23h28zM58 172h38M624 180h38"/><circle cx="634" cy="174" r="3"/><circle cx="652" cy="174" r="3"/></g>${braceTicks}

@@ -113,9 +113,10 @@
     </section>
     <div class="output-column">
       <section class="panel drawing-panel" aria-labelledby="model-heading">
-        <div class="panel-header inline"><div class="model-title"><h2 id="model-heading">Model</h2><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div></div><span class="chip live-chip"><i aria-hidden="true"></i>Live</span></div>
+        <div class="panel-header inline"><div class="model-title"><h2 id="model-heading">Model</h2><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div></div><div class="model-controls"><button type="button" class="model-action" id="animate-deflection" aria-pressed="false" aria-describedby="deflection-readout" disabled><span class="model-action-icon" aria-hidden="true">▶</span><span class="model-action-label">Animate</span></button><label class="model-scale" for="deflection-scale"><span>Scale</span><select id="deflection-scale" disabled></select></label></div><span class="chip live-chip"><i aria-hidden="true"></i>Live</span></div>
         <div class="schematic-wrap"><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"></div><span class="scan-line" aria-hidden="true"></span></div>
-        <div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span class="brace-key"><i class="brace-swatch"></i>Brace</span><span class="deflected-key"><i class="deflected-swatch"></i>Deflected shape · exaggerated</span><span>Click a label to edit</span></div>
+        <p class="deflection-readout" id="deflection-readout"></p><p class="sr-only" id="deflection-status" role="status"></p>
+        <div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span class="brace-key"><i class="brace-swatch"></i>Brace</span><span class="deflected-key"><i class="ghost-swatch"></i>Undeformed</span><span>Click a label to edit</span></div>
       </section>
       <section class="panel results-panel" tabindex="-1" aria-label="Analysis results">
         <div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div>

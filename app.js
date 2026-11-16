@@ -10,6 +10,7 @@ import { drawSchematic as drawBeamSchematic, bindSchematic } from './src/input-v
 import { drawCharts, clearCharts } from './src/visuals.js';
 import { parseFlangeBracing } from './src/bracing.js';
 import { renderCalculationReport } from './src/calculation-report.js';
+import { createDeflectionView } from './src/deflection-view.js';
 
 const $ = id => document.getElementById(id);
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
@@ -21,6 +22,8 @@ const escape = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;',
 let sections = [], record = null;
 const emptyMetrics = $('results').innerHTML;
 const emptyCharts = new Map(['shear-chart', 'moment-chart', 'deflection-chart'].map(id => [id, $(id).innerHTML]));
+const deflectionView = createDeflectionView({ panel: document.querySelector('.drawing-panel'), button: $('animate-deflection'), select: $('deflection-scale'), readout: $('deflection-readout'), status: $('deflection-status') });
+deflectionView.clear();
 function drawSchematic() {
  syncUniformLoads();
  drawBeamSchematic();
@@ -44,6 +47,14 @@ function syncUniformLoads() {
   $(field).value = values.every(value => Number.isFinite(value) && value >= 0) ? values.reduce((sum, value) => sum + value / 1000, 0) : 'NaN';
  }
 }
+// Changing a row's type starts it fresh, as if newly added, so values entered
+// for the other type never linger hidden or reappear on switching back.
+function resetLoadValues(row) {
+ row.querySelector('.uniform-dead').value = '0';
+ row.querySelector('.uniform-live').value = '0';
+ row.querySelector('.point-load').value = '';
+ row.querySelector('.point-location').value = '';
+}
 function setLoadType(row) {
  const isPoint = row.dataset.loadType === 'point';
  row.classList.toggle('point-load-row', isPoint);
@@ -65,7 +76,7 @@ function labelLoadRows() {
   row.dataset.loadId = label;
   row.querySelector('.load-number').textContent = label;
   let picker = row.querySelector('.row-load-type');
-  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; setLoadType(row); labelLoadRows(); invalidate(); drawSchematic(); }); }
+  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; resetLoadValues(row); setLoadType(row); labelLoadRows(); invalidate(); drawSchematic(); }); }
   picker.value = isPoint ? 'point' : 'uniform'; picker.setAttribute('aria-label', `${label} load type`);
   row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
   row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, pounds per foot`);
@@ -114,6 +125,7 @@ function invalidate() {
  if (!record) return;
  record = null;
  document.querySelector('.drawing-panel')?.classList.remove('has-results', 'is-scanning');
+ deflectionView.clear();
  $('verdict').innerHTML = '<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Inputs changed</strong><p class="verdict-detail">Calculate again to update your beam check.</p></div>';
  $('results').innerHTML = emptyMetrics;
  $('suggestion').innerHTML = '';
@@ -330,7 +342,8 @@ function render(r) {
   diagrams:['shear', 'moment', 'deflection'].map(name => ({name, html:$(`${name}-chart`).innerHTML}))
  });
  // Screen-only additions, made after the report snapshot so they never print.
- overlayDeflection(a);
+ deflectionView.show(a);
+ document.querySelector('.drawing-panel')?.classList.add('has-results');
  countUp($('results'));
 }
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -345,22 +358,6 @@ function countUp(container) {
   if (t < 1) requestAnimationFrame(step);
  };
  requestAnimationFrame(step);
-}
-// Exaggerated deflected shape over the input model, scaled to the peak adjusted
-// deflection. It uses the drawing's own coordinates (supports at x = 77 and 643).
-function overlayDeflection(analysis) {
- const beam = document.querySelector('#schematic .input-beam .in-beam');
- const span = analysis.input.spanFt, peak = analysis.maxDeflection.reducedDeflectionIn;
- if (!beam || !(span > 0) || !(peak > 0)) return;
- const points = Array.from({length: 97}, (_, i) => {
-  const deflection = analysis.at(span * i / 96, i === 96 ? 'left' : 'right').reducedDeflectionIn;
-  return `${(77 + 566 * i / 96).toFixed(1)} ${(138 + 26 * deflection / peak).toFixed(1)}`;
- });
- const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
- path.setAttribute('class', 'in-deflected');
- path.setAttribute('d', `M${points.join('L')}`);
- beam.after(path);
- document.querySelector('.drawing-panel')?.classList.add('has-results');
 }
 function scanModel() {
  const drawing = document.querySelector('.drawing-panel');
