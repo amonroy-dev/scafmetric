@@ -273,7 +273,6 @@ function verdictHtml(check) {
  const result = summarizeChecks(check);
  const d = check.deflection;
  const meters = metersHtml(result.items);
- const scope = '<p class="verdict-scope">Preliminary bending, shear and deflection checks only. Bearing, connections, bracing and scaffold requirements need separate review.</p>';
  if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p>${meters}<button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
  const notEvaluated = result.unavailable.length ? `<p class="verdict-detail">Not evaluated: ${escape(result.unavailable.join(' '))}</p>` : '';
  if (result.status === 'fail') {
@@ -282,12 +281,12 @@ function verdictHtml(check) {
   if (!strengthFailures.length) {
    // Deflection is the only failure: say so in plain words, because the strength meters look fine.
    const strong = check.status === 'evaluated' && !result.unavailable.length;
-   return `<div class="verdict-card verdict-fail verdict-deflection"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — deflection</strong><p class="verdict-detail"><strong>${strong ? 'Strong enough, but it bends too much.' : 'It bends too much.'}</strong> ${sagText(d)} Use a deeper or heavier section, a shorter span or less load, then calculate again.</p>${meters}${notEvaluated}${scope}</div>`;
+   return `<div class="verdict-card verdict-fail verdict-deflection"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — deflection</strong><p class="verdict-detail"><strong>${strong ? 'Strong enough, but it bends too much.' : 'It bends too much.'}</strong> ${sagText(d)} Use a deeper or heavier section, a shorter span or less load, then calculate again.</p>${meters}${notEvaluated}</div>`;
   }
   const extra = deflectionFails ? `<br><strong>Deflection also fails.</strong> ${sagText(d)}` : '';
-  return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.${extra}</p>${meters}${notEvaluated}${scope}</div>`;
+  return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong>${extra}</p>${meters}${notEvaluated}</div>`;
  }
- return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong><br>Bending and shear are within the allowable strength, and the sag (${fmt(d.deflectionIn,4)} in) is within the L/${d.limitRatio} limit of ${fmt(d.allowableIn,4)} in.</p>${meters}${scope}</div>`;
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong><br>Bending and shear are within the allowable strength, and the sag (${fmt(d.deflectionIn,4)} in) is within the L/${d.limitRatio} limit of ${fmt(d.allowableIn,4)} in.</p>${meters}</div>`;
 }
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
@@ -302,14 +301,13 @@ function renderSuggestion(r) {
  } catch {
   $('suggestion').innerHTML = ''; return;
  }
- const scope = `<p>Screened for the listed bending and shear checks, including any selected comparison, and the L/${r.checks.deflection.limitRatio} deflection limit. Verify this section’s properties. Depth, availability, bearing, connections, brace design and scaffold requirements are not checked.</p>`;
  if (found.status !== 'suggested') {
-  $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">SIZE SCREEN</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p>${scope}</div>`;
+  $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">SIZE SCREEN</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p></div>`;
   return;
  }
  const name = found.section.AISC_Manual_Label;
  const button = name === r.section ? '<span class="suggestion-current">Currently selected</span>' : `<button type="button" class="suggestion-button" data-use-suggestion="${escape(name)}">Use ${escape(name)} →</button>`;
- $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">PRELIMINARY SIZE TO CONSIDER</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}${scope}</div>`;
+ $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">PRELIMINARY SIZE TO CONSIDER</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}</div>`;
 }
 function render(r) {
  const a = r.analysis; const max = a.maxDeflection;

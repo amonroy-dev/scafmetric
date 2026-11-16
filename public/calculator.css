@@ -99,10 +99,9 @@
   .field-help,.check-row small { margin:8px 0 0; color:var(--ws-dim); font-size:11.5px; line-height:1.55; }
 
   /* Loads */
-  .load-picker { display:block; }
+  .load-picker { display:block; margin-bottom:12px; }
   .load-add-row { display:flex; gap:8px; }
   .load-add-row select { flex:1; min-width:0; }
-  .load-picker-help { margin:8px 0 12px; }
   #load-rows { display:flex; flex-direction:column; gap:10px; }
   #load-rows:empty::after { content:'No loads yet. Add one above.'; display:block; padding:14px 12px; border:1px dashed var(--ws-line-2); color:var(--ws-dim); font:18px/1.2 var(--term); letter-spacing:.03em; }
   .loads-section .load-row { position:relative; padding:12px; border:1px solid var(--ws-line-2); border-left:3px solid var(--ws-aqua); border-radius:0; background:rgba(8,15,26,.5); box-shadow:none; animation:ws-row-in .2s ease-out; }
