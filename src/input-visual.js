@@ -30,6 +30,7 @@ function editableField(id) {
   const selector = id === 'dead-load' ? '.uniform-dead' : '.uniform-live';
   return document.querySelector(`.uniform-load-row ${selector}`) || $('new-load-type');
  }
+ if (id === 'top-brace-locations' || id === 'bottom-brace-locations') return document.querySelector(`[data-flange="${id.split('-')[0]}"] input`) || document.querySelector(`[data-flange="${id.split('-')[0]}"] .next-brace`);
  return $(id);
 }
 export function drawSchematic() {
@@ -52,19 +53,19 @@ export function drawSchematic() {
   const location = row.querySelector('.point-location')?.value.trim();
   return { index, magnitude: magnitude === '' || magnitude == null ? NaN : Number(magnitude), location: location === '' || location == null ? NaN : Number(location) };
  }).filter(p => p.magnitude > 0 && Number.isFinite(p.magnitude) && Number.isFinite(p.location) && validSpan && p.location >= 0 && p.location <= span);
- const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}: ${fmt(p.magnitude)} kip at ${fmt(p.location)} ft"><title>${fmt(p.magnitude)} kip at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
+ const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}: ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft"><title>${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
  container.innerHTML = `<div class="input-drawings"><div class="input-elevation"><div class="input-scroll" role="region" aria-label="Interactive beam model">
  <svg class="input-beam" viewBox="0 0 720 266" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations, schematic not to scale.">
  <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="266" fill="url(#input-grid)"/>
  <g class="in-load">${arrows}${anyLoad?'<path d="M77 64H643"/>':''}</g>${pointArrows}
- ${editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead) : '—'} kip/ft</text>`)}
- ${editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live) : '—'} kip/ft</text>`)}
+ ${editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`)}
+ ${editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`)}
  <path class="in-beam" d="M77 138H643"/><g class="in-support"><path d="M77 144l-14 23h28zM643 144l-14 23h28zM58 172h38M624 180h38"/><circle cx="634" cy="174" r="3"/><circle cx="652" cy="174" r="3"/></g>${braceTicks}
  ${editTarget('section',80,129,560,18,'beam size')}
  <path class="in-dim" d="M77 186v37M643 186v37M77 211H643M77 206v10M643 206v10"/>
  ${editTarget('span',295,219,130,35,'span',`<text class="in-dimtext" x="360" y="242" text-anchor="middle">${validSpan ? fmt(span) : '—'} ft span</text>`)}
  <text class="in-note" x="77" y="193" text-anchor="middle">A</text><text class="in-note" x="643" y="193" text-anchor="middle">B</text>
- </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} kip <small>at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
+ </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} lbs <small>at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
  <div class="input-section"><svg class="input-section-svg" viewBox="0 0 300 200" role="group" aria-label="Wide-flange section, major-axis bending"><path class="in-section-shape" d="M74 30H226V49H166V151H226V170H74V151H134V49H74Z"/><path class="in-axis" d="M51 100H249"/><text class="in-note" x="42" y="104">x</text><text class="in-note" x="253" y="104">x</text>${editTarget('section',65,20,170,160,'beam size')}</svg><span class="section-name">${escapeText(fieldValue('section'))}</span></div></div>`;
  const focused = modelFieldId(document.activeElement);
  container.querySelectorAll('[data-field]').forEach(el => el.classList.toggle('is-active', el.dataset.field === focused));

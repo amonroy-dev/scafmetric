@@ -38,7 +38,7 @@ function syncUniformLoads() {
    return value === '' ? NaN : Number(value);
   });
   // Invalid rows stay invalid even if another row would offset their value.
-  $(field).value = values.every(value => Number.isFinite(value) && value >= 0) ? values.reduce((sum, value) => sum + value, 0) : 'NaN';
+  $(field).value = values.every(value => Number.isFinite(value) && value >= 0) ? values.reduce((sum, value) => sum + value / 1000, 0) : 'NaN';
  }
 }
 function setLoadType(row) {
@@ -61,11 +61,13 @@ function labelLoadRows() {
   const label = isPoint ? `P${++point}` : `U${++uniform}`;
   row.dataset.loadId = label;
   row.querySelector('.load-number').textContent = label;
-  row.querySelector('.load-kind').textContent = isPoint ? 'Point load' : 'Uniform load';
+  let picker = row.querySelector('.row-load-type');
+  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; setLoadType(row); labelLoadRows(); if (row === $('load-rows').firstElementChild) $('new-load-type').value = picker.value; invalidate(); drawSchematic(); }); }
+  picker.value = isPoint ? 'point' : 'uniform'; picker.setAttribute('aria-label', `${label} load type`);
   row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
-  row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, kip per foot`);
-  row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, kip per foot`);
-  row.querySelector('.point-load').setAttribute('aria-label', `${label} point load, kip`);
+  row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, pounds per foot`);
+  row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, pounds per foot`);
+  row.querySelector('.point-load').setAttribute('aria-label', `${label} point load, pounds`);
   row.querySelector('.point-location').setAttribute('aria-label', `${label} position from left support, feet`);
  });
 }
@@ -217,11 +219,11 @@ function run(e) {
   const pointLoads = [...document.querySelectorAll('.point-load-row')].map(row => {
    const load = row.querySelector('.point-load').value, location = row.querySelector('.point-location').value;
    if (load === '' || location === '') throw Error('Enter a load and location for each point load.');
-   const loadKip = Number(load), locationFt = Number(location);
+   const loadKip = Number(load) / 1000, locationFt = Number(location);
    if (!Number.isFinite(loadKip) || loadKip < 0 || !Number.isFinite(locationFt) || locationFt < 0 || locationFt > span) throw Error('Point loads must be nonnegative and located between the supports.');
    return {id:row.dataset.loadId, loadKip, locationFt};
   });
-  const uniformLoads = [...document.querySelectorAll('.uniform-load-row')].map(row => ({id:row.dataset.loadId, deadKipFt:Number(row.querySelector('.uniform-dead').value), liveKipFt:Number(row.querySelector('.uniform-live').value)}));
+  const uniformLoads = [...document.querySelectorAll('.uniform-load-row')].map(row => ({id:row.dataset.loadId, deadKipFt:Number(row.querySelector('.uniform-dead').value)/1000, liveKipFt:Number(row.querySelector('.uniform-live').value)/1000}));
   const self = beamSelfWeight(s), total = dead+live+self, br = readBracing();
   const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoads.map(p=>({loadLb:p.loadKip*1000, locationFt:p.locationFt})), Eksi:E, Iin4:I, stiffnessFactor:factor});
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
@@ -305,24 +307,27 @@ fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ?
   $('acknowledgement').closest('.acknowledgement').hidden = true;
  }
 }).catch(() => {});
-addLoad({dead: 0.2, live: 0.8});
+addLoad({dead: 200, live: 800});
 updateSafetyFactor();
 $('add-load').addEventListener('click', () => {
  const type = $('new-load-type').value;
  const row = addLoad({type});
- $('capacity-confirmed').checked = false;
+
  invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-load' : '.uniform-dead').focus();
 });
 $('load-rows').addEventListener('click', e => {
  const button = e.target.closest('.remove-load');
  if (!button) return;
  button.closest('.load-row').remove();
+ if ($('load-rows').firstElementChild) $('new-load-type').value = $('load-rows').firstElementChild.dataset.loadType;
  labelLoadRows();
- $('capacity-confirmed').checked = false;
+
  invalidate(); drawSchematic(); $('add-load').focus();
 });
 $('new-load-type').addEventListener('change', () => {
- $('add-load').textContent = $('new-load-type').value === 'point' ? '+ Add point load' : '+ Add uniform load';
+ const row = $('load-rows').firstElementChild || addLoad();
+ row.dataset.loadType = $('new-load-type').value;
+ setLoadType(row); labelLoadRows(); invalidate(); drawSchematic();
 });
 $('beam-form').addEventListener('submit', run);
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
@@ -346,17 +351,15 @@ for (const [index, tab] of responseTabs.entries()) {
 
 bindSchematic();
 drawSchematic();
-const confirmationInputs = new Set(['span', 'section', 'top-brace-locations', 'bottom-brace-locations', 'dead-load', 'live-load', 'elastic-modulus', 'inertia', 'stiffness-factor', 'load-comparison', 'custom-safety-factor', 'cb-method']);
 $('beam-form').addEventListener('input', e => {
  if (e.target.id === 'new-load-type') return;
- if (confirmationInputs.has(e.target.id) || e.target.matches('.uniform-dead, .uniform-live, .point-load, .point-location')) $('capacity-confirmed').checked = false;
  invalidate(); drawSchematic();
 });
-$('section').addEventListener('change', () => { $('capacity-confirmed').checked = false; properties(); drawSchematic(); });
+$('section').addEventListener('change', () => {  properties(); drawSchematic(); });
 $('enable-capacity').addEventListener('change', () => { $('capacity-fields').hidden = !$('enable-capacity').checked; invalidate(); });
 $('load-comparison').addEventListener('change', () => {
  updateSafetyFactor();
- $('capacity-confirmed').checked = false;
+
  invalidate(); drawSchematic();
 });
 $('verdict').addEventListener('click', e => {
@@ -370,7 +373,7 @@ $('suggestion').addEventListener('click', e => {
  const name = button.dataset.useSuggestion;
  if (!sections.some(section => section.AISC_Manual_Label === name)) return;
  $('section').value = name;
- $('capacity-confirmed').checked = false;
+
  properties();
  drawSchematic();
  revealField($('capacity-confirmed'));
@@ -383,3 +386,21 @@ fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Se
  $('section').innerHTML = sections.map(s=>`<option value="${escape(s.AISC_Manual_Label)}">${escape(s.AISC_Manual_Label)}</option>`).join('');
  $('section').value = 'W16X31'; properties(); drawSchematic();
 }).catch(err=>{$('error').textContent = err.message + ' Run the app through a local web server.';});
+
+for (const editor of document.querySelectorAll('.brace-editor')) {
+ const flange = editor.dataset.flange;
+ const list = editor.querySelector('.brace-list');
+ const sync = () => {
+  $(`${flange}-brace-locations`).value = [...list.querySelectorAll('input')].map(input => input.value).filter(value => value !== '').join(', ');
+  invalidate(); drawSchematic();
+ };
+ const next = () => {
+  const row = document.createElement('div'); row.className = 'brace-entry';
+  const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.placeholder = 'Position · ft'; input.setAttribute('aria-label', `${flange} flange brace position in feet`);
+  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove brace');
+  remove.addEventListener('click', () => { row.remove(); sync(); }); input.addEventListener('input', sync);
+  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); if (input.value !== '') next(); } });
+  row.append(input, remove); list.append(row); input.focus();
+ };
+ editor.querySelector('.next-brace').addEventListener('click', next);
+}
