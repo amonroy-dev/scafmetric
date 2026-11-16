@@ -349,13 +349,13 @@ for (const surface of document.querySelectorAll('[data-spotlight]')) {
     const card = (s, scale, badges) => {
       const label = escapeHtml(s.AISC_Manual_Label);
       const outline = iBeamPath(60, 60, s.d * scale, s.bf * scale, Math.max(s.tf * scale, 1.2), Math.max(s.tw * scale, 1.2));
-      return `<a class="shape-card spot" href="calculator.html?section=${encodeURIComponent(s.AISC_Manual_Label)}">`
+      return `<a class="shape-card spot" href="signin.html">`
         + badges.map(badge => `<span class="shape-badge shape-badge-${badge.toLowerCase()}">${badge}</span>`).join('')
         + `<svg class="shape-svg" viewBox="0 0 120 120" aria-hidden="true"><path class="shape-axis" d="M6 60H114"/><path class="shape-fill" d="${outline}"/></svg>`
         + `<span class="shape-name">${label}</span>`
         + `<span class="shape-meta"><span>${fmt(s.W)} lb/ft</span><span>I<sub>x</sub> ${fmt(s.Ix)} in⁴</span></span>`
         + `<span class="shape-dims">d ${fmt(s.d)} × b<sub>f</sub> ${fmt(s.bf)} in</span>`
-        + `<span class="shape-open">Open in calculator <span aria-hidden="true">→</span></span></a>`;
+        + `<span class="shape-open">Sign in to analyze <span aria-hidden="true">→</span></span></a>`;
     };
     // Cards before `settled` are already on screen and skip the entrance animation.
     const render = (settled = 0) => {
@@ -390,7 +390,7 @@ for (const surface of document.querySelectorAll('[data-spotlight]')) {
         library.classList.add('is-loaded');
         render();
       }).catch(() => {
-        grid.innerHTML = '<p class="library-error">The section library could not be loaded here. <a href="calculator.html">Open the calculator</a> to choose a size.</p>';
+        grid.innerHTML = '<p class="library-error">The section library could not be loaded here. <a href="signin.html">Sign in</a> to use the beam workspace.</p>';
         status.textContent = 'The section library could not be loaded.';
       });
     };

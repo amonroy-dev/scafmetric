@@ -341,6 +341,28 @@ html.crt body::after{content:'';position:fixed;inset:0;z-index:70;pointer-events
 @keyframes crt-flicker{50%{opacity:.9}}
 
 /* Responsive */
+/* Real workspace views */
+.workspace-section{overflow:hidden;background:radial-gradient(ellipse 70% 60% at 80% 34%,rgba(61,217,201,.06),transparent 70%),var(--bg)}
+.workspace-feature{display:grid;grid-template-columns:minmax(0,2fr) minmax(220px,.8fr);align-items:center;gap:0;margin-top:52px;border:1px solid var(--line-2);background:var(--panel-2);box-shadow:0 24px 55px rgba(0,0,0,.22)}
+.workspace-image{display:flex;align-items:center;justify-content:center;overflow:hidden;background:#080f1a;text-decoration:none}
+.workspace-image img{display:block;width:100%;height:auto;transition:transform .35s var(--ease)}
+.workspace-image:hover img{transform:scale(1.025)}
+.workspace-feature-image{border-right:1px solid var(--line-2)}
+.workspace-feature-copy{padding:clamp(22px,3vw,38px)}
+.workspace-index,.workspace-card figcaption span{display:block;color:var(--aqua);font:19px/1.1 var(--term);letter-spacing:.06em}
+.workspace-feature-copy h3{margin:16px 0 14px;font:400 13px/1.8 var(--pixel)}
+.workspace-feature-copy p{margin:0;color:var(--muted);font-size:14px;line-height:1.75}
+.workspace-badge{display:inline-block;margin-top:25px;padding:7px 9px;border:1px solid var(--orange-ink);color:var(--orange-2);font:16px/1 var(--term);letter-spacing:.05em}
+.workspace-gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:20px}
+.workspace-card{min-width:0;margin:0;border:1px solid var(--line);background:var(--panel-2)}
+.workspace-card .workspace-image{aspect-ratio:2000/1441;border-bottom:1px solid var(--line)}
+.workspace-card .workspace-mobile-image img{width:auto;max-width:100%;height:100%}
+.workspace-card figcaption{padding:15px 16px 17px}
+.workspace-card figcaption strong{display:block;margin-top:6px;color:var(--text);font-size:13px;font-weight:650}
+.workspace-caption{margin:20px 0 0;color:var(--dim);font-size:12px;line-height:1.6}
+@media(max-width:760px){.workspace-feature{grid-template-columns:1fr}.workspace-feature-image{border-right:0;border-bottom:1px solid var(--line-2)}.workspace-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.workspace-feature{margin-top:34px}.workspace-feature-copy{padding:23px}.workspace-gallery{gap:10px}.workspace-card figcaption{padding:12px}.workspace-card figcaption strong{font-size:12px}}
+
 @media(max-width:1100px){.posters{gap:14px}.lab-readout dd{font-size:12px}}
 @media(max-width:960px){
   nav{display:none}.header-actions{margin-left:auto}
