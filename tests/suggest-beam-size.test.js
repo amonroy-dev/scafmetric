@@ -79,6 +79,35 @@ test('eccentric point loads contribute to the governing shear and the separate c
   assert.ok(result.bendingRatio > selfOnly.bendingRatio);
 });
 
+test('mixed point-load categories retain dead demand and factor only live demand in size screening', () => {
+  const beam = section('W16X31');
+  const result = suggestBeamSize({...base, sections:[beam], liveLoadKipFt:0, safetyFactor:4,
+    pointLoads:[{deadKip:2,liveKip:3,locationFt:4},{deadKip:1,liveKip:1,locationFt:15}]});
+  assert.equal(result.status, 'suggested');
+  const allowable = checkMajorAxisShear({section:beam,Eksi:29000,FyKsi:50,demandKip:0}).allowableKip;
+  const selfReaction = .031*20/2;
+  // Independent left reactions: D = 2(16/20)+1(5/20) = 1.85 kip;
+  // LL = 3(16/20)+1(5/20) = 2.65 kip. Left governs every case.
+  const deadReaction = 1.85, liveReaction = 2.65;
+  assert.ok(Math.abs(result.shearRatio - (selfReaction+deadReaction+liveReaction)/allowable) < 1e-12);
+  assert.ok(Math.abs(result.comparisonShearRatio - (selfReaction+deadReaction+liveReaction*4/1.5)/allowable) < 1e-12);
+  // Both maxima occur at x = 4 ft; all four unbraced intervals have the
+  // same Cb = 1 capacity, so the utilization ratio equals the moment ratio.
+  const serviceMoment = (selfReaction+deadReaction+liveReaction)*4 - .031*4**2/2;
+  const comparedMoment = (selfReaction+deadReaction+liveReaction*4/1.67)*4 - .031*4**2/2;
+  assert.ok(Math.abs(result.comparisonBendingRatio/result.bendingRatio - comparedMoment/serviceMoment) < 1e-12);
+});
+
+test('dead-only point loads are unchanged by the selected live-load comparison', () => {
+  const result = suggestBeamSize({...base, sections:[section('W16X31')], liveLoadKipFt:0,
+    pointLoads:[{deadKip:5,liveKip:0,locationFt:6}], safetyFactor:4});
+  assert.equal(result.status, 'suggested');
+  assert.equal(result.comparisonBendingRatio, result.bendingRatio);
+  assert.equal(result.comparisonShearRatio, result.shearRatio);
+  assert.throws(() => suggestBeamSize({...base, pointLoads:[{deadKip:-1,liveKip:1,locationFt:2}]}), /Point loads/);
+  assert.throws(() => suggestBeamSize({...base, pointLoads:[{deadKip:1,liveKip:NaN,locationFt:2}]}), /Point loads/);
+});
+
 test('unsupported sections are skipped and do not receive a passing result', () => {
   const missing = { ...section('W16X31'), AISC_Manual_Label:'MISSING', rts:undefined, W:1 };
   const result = suggestBeamSize({ ...base, sections: [missing, section('W16X36')] });

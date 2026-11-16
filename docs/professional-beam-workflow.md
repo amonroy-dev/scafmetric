@@ -18,7 +18,7 @@ The official [RISA load-help URL](https://risa.com/risahelp/risa3d/Content/Loads
 
 - Make the load-type selector visible and explicit: **Uniform load** or **Point load**. A load editor is a collection of records, not a single global switch that silently discards other loads.
 - Each point-load record needs a unique visible label, a magnitude in kip, and an **x distance in ft from the left support**. Repeated additions must preserve each existing load. Coincident points are valid and superpose; positions outside `0 ≤ x ≤ L` are invalid. Do not impose an arbitrary small load-count limit.
-- Keep a load schedule in the PDF with every magnitude and x position. Document the current classification: point loads are downward live loads; full-span uniform dead and live loads are entered separately; section self-weight is added once.
+- Keep a load schedule in the PDF with every magnitude and x position. Enter separate downward dead and live portions for both point loads and full-span uniform loads; section self-weight is added once. Service point loads use D + LL, and optional comparison multipliers apply only to LL.
 - Record **top-flange** and **bottom-flange** lateral-restraint stations independently. They are positions along the beam, not additional vertical supports. Show the support restraints and any assumed endpoints explicitly.
 
 ## Flange-bracing interpretation

@@ -1,5 +1,6 @@
 import { analyzeBeam } from './beam.js';
 import { summarizeChecks, formatUtilization } from './check-verdict.js';
+import { normalizePointLoads, pointLoadsForAnalysis } from './point-loads.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const number = (value, digits = 6) => Number.isFinite(value) ? value.toLocaleString('en-US', { maximumFractionDigits: digits }) : 'Not available';
@@ -33,7 +34,7 @@ function reportStatus(checks) {
  const g = summary.governing;
  return `<strong>${title}</strong><p>Governing: ${escape(g.name)}; ${g.kind === 'deflection' ? 'deflection / limit' : 'demand / allowable'} = ${formatUtilization(g.utilization)}.${summary.unavailable?.length ? ` ${escape(summary.unavailable.join(' '))}` : ''}</p>${sag ? `<p>${sag}</p>` : ''}`;
 }
-function pointIds(r) { return r.pointLoads.map((p, i) => ({ ...p, id: p.id || `P${i + 1}` })); }
+function pointIds(r) { return normalizePointLoads(r.pointLoads, r.span).map((p, i) => ({ ...p, id: p.id || `P${i + 1}` })); }
 function sourceGeometry(r) {
  const s = r.sectionProperties || r.checks?.section || {};
  const entries = [
@@ -50,10 +51,13 @@ function loadSchedule(r) {
   [escape(u.id || `U${i+1}`), 'Uniform — live', fromKips(u.liveKipFt), 'lb/ft', `0 to ${n(r.span)} ft`]
  ]);
  rows.push(['SW','Uniform — beam self-weight',fromKips(r.self),'lb/ft',`0 to ${n(r.span)} ft`]);
- for (const p of pointIds(r)) rows.push([escape(p.id),'Point — live',fromKips(p.loadKip),'lbs',`x = ${n(p.locationFt)} ft`]);
+ for (const p of pointIds(r)) rows.push(
+  [escape(p.id),'Point — dead D',fromKips(p.deadKip),'lbs',`x = ${n(p.locationFt)} ft`],
+  [escape(p.id),'Point — live LL',fromKips(p.liveKip),'lbs',`x = ${n(p.locationFt)} ft`]
+ );
  return table('Applied loads — downward positive; x measured from left support A', ['ID','Type / category','Magnitude','Unit','Location'], rows)
  + row('Uniform service load', 'w = Σw<sub>D</sub> + W + Σw<sub>L</sub>', `${fromKips(r.dead)} + ${fromKips(r.self)} + ${fromKips(r.live)}`, `${fromKips(r.total)} lb/ft`)
- + `<p class="report-note">Beam self-weight is included once. Point loads are entered as downward live loads. Service analysis uses 1.0D + 1.0L; this is the supported load case, not an envelope of all required project load combinations.</p>`;
+ + `<p class="report-note">Beam self-weight is included once. Every point load has separate downward dead and live portions at the same position; its service total is D + LL. Service analysis uses 1.0D + 1.0L; this is the supported load case, not an envelope of all required project load combinations.</p>`;
 }
 function bracingSchedule(r) {
  const top = r.braces.top?.locations || r.braces.locations;
@@ -177,12 +181,13 @@ function comparisonReport(r) {
  if(!r.comparison) return '';
  const sf=r.comparison.numerator, x=r.checks?.extra;
  const bendingLoad=r.dead+r.self+sf/1.67*r.live, shearLoad=r.dead+r.self+sf/1.5*r.live;
- const response=(w,multiplier)=>analyzeBeam({...r.analysis.input,uniformLoadPlf:w*1000,pointLoads:r.analysis.input.pointLoads.map(p=>({...p,loadLb:p.loadLb*multiplier}))});
+ const categorizedPoints=pointIds(r);
+ const response=(w,multiplier)=>analyzeBeam({...r.analysis.input,uniformLoadPlf:w*1000,pointLoads:pointLoadsForAnalysis(categorizedPoints,multiplier)});
  const bend=response(bendingLoad,sf/1.67), shear=response(shearLoad,sf/1.5);
- const points=table('Requested point-load comparison values', ['Point','Service P (lbs)','Bending P × SF/1.67 (lbs)','Shear P × SF/1.50 (lbs)'],pointIds(r).map(p=>[escape(p.id),fromKips(p.loadKip),fromKips(p.loadKip*sf/1.67),fromKips(p.loadKip*sf/1.5)]));
+ const points=table('Requested point-load comparison values', ['Point','D (lbs)','LL (lbs)','Service D + LL (lbs)','Bending D + (SF/1.67)LL (lbs)','Shear D + (SF/1.50)LL (lbs)'],categorizedPoints.map(p=>[escape(p.id),fromKips(p.deadKip),fromKips(p.liveKip),fromKips(p.loadKip),fromKips(p.deadKip+p.liveKip*sf/1.67),fromKips(p.deadKip+p.liveKip*sf/1.5)]));
  return section(`Requested ${n(sf)}:1 comparison — illustrative`, `<p class="report-status"><strong>Not a verified OSHA load combination or compliance check.</strong> The selected factor is applied to entered live loads only. Service reactions, deflections and diagrams remain unfactored. This arithmetic comparison does not establish maximum intended load, failure capacity, scaffold capacity or approval for use.</p>`
- + row('Bending comparison load','w<sub>b</sub> = D + SW + (SF/1.67)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.67) × ${fromKips(r.live)}`,`${fromKips(bendingLoad)} lb/ft; point multiplier = ${n(sf/1.67)}`)
- + row('Shear comparison load','w<sub>v</sub> = D + SW + (SF/1.50)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.50) × ${fromKips(r.live)}`,`${fromKips(shearLoad)} lb/ft; point multiplier = ${n(sf/1.5)}`)
+ + row('Bending comparison load','w<sub>b</sub> = D + SW + (SF/1.67)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.67) × ${fromKips(r.live)}`,`${fromKips(bendingLoad)} lb/ft; point live-load multiplier = ${n(sf/1.67)}`)
+ + row('Shear comparison load','w<sub>v</sub> = D + SW + (SF/1.50)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.50) × ${fromKips(r.live)}`,`${fromKips(shearLoad)} lb/ft; point live-load multiplier = ${n(sf/1.5)}`)
  + (r.pointLoads.length?points:'')
  + analysisSchedule(bend,pointIds(r),'Bending-comparison equilibrium')
  + row('Bending-comparison maximum','M(x) = R<sub>A</sub>x − wx²/2 − ΣP<sub>i</sub>⟨x−a<sub>i</sub>⟩',`R_A = ${pounds(bend.reactions.leftLb)} lbs; w = ${fromKips(bendingLoad)} lb/ft; x = ${n(bend.maxMoment.xFt)} ft`,`${fromKips(bend.maxMoment.momentKipFt)} lb-ft`)

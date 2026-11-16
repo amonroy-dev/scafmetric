@@ -4,6 +4,7 @@ import { checkFlexure } from './strength-flexure.js';
 import { checkMajorAxisShear } from './strength-shear.js';
 import { strengthComparisonLoads } from './strength-comparison.js';
 import { resolveFlangeBracing } from './bracing.js';
+import { normalizePointLoads, pointLoadsForAnalysis } from './point-loads.js';
 
 /**
  * Find the lowest weight-per-foot catalogue section that meets the implemented
@@ -17,7 +18,7 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
   if (!confirmedLateralBracing || !confirmedScope) throw new Error('Confirm the material, restraint and loading assumptions before suggesting a size.');
   if (Eksi !== 29000) throw new Error('Suggested sizes require E = 29,000 ksi and A992 steel.');
   if (!Number.isFinite(spanFt) || spanFt <= 0 || ![deadLoadKipFt, liveLoadKipFt].every(n => Number.isFinite(n) && n >= 0)) throw new Error('A positive span and finite nonnegative loads are required.');
-  if (!Array.isArray(pointLoads) || pointLoads.some(p => !p || !Number.isFinite(p.loadKip) || p.loadKip < 0 || !Number.isFinite(p.locationFt) || p.locationFt < 0 || p.locationFt > spanFt)) throw new Error('Point loads must be nonnegative and located between the supports.');
+  const categorizedPoints = normalizePointLoads(pointLoads, spanFt);
   if (!Array.isArray(sections)) throw new Error('Section library is unavailable.');
   if (!['unity', 'quarter'].includes(cbMethod)) throw new Error('Select a supported Cb method.');
   const bracing = resolveFlangeBracing({ spanFt, bracesFt, topBracesFt, bottomBracesFt });
@@ -34,9 +35,9 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
       // Strength results do not depend on stiffness; the deflection check uses the
       // calculator's stiffness factor so it matches the adjusted deflection shown.
       const base = { spanFt, Eksi, Iin4: section.Ix, stiffnessFactor };
-      // Point loads are live loads. Use the complete response for both checks:
-      // eccentric loads make the end reactions, and hence shear demand, unequal.
-      const response = (load, pointMultiplier = 1) => analyzeBeam({ ...base, uniformLoadPlf: load * 1000, pointLoads: pointLoads.map(p => ({ loadLb: p.loadKip * pointMultiplier * 1000, locationFt: p.locationFt })) });
+      // Preserve point-load categories when comparing live loads. Eccentric
+      // point loads also make the end reactions, and hence shear demand, unequal.
+      const response = (load, pointMultiplier = 1) => analyzeBeam({ ...base, uniformLoadPlf: load * 1000, pointLoads: pointLoadsForAnalysis(categorizedPoints, pointMultiplier) });
       const flexure = analysis => checkFlexure({ section, analysis, topBracesFt: bracing.top.locations, bottomBracesFt: bracing.bottom.locations, cbMethod, Eksi, Fyksi: 50, confirmedLateralBracing: true, confirmedScope: true });
       const shear = analysis => checkMajorAxisShear({ section, Eksi, FyKsi: 50, demandKip: Math.max(Math.abs(analysis.maxShear.shearLb), Math.abs(analysis.minShear.shearLb)) / 1000 });
       const serviceLoad = deadLoadKipFt + liveLoadKipFt + self;

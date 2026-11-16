@@ -49,8 +49,8 @@
             </div>
             <div class="form-section loads-section">
               <div class="section-title"><span class="step" aria-hidden="true">03</span><h3>Loads</h3><span>Downward</span></div>
-              <div class="load-picker"><div><label for="new-load-type">Add a load</label><div class="load-add-row"><select id="new-load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select><button type="button" id="add-load" class="add-load">+ Add</button></div></div></div>
-              <p class="field-help load-picker-help">Pick a type and add as many loads as you need. Change a load's type from its row.</p>
+              <div class="load-picker"><div><label for="new-load-type">Load type</label><div class="load-add-row"><select id="new-load-type" aria-describedby="load-picker-help"><option value="uniform">Uniform load</option><option value="point">Point load</option></select><button type="button" id="add-load" class="add-load">+ Add</button></div></div></div>
+              <p id="load-picker-help" class="field-help load-picker-help">Changing this type clears the load list and adds one empty load. Use + Add for additional loads. Changing a row's type clears that row.</p>
               <input id="dead-load" type="hidden" value="0.2"><input id="live-load" type="hidden" value="0.8">
               <div id="load-rows"></div>
               <template id="load-template"><div class="load-row">
@@ -60,9 +60,10 @@
                   <label>Live load <em>L</em><span class="input-unit"><input class="uniform-live" type="number" min="0" step="any" value="0" required><span>lb/ft</span></span></label>
                 </div>
                 <div class="point-fields field-grid" hidden>
-                  <label>Load <em>P</em><span class="input-unit"><input class="point-load" type="number" min="0" step="any" placeholder="0" disabled><span>lbs</span></span></label>
-                  <label>Distance <em>x</em><span class="input-unit"><input class="point-location" type="number" min="0" step="any" placeholder="0" disabled><span>ft</span></span></label>
-                  <p class="field-help point-load-help">Downward live load · x from the left support.</p>
+                  <label>Dead load <em>D</em><span class="input-unit"><input class="point-dead" type="number" min="0" step="any" value="0" disabled><span>lbs</span></span></label>
+                  <label>Live load <em>LL</em><span class="input-unit"><input class="point-live" type="number" min="0" step="any" value="0" disabled><span>lbs</span></span></label>
+                  <label class="point-position">Distance <em>x</em><span class="input-unit"><input class="point-location" type="number" min="0" step="any" placeholder="0" disabled><span>ft</span></span></label>
+                  <p class="field-help point-load-help">Downward D + LL at this position · x from the left support.</p>
                 </div>
               </div></template>
               <div class="self-weight-info"><strong>Beam self-weight <span>Auto</span></strong><output id="self-weight">Select a beam section</output></div>

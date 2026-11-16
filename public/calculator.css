@@ -117,6 +117,7 @@
   .load-row .field-grid>label { margin:0; font-size:11.5px; }
   .load-row .field-grid .input-unit { margin-top:6px; }
   .load-row .point-load-help { grid-column:1/-1; margin:2px 0 0; }
+  .load-row .point-position { grid-column:1/-1; }
   .add-load,.next-brace { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:42px; margin:0; padding:4px 14px 2px; border:1px dashed var(--ws-line-2); border-radius:0; background:transparent; color:var(--ws-aqua-2); font:19px/1 var(--term); letter-spacing:.04em; text-transform:uppercase; white-space:nowrap; transition:background-color .15s,border-color .15s,color .15s; }
   .add-load:hover,.next-brace:hover { border-style:solid; border-color:var(--ws-aqua); background:rgba(61,217,201,.08); color:#d6fffa; }
   .self-weight-info { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:14px 0 0; padding:10px 12px; border:1px solid var(--ws-line); border-radius:0; background:rgba(8,15,26,.5); }

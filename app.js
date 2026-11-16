@@ -1,4 +1,5 @@
 import { analyzeBeam } from './src/beam.js';
+import { normalizePointLoads, pointLoadsForAnalysis } from './src/point-loads.js';
 import { beamSelfWeight } from './src/beam-self-weight.js';
 import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
 import { checkDeflection } from './src/deflection-check.js';
@@ -53,7 +54,8 @@ function syncUniformLoads() {
 function resetLoadValues(row) {
  row.querySelector('.uniform-dead').value = '0';
  row.querySelector('.uniform-live').value = '0';
- row.querySelector('.point-load').value = '';
+ row.querySelector('.point-dead').value = '0';
+ row.querySelector('.point-live').value = '0';
  row.querySelector('.point-location').value = '';
 }
 function setLoadType(row) {
@@ -82,7 +84,8 @@ function labelLoadRows() {
   row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
   row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, pounds per foot`);
   row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, pounds per foot`);
-  row.querySelector('.point-load').setAttribute('aria-label', `${label} point load, pounds`);
+  row.querySelector('.point-dead').setAttribute('aria-label', `${label} point dead load, pounds`);
+  row.querySelector('.point-live').setAttribute('aria-label', `${label} point live load, pounds`);
   row.querySelector('.point-location').setAttribute('aria-label', `${label} position from left support, feet`);
  });
 }
@@ -91,9 +94,11 @@ function addLoad({type = 'uniform', dead = 0, live = 0} = {}) {
  const row = $('load-template').content.firstElementChild.cloneNode(true);
  const id = ++loadSequence;
  row.dataset.loadType = type;
- for (const name of ['uniform-dead', 'uniform-live', 'point-load', 'point-location']) row.querySelector(`.${name}`).id = `${name}-${id}`;
+ for (const name of ['uniform-dead', 'uniform-live', 'point-dead', 'point-live', 'point-location']) row.querySelector(`.${name}`).id = `${name}-${id}`;
  row.querySelector('.uniform-dead').value = dead;
  row.querySelector('.uniform-live').value = live;
+ row.querySelector('.point-dead').value = dead;
+ row.querySelector('.point-live').value = live;
  setLoadType(row);
  $('load-rows').append(row);
  labelLoadRows();
@@ -138,7 +143,7 @@ function invalidate() {
 function readBracing() {
  return parseFlangeBracing({top:$('top-brace-locations').value, bottom:$('bottom-brace-locations').value, spanFt:Number($('span').value)});
 }
-function memberChecks({section, analysis, topBracesFt, bottomBracesFt, Eksi, dead, live, self, comparison}) {
+function memberChecks({section, analysis, pointLoads, topBracesFt, bottomBracesFt, Eksi, dead, live, self, comparison}) {
  if (!$('enable-capacity').checked) return { status: 'not_requested' };
  const missing = [];
  if (!$('capacity-confirmed').checked) missing.push('Confirm the steel-check assumptions for this beam.');
@@ -159,10 +164,10 @@ function memberChecks({section, analysis, topBracesFt, bottomBracesFt, Eksi, dea
   const shearLoad = comparisonLoads.shear;
   let bending, shearing;
   try {
-   const bendingAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:bendingLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.67})) });
+   const bendingAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:bendingLoad * 1000, pointLoads: pointLoadsForAnalysis(pointLoads, sf / 1.67) });
    bending = { status:'evaluated', ...checkFlexure({ section, analysis:bendingAnalysis, topBracesFt, bottomBracesFt, cbMethod:$('cb-method').value, Eksi, Fyksi:50, confirmedLateralBracing:true, confirmedScope:true }) };
   } catch (e) { bending = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
-  try { const shearAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:shearLoad * 1000, pointLoads: analysis.input.pointLoads.map(p => ({...p, loadLb: p.loadLb * sf / 1.5})) }); shearing = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip:Math.max(Math.abs(shearAnalysis.maxShear.shearLb), Math.abs(shearAnalysis.minShear.shearLb))/1000}); }
+  try { const shearAnalysis = analyzeBeam({ ...analysis.input, uniformLoadPlf:shearLoad * 1000, pointLoads: pointLoadsForAnalysis(pointLoads, sf / 1.5) }); shearing = checkMajorAxisShear({section, FyKsi:50, Eksi, demandKip:Math.max(Math.abs(shearAnalysis.maxShear.shearLb), Math.abs(shearAnalysis.minShear.shearLb))/1000}); }
   catch (e) { shearing = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
   extra = {sf, bendingLoad, shearLoad, bending, shearing};
  }
@@ -226,7 +231,7 @@ function memberChecksHtml(check) {
   ${calculationRow('Bending load', `D + self-weight + (SF / 1.67)L = ${lb(check.dead,2)} + ${lb(check.self,2)} + (${fmt(x.sf,8)} / 1.67 × ${lb(check.live,2)})`, `${lb(x.bendingLoad,1)} lb/ft`, '')}
   ${fb.status === 'evaluated' ? calculationRow('Moment demand', `Peak combined moment, segment ${fmt(fb.governingSegment.startFt,3)}–${fmt(fb.governingSegment.endFt,3)} ft`, `${lb(fb.governingSegment.MmaxKipFt)} lb-ft`, '') : ''}
   ${bendRows}
-  <p class="capacity-note">Point loads are treated as live loads and multiplied by SF / 1.67 for bending and SF / 1.50 for shear.</p>
+  <p class="capacity-note">Each point load uses D + (SF / 1.67)LL for bending and D + (SF / 1.50)LL for shear. Only its live portion receives the additional multiplier.</p>
   ${calculationRow('Shear load', `D + self-weight + (SF / 1.50)L = ${lb(check.dead,2)} + ${lb(check.self,2)} + (${fmt(x.sf,8)} / 1.50 × ${lb(check.live,2)})`, `${lb(x.shearLoad,1)} lb/ft`, '')}
   ${vs.status === 'evaluated' ? calculationRow('Shear demand', 'Peak combined shear', `${lb(vs.demandKip)} lbs`, '') : ''}
   ${shearRows}</div>`;
@@ -242,20 +247,18 @@ function run(e) {
   // E is entered in psi; the analysis engine and the record keep it in ksi.
   const span=Number($('span').value), dead=Number($('dead-load').value), live=Number($('live-load').value), E=Number($('elastic-modulus').value)/1000, I=Number($('inertia').value), factor=Number($('stiffness-factor').value);
   if (dead < 0 || live < 0 || !Number.isFinite(dead+live)) throw Error('Loads must be finite, nonnegative numbers.');
-  const pointLoads = [...document.querySelectorAll('.point-load-row')].map(row => {
-   const load = row.querySelector('.point-load').value, location = row.querySelector('.point-location').value;
-   if (load === '' || location === '') throw Error('Enter a load and location for each point load.');
-   const loadKip = Number(load) / 1000, locationFt = Number(location);
-   if (!Number.isFinite(loadKip) || loadKip < 0 || !Number.isFinite(locationFt) || locationFt < 0 || locationFt > span) throw Error('Point loads must be nonnegative and located between the supports.');
-   return {id:row.dataset.loadId, loadKip, locationFt};
-  });
+  const pointLoads = normalizePointLoads([...document.querySelectorAll('.point-load-row')].map(row => {
+   const dead = row.querySelector('.point-dead').value, live = row.querySelector('.point-live').value, location = row.querySelector('.point-location').value;
+   if (dead === '' || live === '' || location === '') throw Error('Enter dead load, live load, and a location for each point load (use 0 for an unused load category).');
+   return {id:row.dataset.loadId, deadKip:Number(dead)/1000, liveKip:Number(live)/1000, locationFt:Number(location)};
+  }), span);
   const uniformLoads = [...document.querySelectorAll('.uniform-load-row')].map(row => ({id:row.dataset.loadId, deadKipFt:Number(row.querySelector('.uniform-dead').value)/1000, liveKipFt:Number(row.querySelector('.uniform-live').value)/1000}));
   const self = beamSelfWeight(s), total = dead+live+self, br = readBracing();
-  const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoads.map(p=>({loadLb:p.loadKip*1000, locationFt:p.locationFt})), Eksi:E, Iin4:I, stiffnessFactor:factor});
+  const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoadsForAnalysis(pointLoads), Eksi:E, Iin4:I, stiffnessFactor:factor});
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
   // Deflection is checked on every run, whether or not the AISC strength checks are on.
   const deflection = checkDeflection({analysis, limitRatio:Number($('deflection-limit').value)});
-  const checks = {...memberChecks({section:s, analysis, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison}), deflection};
+  const checks = {...memberChecks({section:s, analysis, pointLoads, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison}), deflection};
   record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, sectionProperties:s, span, dead, live, self, total, uniformLoads, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); scanModel(); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
@@ -329,14 +332,14 @@ function render(r) {
  let comparisonHtml = '';
  if (r.comparison && r.checks.status !== 'evaluated') {
   const multiplier = r.comparison.multiplier;
-  const compared = analyzeBeam({ ...a.input, uniformLoadPlf:r.comparison.totalKipFt * 1000, pointLoads:a.input.pointLoads.map(p => ({ ...p, loadLb:p.loadLb * multiplier })) });
+  const compared = analyzeBeam({ ...a.input, uniformLoadPlf:r.comparison.totalKipFt * 1000, pointLoads:pointLoadsForAnalysis(r.pointLoads, multiplier) });
   comparisonHtml = `<div class="calculation-detail"><h3>Safety factor comparison · illustrative</h3><p>Live uniform and point loads × ${fmt(multiplier,5)} (SF / 1.67). Left reaction ${fmt(compared.reactions.leftLb, 0)} lbs; right reaction ${fmt(compared.reactions.rightLb, 0)} lbs; maximum moment ${lb(compared.maxMoment.momentKipFt)} lb-ft.</p><p>Not a verified OSHA combination or capacity check. Service diagrams remain unfactored.</p></div>`;
  }
  const basis = `<div class="capacity-checks analysis-basis"><h3>Service analysis</h3>
  ${calculationRow('Section', `${escape(r.section)} · E = ${lb(r.E)} psi`, `I<sub>x</sub> = ${fmt(r.I,3)} in⁴`, '')}
  ${calculationRow('Beam self-weight', 'AISC section weight', `${lb(r.self,2)} lb/ft`, '')}
  ${calculationRow('Uniform load', `D + self-weight + L = ${lb(r.dead,2)} + ${lb(r.self,2)} + ${lb(r.live,2)}`, `${lb(r.total,2)} lb/ft`, '')}
- ${calculationRow('Point loads', 'Live loads; positions measured from left support', r.pointLoads.length ? r.pointLoads.map(p=>`${lb(p.loadKip,2)} lbs at ${fmt(p.locationFt,3)} ft`).join('; ') : 'None', '')}
+ ${calculationRow('Point loads', 'D + LL; positions measured from left support', r.pointLoads.length ? r.pointLoads.map(p=>`${escape(p.id)}: D ${lb(p.deadKip,2)} + LL ${lb(p.liveKip,2)} = ${lb(p.loadKip,2)} lbs at ${fmt(p.locationFt,3)} ft`).join('; ') : 'None', '')}
  ${calculationRow('Left reaction', 'Combined loads', `${fmt(a.reactions.leftLb,0)} lbs`, '')}
  ${calculationRow('Right reaction', 'Combined loads', `${fmt(a.reactions.rightLb,0)} lbs`, '')}
  ${calculationRow('Maximum moment', `Combined loads at x = ${fmt(a.maxMoment.xFt,3)} ft`, `${lb(a.maxMoment.momentKipFt)} lb-ft`, '')}
@@ -397,10 +400,15 @@ fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ?
 }).catch(() => {});
 addLoad({dead: 200, live: 800});
 updateSafetyFactor();
-$('add-load').addEventListener('click', () => {
+function addSelectedLoad() {
  const type = $('new-load-type').value;
  const row = addLoad({type});
- invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-load' : '.uniform-dead').focus();
+ invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-dead' : '.uniform-dead').focus();
+}
+$('add-load').addEventListener('click', addSelectedLoad);
+$('new-load-type').addEventListener('change', () => {
+ $('load-rows').replaceChildren();
+ addSelectedLoad();
 });
 $('load-rows').addEventListener('click', e => {
  const button = e.target.closest('.remove-load');
