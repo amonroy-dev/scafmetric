@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ensureAccount, readAccount, hasProfile, normalizeProfile, TERMS_VERSION } from '../../server/account.js';
 import { COOKIE_NAME, cookieFor, getSessionCookie, issueSession, sameOrigin, verifySession } from '../../server/session-core.js';
+import { canAccessAdmin } from '../../server/admin-access.js';
 
 let adminAuth;
 let firestore;
@@ -45,7 +46,7 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
       if (!configured || !user) return send(res, 200, { configured, authenticated: false });
       try {
         const trial = await accountStatus(user);
-        return send(res, 200, trial ? { configured, authenticated: true, user, trial, termsAccepted: trial.termsAccepted === true, profileComplete: trial.profileComplete === true, termsVersion: TERMS_VERSION } : { configured, authenticated: false });
+        return send(res, 200, trial ? { configured, authenticated: true, user, trial, termsAccepted: trial.termsAccepted === true, profileComplete: trial.profileComplete === true, isAdmin: canAccessAdmin(user, trial, env), termsVersion: TERMS_VERSION } : { configured, authenticated: false });
       } catch { return send(res, 503, { configured, authenticated: false, error: 'Account storage is unavailable.' }); }
     }
     if (!['POST', 'DELETE'].includes(req.method)) {

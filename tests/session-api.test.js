@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TERMS_VERSION } from '../server/account.js';
 import { createSessionHandler, isConfigured } from '../api/auth/session.js';
+import { COOKIE_NAME, issueSession } from '../server/session-core.js';
 
 const env = { NODE_ENV: 'production', NEXT_PUBLIC_APP_URL: 'https://example.com', FIREBASE_PROJECT_ID: 'project', FIREBASE_CLIENT_EMAIL: 'service@example.com', FIREBASE_PRIVATE_KEY: 'test', SESSION_SECRET: 'a strong sufficiently long secret for testing' };
 function response() { return { headers: {}, statusCode: 0, body: null, setHeader(k,v) { this.headers[k]=v; }, status(n) { this.statusCode=n; return this; }, json(v) { this.body=v; return this; } }; }
@@ -65,4 +66,25 @@ test('profile completion is validated and bound to the verified identity', async
   const cookie = r.headers['Set-Cookie'].split(';')[0];
   r=response(); await handler(req('GET', null, { cookie }), r); assert.equal(r.body.profileComplete, true);
   assert.equal(r.body.profile, undefined);
+});
+
+test('admin navigation is exposed only for an allowlisted, active, fully onboarded session', async () => {
+  const adminEnv = { ...env, ADMIN_UIDS:'u1, other-owner' };
+  const cookieForUser = uid => `${COOKIE_NAME}=${issueSession({ uid, email:`${uid}@example.com`, name:uid }, adminEnv).token}`;
+  let account = { termsAccepted:true, profileComplete:true };
+  const handler = createSessionHandler({ env:adminEnv, accountStatus:async () => account });
+  let r=response(); await handler(req('GET', null), r);
+  assert.equal(r.body.authenticated, false); assert.notEqual(r.body.isAdmin, true);
+  r=response(); await handler(req('GET', null, { cookie:cookieForUser('u1') }), r);
+  assert.equal(r.body.isAdmin, true); assert.match(r.headers['Cache-Control'], /no-store/);
+  r=response(); await handler(req('GET', null, { cookie:cookieForUser('u10') }), r);
+  assert.equal(r.body.authenticated, true); assert.equal(r.body.isAdmin, false);
+  for (const state of [{ termsAccepted:false, profileComplete:true }, { termsAccepted:true, profileComplete:false }, { termsAccepted:'true', profileComplete:true }]) {
+    account=state; r=response(); await handler(req('GET', null, { cookie:cookieForUser('u1') }), r); assert.equal(r.body.isAdmin, false);
+  }
+  account=null; r=response(); await handler(req('GET', null, { cookie:cookieForUser('u1') }), r); assert.equal(r.body.authenticated, false); assert.notEqual(r.body.isAdmin, true);
+  const noAdmins=createSessionHandler({ env:{ ...adminEnv, ADMIN_UIDS:'' }, accountStatus:async () => ({ termsAccepted:true, profileComplete:true }) });
+  r=response(); await noAdmins(req('GET', null, { cookie:cookieForUser('u1') }), r); assert.equal(r.body.isAdmin, false);
+  const unavailable=createSessionHandler({ env:adminEnv, accountStatus:async () => { throw Error('unavailable'); } });
+  r=response(); await unavailable(req('GET', null, { cookie:cookieForUser('u1') }), r); assert.equal(r.statusCode, 503); assert.notEqual(r.body.isAdmin, true);
 });

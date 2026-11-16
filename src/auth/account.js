@@ -1,14 +1,17 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signOut } from 'firebase/auth';
 const anchor = document.getElementById('account-link');
+const adminLink = document.getElementById('admin-link');
 if (anchor) {
   fetch('/api/auth/session', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(session => {
     if (!session?.authenticated) return;
+    if (adminLink && session.isAdmin === true) adminLink.hidden = false;
     anchor.textContent = 'Sign out';
     anchor.href = '#';
     anchor.addEventListener('click', async e => {
       e.preventDefault();
       try {
+        if (adminLink) adminLink.hidden = true;
         const response = await fetch('/api/auth/session', { method:'DELETE' });
         if (!response.ok) throw new Error('Sign out failed');
         const configResponse = await fetch('/auth-config.json');

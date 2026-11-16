@@ -39,6 +39,7 @@
   .topbar-status.is-offline i { background:var(--ws-coral); }
   .account-nav { margin-left:8px; padding:8px 0; color:#c4cfdd; text-decoration:none; font-size:13px; font-weight:500; white-space:nowrap; }
   .account-nav:hover { color:#fff; }
+  .admin-nav { color:var(--ws-aqua-2); }
 
   /* Page heading */
   .page { max-width:1600px; margin:0 auto; padding:28px 28px 56px; background:none; }

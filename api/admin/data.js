@@ -3,6 +3,7 @@ import { FieldPath, getFirestore } from 'firebase-admin/firestore';
 import { readAccount } from '../../server/account.js';
 import { getSessionCookie, verifySession } from '../../server/session-core.js';
 import { isConfigured } from '../auth/session.js';
+import { isAdminUid, canAccessAdmin } from '../../server/admin-access.js';
 
 const PAGE_SIZE = 100;
 const fields = {
@@ -45,13 +46,12 @@ export function createAdminDataHandler({ env = process.env, accountFor = user =>
     if (!isConfigured(env)) return res.status(503).json({ error: 'Owner data is unavailable.' });
     const user = verifySession(getSessionCookie(req.headers.cookie), env);
     if (!user) return res.status(401).json({ error: 'Sign in to view owner data.' });
-    const allowed = (env.ADMIN_UIDS || '').split(',').map(uid => uid.trim()).filter(Boolean);
-    if (!allowed.includes(user.uid)) return res.status(403).json({ error: 'Owner access required.' });
+    if (!isAdminUid(user, env)) return res.status(403).json({ error: 'Owner access required.' });
     const { type, format = 'json', cursor = '' } = req.query || {};
     if (typeof type !== 'string' || !Object.hasOwn(fields, type) || typeof format !== 'string' || !['json', 'csv'].includes(format) || typeof cursor !== 'string' || cursor.length > 1500 || cursor.includes('/') || (format === 'csv' && cursor)) return res.status(400).json({ error: 'Invalid request.' });
     try {
       const account = await accountFor(user);
-      if (!account?.termsAccepted || !account?.profileComplete) return res.status(403).json({ error: 'Owner account is unavailable.' });
+      if (!canAccessAdmin(user, account, env)) return res.status(403).json({ error: 'Owner account is unavailable.' });
       if (format === 'json') return res.status(200).json(await page(type, cursor));
       const rows = []; let next = '';
       do { const batch = await page(type, next); rows.push(...batch.rows); next = batch.nextCursor; } while (next);
