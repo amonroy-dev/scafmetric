@@ -15,6 +15,7 @@ import { drawCharts, clearCharts } from './src/visuals.js';
 import { parseFlangeBracing } from './src/bracing.js';
 import { renderCalculationReport } from './src/calculation-report.js';
 import { createDeflectionView } from './src/deflection-view.js';
+import { initializeStepWizard } from './src/step-wizard.js';
 
 const $ = id => document.getElementById(id);
 const bracingHelp = initializeBracingHelp();
@@ -411,6 +412,7 @@ fetch('/api/auth/session', { cache: 'no-store' }).then(response => response.ok ?
 }).catch(() => {});
 addLoad({dead: 200, live: 800});
 updateSafetyFactor();
+const stepWizard = initializeStepWizard({form:$('beam-form'), readBracing, invalidate, drawSchematic});
 function addSelectedLoad() {
  const type = $('new-load-type').value;
  const row = addLoad({type});
@@ -428,7 +430,7 @@ $('load-rows').addEventListener('click', e => {
  labelLoadRows();
  invalidate(); drawSchematic(); $('add-load').focus();
 });
-$('beam-form').addEventListener('submit', run);
+$('beam-form').addEventListener('submit', e => { if (stepWizard.canSubmit()) run(e); else e.preventDefault(); });
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
 const responseTabs = [...document.querySelectorAll('[data-response-tab]')];
 function selectResponse(name, focus = false) {

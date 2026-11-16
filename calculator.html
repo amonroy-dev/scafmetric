@@ -33,22 +33,24 @@
       <form id="beam-form">
         <div class="inspector-scroll">
           <div class="essential-fields">
-            <div class="form-section project-info">
-              <div class="section-title"><span class="step" aria-hidden="true">01</span><h3>Project info</h3><span class="optional">Report details</span></div>
+            <details class="form-section wizard-step project-info" data-step="1" open>
+              <summary class="section-title"><span class="step" aria-hidden="true">01</span><h3>Project info</h3><span class="optional">Both required</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <div class="field-grid">
-                <div><label for="project">Project name</label><input id="project" type="text" placeholder="Project name" autocomplete="off"></div>
-                <div><label for="preparer">Prepared by</label><input id="preparer" type="text" placeholder="Name or company" autocomplete="name"></div>
+                <div><label for="project">Project name</label><input id="project" type="text" placeholder="Project name" autocomplete="off" required></div>
+                <div><label for="preparer">Prepared by</label><input id="preparer" type="text" placeholder="Name or company" autocomplete="name" required></div>
               </div>
-            </div>
-            <div class="form-section beam-section">
-              <div class="section-title"><span class="step" aria-hidden="true">02</span><h3>Beam</h3><span>AISC v15 W-shapes</span></div>
+              <p class="wizard-error" data-step-error role="alert" hidden></p><div class="wizard-actions"><button type="button" class="wizard-next" data-step-next>Continue →</button></div></div>
+            </details>
+            <details class="form-section wizard-step beam-section" data-step="2" hidden>
+              <summary class="section-title"><span class="step" aria-hidden="true">02</span><h3>Beam</h3><span>AISC v15 W-shapes</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <div class="field-grid beam-fields">
                 <div><label for="section">Beam size</label><select id="section"><option value="">Loading…</option></select></div>
                 <div><label for="span">Span</label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div></div>
               </div>
-            </div>
-            <div class="form-section loads-section">
-              <div class="section-title"><span class="step" aria-hidden="true">03</span><h3>Loads</h3><span>Downward</span></div>
+              <p class="wizard-error" data-step-error role="alert" hidden></p><div class="wizard-actions"><button type="button" class="wizard-next" data-step-next>Continue →</button></div></div>
+            </details>
+            <details class="form-section wizard-step loads-section" data-step="3" hidden>
+              <summary class="section-title"><span class="step" aria-hidden="true">03</span><h3>Loads</h3><span>Downward</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <div class="load-picker"><div><label for="new-load-type">Load type</label><div class="load-add-row"><select id="new-load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select><button type="button" id="add-load" class="add-load">+ Add</button></div></div></div>
               <input id="dead-load" type="hidden" value="0.2"><input id="live-load" type="hidden" value="0.8">
               <div id="load-rows"></div>
@@ -70,17 +72,19 @@
                 <div id="custom-safety-row" hidden><label for="custom-safety-factor">Custom factor</label><div class="input-unit"><input id="custom-safety-factor" type="number" min="1" step="any" placeholder="2.5" disabled><span>: 1</span></div></div>
                 <p id="safety-factor-note" class="field-help">4:1 illustrative comparison. Does not establish OSHA compliance.</p>
               </div>
-            </div>
-            <div class="form-section bracing-section">
-              <div class="section-title"><span class="step" aria-hidden="true">04</span><h3>Lateral bracing</h3><span>From left support</span></div>
+              <p class="wizard-error" data-step-error role="alert" hidden></p><div class="wizard-actions"><button type="button" class="wizard-next" data-step-next>Continue →</button></div></div>
+            </details>
+            <details class="form-section wizard-step bracing-section" data-step="4" hidden>
+              <summary class="section-title"><span class="step" aria-hidden="true">04</span><h3>Lateral bracing</h3><span>From left support</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <button type="button" class="bracing-help-trigger bracing-help-section-trigger" data-open-bracing-help>What is lateral bracing?</button>
               <p id="brace-cleared" class="brace-cleared" role="status"></p>
               <label for="top-brace-locations">Top flange</label><input id="top-brace-locations" type="hidden"><div class="brace-editor" data-flange="top"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <label for="bottom-brace-locations">Bottom flange</label><input id="bottom-brace-locations" type="hidden"><div class="brace-editor" data-flange="bottom"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <output id="bracing-summary" class="bracing-summary"></output>
-            </div>
-            <div class="form-section assumptions-section">
-              <div class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>Strength · deflection</span></div>
+              <p class="wizard-error" data-step-error role="alert" hidden></p><p class="wizard-bracing-note">Support end restraints are still assumed.</p><div class="wizard-actions"><button type="button" class="wizard-skip" data-no-bracing>No lateral bracing</button><button type="button" class="wizard-next" data-step-next>Continue →</button></div></div>
+            </details>
+            <details class="form-section wizard-step assumptions-section" data-step="5" hidden>
+              <summary class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>Strength · deflection</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <div class="deflection-limit-control"><label for="deflection-limit">Deflection limit</label><select id="deflection-limit"><option value="240" selected>L/240 · default</option><option value="360">L/360 · stricter</option><option value="180">L/180 · less strict</option></select>
               </div>
               <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
@@ -90,9 +94,10 @@
                 <li>Major-axis bending with no axial force, torsion, or destabilizing load-induced torsion.</li>
               </ul></div>
               <label class="check-row" for="capacity-confirmed"><input type="checkbox" id="capacity-confirmed"><span>I confirm these assumptions for this beam.</span></label>
-            </div>
+              <p class="wizard-error" data-step-error role="alert" hidden></p></div>
+            </details>
           </div>
-          <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary>
+          <details class="settings-group" data-after-steps hidden><summary>Design settings <span>AISC ASD</span></summary>
             <details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">
               <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="1" step="any" value="29000000" required><span>psi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div>
               <p class="field-help">Strong-axis bending; nominal section stiffness.</p>
@@ -106,7 +111,7 @@
             </div></details>
           </details>
         </div>
-        <div class="action-bar">
+        <div class="action-bar" data-after-steps hidden>
           <div class="acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
           <p id="error" class="error" role="alert"></p>
           <button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
@@ -122,7 +127,7 @@
       </section>
       <section class="panel results-panel" tabindex="-1" aria-label="Analysis results">
         <div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div>
-        <div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">No analysis yet</strong><p class="verdict-detail">Set the beam and loads, then run analysis.</p></div></div>
+        <div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">No analysis yet — complete all steps</strong></div></div>
         <div id="suggestion" class="suggestion"></div>
         <div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>lbs</small></strong></div><div><span>Right reaction</span><strong>— <small>lbs</small></strong></div><div><span>Max. moment</span><strong>— <small>lb-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div>
       </section>
@@ -147,20 +152,39 @@
     <section id="bracing-help-meaning" class="bracing-help-section">
       <p id="bracing-help-intro">A bending steel beam can buckle sideways and twist. Lateral bracing restrains sideways movement of its compression flange; torsional bracing restrains twist. In this calculator's simply supported, downward-load model, the top flange is in compression. Effective bracing can improve buckling resistance; it does not reduce the calculated vertical sag.</p>
       <figure class="bracing-help-diagram">
-        <svg viewBox="0 0 600 225" role="img" aria-labelledby="bracing-diagram-title bracing-diagram-desc">
-          <title id="bracing-diagram-title">Concept of compression-flange restraint</title><desc id="bracing-diagram-desc">A beam cross-section has a restrained top compression flange connected through a brace to a braced restraint system. Arrows show possible sideways movement and twist. Connection details require their own design.</desc>
-          <defs><marker id="bracing-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto-start-reverse"><path d="M0 0L6 3L0 6" fill="#ffa41b"/></marker></defs>
-          <path d="M80 68H200V85H150V155H200V172H80V155H130V85H80Z" fill="#243752" stroke="#a9b6ca" stroke-width="2"/>
-          <path d="M80 68H200V85H80Z" fill="#3dd9c9" stroke="#9ff3e9" stroke-width="2"/>
-          <path d="M201 76H440" fill="none" stroke="#3dd9c9" stroke-width="8"/>
-          <circle cx="204" cy="76" r="5" fill="#9ff3e9"/><circle cx="439" cy="76" r="5" fill="#9ff3e9"/>
-          <path d="M446 52H552V172H446ZM446 52L552 172M552 52L446 172" fill="none" stroke="#8493ab" stroke-width="4"/>
-          <path d="M102 111H178" stroke="#ffa41b" stroke-width="2" marker-start="url(#bracing-arrow)" marker-end="url(#bracing-arrow)"/>
-          <path d="M105 180C42 170 39 102 66 87" fill="none" stroke="#ffa41b" stroke-width="2" marker-end="url(#bracing-arrow)"/>
-          <g fill="#e8ecf4" font-family="Inter,Arial,sans-serif" font-size="14"><text x="75" y="34">Compression flange</text><text x="278" y="57">Brace</text><text x="446" y="199">Restraint system</text></g>
-          <path d="M140 41V61" stroke="#9ff3e9" stroke-width="1.5"/>
-        </svg>
-        <figcaption>Concept only: the connections and the complete restraint system must be verified.</figcaption>
+        <div class="bracing-diagram-header"><div><span class="bracing-diagram-kicker">BEAM BEHAVIOR / 01</span><strong>Twisting under load</strong></div><label class="bracing-motion-control"><input id="bracing-motion-toggle" type="checkbox" checked> Animate twist</label></div>
+        <div class="bracing-diagram-panels">
+          <div class="bracing-diagram-panel bracing-diagram-beam">
+            <div class="bracing-diagram-panel-title"><span>01</span> BEAM UNDER LOAD <span class="bracing-diagram-live">● LOAD ON</span></div>
+            <svg viewBox="0 0 500 245" role="img" aria-labelledby="bracing-beam-title bracing-beam-desc">
+              <title id="bracing-beam-title">A supported beam under downward load</title><desc id="bracing-beam-desc">A conceptual supported beam shown with downward load arrows, a dashed unloaded reference, and an exaggerated deformed shape. The offset of the highlighted compression flange indicates possible lateral movement.</desc>
+              <defs><pattern id="bracing-beam-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#263751" stroke-width=".7"/></pattern><linearGradient id="bracing-web-shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#263c58"/><stop offset="1" stop-color="#15243b"/></linearGradient><linearGradient id="bracing-top-shade" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#baf8f0"/><stop offset="1" stop-color="#3dd9c9"/></linearGradient><marker id="bracing-load-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0L6 3.5L0 7" fill="none" stroke="#ffa41b" stroke-width="1.5"/></marker></defs>
+              <rect width="500" height="245" fill="url(#bracing-beam-grid)"/>
+              <path d="M59 91H441M59 103H441M59 145H441M59 156H441" fill="none" stroke="#8393aa" stroke-width="1.5" stroke-dasharray="6 6" opacity=".65"/>
+              <path d="M61 104 C165 108 325 134 439 104 L439 145 C325 162 165 136 61 145Z" fill="url(#bracing-web-shade)" stroke="#66809e" stroke-width="1.5"/>
+              <path d="M57 91 C160 96 325 123 443 91 L443 103 C325 135 160 108 57 103Z" fill="url(#bracing-top-shade)" stroke="#a6f5ec" stroke-width="1.5"/>
+              <path d="M57 145 C160 136 325 162 443 145 L443 157 C325 174 160 148 57 157Z" fill="#415672" stroke="#91a7c0" stroke-width="1.5"/>
+              <path d="M57 91 C160 96 325 123 443 91" fill="none" stroke="#9ff3e9" stroke-width="2"/>
+              <path d="M61 160l-13 22h26z M439 160l-13 22h26z M45 187h32 M423 193h32" fill="#101a2d" stroke="#ffa41b" stroke-width="2"/><circle cx="432" cy="187" r="3" fill="#101a2d" stroke="#ffa41b"/><circle cx="446" cy="187" r="3" fill="#101a2d" stroke="#ffa41b"/>
+              <g stroke="#ffa41b" stroke-width="2" marker-end="url(#bracing-load-arrow)"><path d="M110 31v41"/><path d="M180 31v45"/><path d="M250 31v50"/><path d="M320 31v47"/><path d="M390 31v41"/></g>
+              <path d="M250 105v80" stroke="#9ff3e9" stroke-width="1" stroke-dasharray="3 5" opacity=".7"/><circle cx="250" cy="120" r="4" fill="#9ff3e9"/>
+            </svg>
+            <div class="bracing-diagram-legend"><span><i class="bracing-legend-load"></i>Downward load</span><span><i class="bracing-legend-ghost"></i>Unloaded</span><span><i class="bracing-legend-top"></i>Compression flange</span></div>
+          </div>
+          <div class="bracing-diagram-panel bracing-diagram-section">
+            <div class="bracing-diagram-panel-title"><span>02</span> SECTION AT MIDSPAN</div>
+            <svg viewBox="0 0 280 245" role="img" aria-labelledby="bracing-section-title bracing-section-desc">
+              <title id="bracing-section-title">Cross-section twisting under load</title><desc id="bracing-section-desc">A highlighted top flange shifts sideways as the beam cross-section rotates. A dashed outline marks the original unloaded position.</desc>
+              <defs><pattern id="bracing-section-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#263751" stroke-width=".7"/></pattern><marker id="bracing-twist-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0 0L6 3L0 6" fill="none" stroke="#ffa41b" stroke-width="1.5"/></marker></defs>
+              <rect width="280" height="245" fill="url(#bracing-section-grid)"/>
+              <path d="M96 49H184V64H151V161H184V176H96V161H129V64H96Z" fill="none" stroke="#8493ab" stroke-width="1.5" stroke-dasharray="5 5" opacity=".8"/>
+              <g class="bracing-twist-section"><path d="M96 49H184V64H151V161H184V176H96V161H129V64H96Z" fill="#31465f" stroke="#a9bfd4" stroke-width="2"/><path d="M96 49H184V64H96Z" fill="#3dd9c9" stroke="#a6f5ec" stroke-width="2"/><path d="M100 53H180" stroke="#d2fff8" stroke-width="2" opacity=".8"/></g>
+              <path d="M204 80 A76 76 0 0 1 202 160" fill="none" stroke="#ffa41b" stroke-width="2" marker-end="url(#bracing-twist-arrow)"/><circle cx="140" cy="112" r="3" fill="#ffc266"/>
+            </svg>
+            <div class="bracing-diagram-caption"><span class="bracing-twist-icon" aria-hidden="true">↻</span> Sideways movement + twist</div>
+          </div>
+        </div>
+        <figcaption>Illustrative movement is exaggerated. A designed bracing system restrains the beam’s sideways movement or twist.</figcaption>
       </figure>
     </section>
     <section id="bracing-help-practice" class="bracing-help-section">
@@ -171,14 +195,6 @@
         <li><strong>Check strength and stiffness.</strong> A brace must resist the force and limit movement. Include tube buckling or bending, clamp slip and rotation, connection offsets, and movement of the receiving structure.</li>
         <li><strong>Use the exact hardware instructions.</strong> Clamp number, placement, installation torque and permitted force direction depend on the component. Inspect for loose connections, damage and changes during erection or loading.</li>
       </ul>
-    </section>
-    <section id="bracing-help-tube" class="bracing-help-section">
-      <h3>Is 1.9″ OD × 0.095″ wall tube stiff enough?</h3>
-      <p>This size appears in manufactured scaffold braces. That does not rate a beam-to-beam tube-and-clamp assembly. Its effective restraint depends on tube grade and condition, unsupported length, orientation, connections, beam spacing and the receiving system.</p>
-      <p><strong>For 5–7 ft parallel ties with rigid connections:</strong> top-to-top and bottom-to-bottom tubes may provide restraint through the frame action of the connected beams and tubes. Verify the complete frame's strength and stiffness, including receiving-beam and support movement. Rigid connections do not make the tubes or the complete assembly infinitely stiff.</p>
-      <p><strong>The calculator's assumption:</strong> an entered lateral-brace connection is rigid in the required restraint directions, and the complete brace/support system has adequate strength and stiffness. The proprietary hardware's documented behavior must support that connection assumption.</p>
-      <p><strong>There is no universal cutoff length from these dimensions.</strong> A structural engineer can establish a standard detail with limits for tube length, brace spacing, beam loads, connection fixity and installation.</p>
-      <p>Enter verified restraint positions in this calculator. It assumes effective lateral braces; it does not design tube-and-clamp assemblies or analyze torsional bracing of paired beams.</p>
     </section>
     <section id="bracing-help-sources" class="bracing-help-section">
       <h3>Sources and further reading</h3>
