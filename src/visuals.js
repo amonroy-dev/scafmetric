@@ -62,8 +62,10 @@ function makeChart(analysis, id, key, label, symbol, unit) {
   const maxDetail = allZero ? `0 ${unit} throughout span` : `${labelValue(max,key)} ${unit} at ${num(ext.max.xFt,3)} ft`;
   const minDetail = allZero ? `0 ${unit} throughout span` : key === 'shearLb' ? `${labelValue(min,key)} ${unit} at ${num(ext.min.xFt,3)} ft` : `0 ${unit} at both supports`;
   const zeroDetail = key === 'shearLb' && !allZero && zeros.length ? `Zero shear at ${zeros.map(z=>num(z,3)).join(', ')} ft.` : '';
+  // The plot and its slider share one frame so the slider's percentage margins
+  // always match the plotted span, whatever width the frame is given.
   $(id).innerHTML = `<div class="response-figure"><div class="response-heading"><div><span class="response-kicker">SERVICE CASE / 1.0D + 1.0L</span><h3>${label}</h3></div><span class="response-unit">${symbol} / ${unit}</span></div>
-  <svg class="response-svg" viewBox="0 0 720 244" role="img" aria-label="${label} diagram, ${unit}. Minimum ${minDetail}; maximum ${maxDetail}. ${zeroDetail} Use the shared position slider to inspect values.">
+  <div class="plot-frame"><svg class="response-svg" viewBox="0 0 720 244" role="img" aria-label="${label} diagram, ${unit}. Minimum ${minDetail}; maximum ${maxDetail}. ${zeroDetail} Use the shared position slider to inspect values.">
   <defs><pattern id="hatch-${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#ffa41b" stroke-width="2" opacity=".5"/></pattern><clipPath id="negative-${id}"><rect x="0" y="${downPositive ? 0 : zero}" width="720" height="${downPositive ? zero : 125}"/></clipPath></defs>
   <path class="chart-gridline" d="M${left} 51H${right}M${left} 85H${right}M${left} 153H${right}M${left} 187H${right}"/>
   <path class="chart-support-guide" d="M${left} 40V193M${right} 40V193"/>
@@ -72,7 +74,7 @@ function makeChart(analysis, id, key, label, symbol, unit) {
   <path class="chart-cursor" data-cursor-line d="M${left} 38V193"/><circle class="chart-point" data-cursor-point cx="${left}" cy="${y(valueAt(pts[0],key))}" r="5"/>
   <text class="chart-axis chart-y-tick" x="72" y="56" text-anchor="end">${allZero ? '' : (downPositive ? '−' : '')+labelValue(maxAbs,key)}</text><text class="chart-axis chart-y-tick" x="72" y="124" text-anchor="end">0</text><text class="chart-axis chart-y-tick" x="72" y="191" text-anchor="end">${allZero ? '' : (downPositive ? '' : '−')+labelValue(maxAbs,key)}</text>${axisTicks}
   <text class="chart-axis chart-x-label" x="${(left+right)/2}" y="239" text-anchor="middle">DISTANCE FROM LEFT SUPPORT / ft</text></svg>
-  <div class="plot-slider"><input type="range" class="diagram-plot-slider" aria-label="Position along ${label.toLowerCase()} diagram in feet" min="0" max="${L}" step="${L/1000}" value="0"></div><div class="response-extrema"><div><span>MAXIMUM</span><strong>${maxDetail}</strong></div><div><span>MINIMUM</span><strong>${minDetail}</strong></div></div>${zeroDetail ? `<p class="response-zero">${zeroDetail}</p>` : ''}</div>`;
+  <div class="plot-slider"><input type="range" class="diagram-plot-slider" aria-label="Position along ${label.toLowerCase()} diagram in feet" min="0" max="${L}" step="${L/1000}" value="0"></div></div><div class="response-extrema"><div><span>MAXIMUM</span><strong>${maxDetail}</strong></div><div><span>MINIMUM</span><strong>${minDetail}</strong></div></div>${zeroDetail ? `<p class="response-zero">${zeroDetail}</p>` : ''}</div>`;
   return {id,key,y,left,right};
 }
 export function drawCharts(analysis) {
