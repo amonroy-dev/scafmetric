@@ -4,6 +4,29 @@ import { parseFlangeBracing } from './bracing.js';
 const $ = id => document.getElementById(id);
 const escapeText = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = n => Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—';
+const pointMagnitude = n => n !== 0 && (Math.abs(n) < 0.0001 || Math.abs(n) >= 1e9) ? n.toExponential(3) : fmt(Object.is(n, -0) ? 0 : n);
+// Keep labels near their arrows but allocate separate rows for overlapping text.
+export function arrangePointLabels(points, xAt, showUniform = false) {
+ const lanes = [];
+ return [...points].sort((a, b) => a.location - b.location || a.index - b.index).map(point => {
+  const label = `P${point.index + 1} = ${pointMagnitude(point.magnitude)} lbs`;
+  const width = Math.min(700, Math.max(110, label.length * 14));
+  const center = Math.max(width / 2 + 5, Math.min(715 - width / 2, xAt(point.location)));
+  const left = center - width / 2, right = center + width / 2;
+  let lane = lanes.findIndex(end => left > end + 10);
+  if (lane < 0) { lane = lanes.length; lanes.push(right); } else lanes[lane] = right;
+  return { ...point, label, labelX:center, labelY:(showUniform ? 0 : 58) - lane * 30, labelWidth:width };
+ });
+}
+// Reactions and point labels show the same instantaneous fraction during animation.
+export function updatePointLoads(svg, loadFraction = 1) {
+ if (!svg) return;
+ const fraction = Number.isFinite(loadFraction) ? Math.min(1, Math.max(0, loadFraction)) : 1;
+ for (const text of svg.querySelectorAll('[data-point-value]')) {
+  const magnitude = Number(text.dataset.pointMagnitude);
+  if (Number.isFinite(magnitude)) text.textContent = `P${text.dataset.pointNumber} = ${pointMagnitude(magnitude * fraction)} lbs`;
+ }
+}
 const numeric = id => { const value = $(id)?.value?.trim(); return value ? Number(value) : NaN; };
 const fields = [
  ['span','01','Distance between supports','ft'], ['dead-load','02','Dead load D','lb/ft'], ['live-load','03','Live load L','lb/ft'],
@@ -86,10 +109,12 @@ export function drawSchematic({ analysis = null } = {}) {
   const deadLb = dead === '' || dead == null ? NaN : Number(dead), liveLb = live === '' || live == null ? NaN : Number(live);
   return { index, deadLb, liveLb, magnitude:deadLb+liveLb, location: location === '' || location == null ? NaN : Number(location) };
  }).filter(p => p.deadLb >= 0 && p.liveLb >= 0 && p.magnitude > 0 && Number.isFinite(p.magnitude) && Number.isFinite(p.location) && validSpan && p.location >= 0 && p.location <= span);
- const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" data-x-ft="${p.location}" aria-label="Edit point load ${p.index+1}: dead ${fmt(p.deadLb)} plus live ${fmt(p.liveLb)} equals ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft"><title>D ${fmt(p.deadLb)} + LL ${fmt(p.liveLb)} = ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
+ const labeledPoints = arrangePointLabels(pointLoads, x, showUniform);
+ const topPadding = Math.max(0, ...labeledPoints.map(p => 28 - p.labelY));
+ const pointArrows = labeledPoints.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" data-x-ft="${p.location}" aria-label="Edit P${p.index+1}: dead ${fmt(p.deadLb)} plus live ${fmt(p.liveLb)} equals ${pointMagnitude(p.magnitude)} lbs at ${fmt(p.location)} ft, full service load"><title>Edit P${p.index+1}: D ${fmt(p.deadLb)} + LL ${fmt(p.liveLb)} = ${pointMagnitude(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><rect class="input-hit-area" x="${p.labelX-p.labelWidth/2}" y="${p.labelY-24}" width="${p.labelWidth}" height="29" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/><text class="in-point-label" data-point-value data-point-number="${p.index+1}" data-point-magnitude="${p.magnitude}" x="${p.labelX}" y="${p.labelY}" text-anchor="middle">${p.label}</text></g>`).join('');
  container.innerHTML = `<div class="input-drawings"><div class="input-elevation"><div class="input-scroll" role="region" aria-label="Interactive beam model">
- <svg class="input-beam" viewBox="0 0 720 310" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations. R1 is the upward left support reaction and R2 is the upward right support reaction under service load. Schematic not to scale.">
- <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="310" fill="url(#input-grid)"/>
+ <svg class="input-beam" viewBox="0 ${-topPadding} 720 ${310+topPadding}" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations. R1 is the upward left support reaction and R2 is the upward right support reaction under service load. Schematic not to scale.">
+ <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect y="${-topPadding}" width="720" height="${310+topPadding}" fill="url(#input-grid)"/>
  <g class="in-load">${arrows}${anyLoad?'<path data-load-bar d="M77 64H643"/>':''}</g>${pointArrows}
  ${showUniform ? editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`) : ''}
  ${showUniform ? editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`) : ''}
@@ -99,7 +124,7 @@ export function drawSchematic({ analysis = null } = {}) {
  ${editTarget('span',295,219,130,35,'span',`<text class="in-dimtext" x="360" y="242" text-anchor="middle">${validSpan ? fmt(span) : '—'} ft span</text>`)}
  <text class="in-note" x="77" y="193" text-anchor="middle">A</text><text class="in-note" x="643" y="193" text-anchor="middle">B</text>
  ${[['leftLb','R1',77],['rightLb','R2',643]].map(([key,name,station])=>`<g class="in-reaction" data-support-reaction="${key}" role="img"><path class="in-reaction-arrow" d="M${station} 251V231m-6 7 6-7 6 7" fill="none" stroke="#3dd9c9" stroke-width="2"/><text class="in-reaction-name" x="${station}" y="267" text-anchor="middle" font-size="14" fill="#ffc266">${name}</text><text class="in-reaction-value" data-reaction-value="${key}" x="${station}" y="293" text-anchor="middle" font-size="15" fill="#9ff3e9">— lbs</text></g>`).join('')}
- </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} lbs <small>D ${fmt(p.deadLb)} + LL ${fmt(p.liveLb)} · at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
+ </svg></div><div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
  <div class="input-section"><svg class="input-section-svg" viewBox="0 0 300 200" role="group" aria-label="Wide-flange section, major-axis bending"><path class="in-section-shape" d="M74 30H226V49H166V151H226V170H74V151H134V49H74Z"/><path class="in-axis" d="M51 100H249"/><text class="in-note" x="42" y="104">x</text><text class="in-note" x="253" y="104">x</text>${editTarget('section',65,20,170,160,'beam size')}</svg><span class="section-name">${escapeText(fieldValue('section'))}</span></div></div>`;
  updateSupportReactions(container.querySelector('.input-beam'), analysis);
  const focused = modelFieldId(document.activeElement);

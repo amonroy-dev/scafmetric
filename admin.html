@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Owner data | Scafmetric</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <main class="admin-wrap">
+    <header class="admin-header"><div><p class="eyebrow">SCAFMETRIC / OWNER</p><h1>Account and project data</h1><p>Review information submitted by signed-in users.</p></div><a href="calculator.html">Back to calculator</a></header>
+    <p id="admin-status" role="status" aria-live="polite">Checking owner access…</p>
+    <div id="admin-content" hidden>
+      <nav class="tabs" aria-label="Data type"><button type="button" id="accounts-tab" aria-pressed="true">Accounts</button><button type="button" id="projects-tab" aria-pressed="false">Projects</button></nav>
+      <div class="toolbar"><p id="data-description"></p><a id="download" class="download" href="/api/admin/data?type=accounts&amp;format=csv">Download CSV</a></div>
+      <div class="table-scroll"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
+      <button type="button" id="load-more" class="more" hidden>Load more</button>
+    </div>
+    <p class="signin-link"><a href="signin.html">Sign in</a> with an authorized owner account to access this page.</p>
+  </main>
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

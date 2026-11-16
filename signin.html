@@ -32,10 +32,26 @@
         </section>
         <section id="terms-view" class="verification" aria-labelledby="terms-title" hidden>
           <h3 id="terms-title">Terms of use · draft</h3>
-          <p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p>
-          <p>By continuing, you acknowledge this preliminary-use limitation and agree to the <a href="calculator.html#terms" target="_blank" rel="noopener">draft terms of use</a>.</p>
+          <p>Monroy Labs, LLC provides Scafmetric for preliminary calculations only. A qualified professional must independently verify the inputs, assumptions, results, and complete scaffold design before use. The tool does not provide engineering approval or certification.</p>
+          <p>Wind, snow, rain, and earthquake loads are not added automatically or checked separately. Loads entered as dead or live load are treated only as downward static loads.</p>
+          <p>To the extent permitted by law, the output is provided as-is without warranties and subject to the liability limitations in the terms.</p>
+          <p>Scafmetric stores account details and, when a project save succeeds, its project name and preparer. Read the <a href="calculator.html#terms" target="_blank" rel="noopener">full draft terms of use (opens in a new tab)</a> for the complete limitations, responsibilities, and data details.</p>
+          <p>By selecting “I agree and continue,” you agree to the full draft terms of use.</p>
           <button type="button" class="submit-button" id="accept-terms">I agree and continue</button>
           <button type="button" class="text-button" id="decline-terms">Cancel</button>
+        </section>
+        <section id="profile-view" class="verification" aria-labelledby="profile-title" hidden>
+          <h3 id="profile-title">Tell us about yourself</h3>
+          <p class="profile-notice">We save these details with your account to understand who uses Scafmetric and how people find us.</p>
+          <form id="profile-form">
+            <fieldset id="profile-fields">
+              <div class="field"><label for="profile-name">Your name</label><input id="profile-name" type="text" autocomplete="name" maxlength="80" required></div>
+              <div class="field"><label for="profile-company">Company</label><input id="profile-company" type="text" autocomplete="organization" maxlength="120" required></div>
+              <div class="field"><label for="profile-discovery">How did you find Scafmetric?</label><input id="profile-discovery" type="text" maxlength="160" placeholder="For example, a colleague or a web search" required></div>
+              <button type="submit" class="submit-button">Continue</button>
+            </fieldset>
+          </form>
+          <button type="button" class="text-button profile-cancel" id="cancel-profile">Cancel</button>
         </section>
         <form id="auth-form" novalidate>
           <fieldset id="auth-fields" disabled>
@@ -50,7 +66,7 @@
             <button class="text-button back-button" id="back-to-signin" type="button" hidden>Back to sign in</button>
           </fieldset>
         </form>
-        <p class="fine-print">Account access is being prepared. The current beam calculator remains available for preliminary use.</p>
+        <p class="fine-print">Sign in and complete your account details to run a preliminary beam analysis.</p>
         <a class="back-link" href="index.html">← Back to Scafmetric</a>
       </div>
     </section>

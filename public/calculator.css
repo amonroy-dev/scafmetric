@@ -94,6 +94,9 @@
   .wizard-skip { background:transparent; color:var(--ws-aqua-2); }
   .wizard-skip:hover { border-color:var(--ws-aqua); background:rgba(61,217,201,.08); }
   .wizard-error { margin:12px 0 0; color:var(--ws-coral); font-size:12px; line-height:1.5; }
+  .project-save-disclosure { margin:12px 0 0; color:var(--ws-dim); font-size:11.5px; line-height:1.5; }
+  .project-save-status { margin:14px 18px 0; padding:10px 12px; border:1px solid var(--ws-line); color:var(--ws-muted); font-size:12px; line-height:1.5; }
+  .project-save-status button,.project-save-status a { padding:0; border:0; background:none; color:var(--ws-aqua-2); font:inherit; text-decoration:underline; cursor:pointer; }
   .wizard-bracing-note { margin:12px 0 0; color:var(--ws-dim); font-size:11.5px; line-height:1.5; }
   .section-title { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
   .section-title .step { display:inline-grid; place-items:center; min-width:28px; height:20px; padding:0 5px; border:1px solid rgba(255,164,27,.5); background:rgba(255,164,27,.1); color:var(--ws-orange); font:400 8px/1 var(--pixel); letter-spacing:0; }
@@ -162,6 +165,7 @@
   .brace-list { display:flex; flex-direction:column; gap:6px; }
   .brace-list:not(:empty) { margin-bottom:8px; }
   .brace-entry { display:flex; gap:6px; margin:0; animation:ws-row-in .2s ease-out; }
+  .brace-entry>.input-unit { flex:1; min-width:0; }
   .brace-entry input { flex:1; min-width:0; }
   .brace-entry button { flex:none; width:42px; border:1px solid var(--ws-line-2); border-radius:0; background:transparent; color:var(--ws-dim); font-size:18px; }
   .brace-entry button:hover { border-color:rgba(255,140,123,.55); background:rgba(255,140,123,.1); color:#ffc4b9; }
@@ -208,6 +212,8 @@
   .action-bar .acknowledgement { margin:0 0 12px; padding:0; border:0; }
   .action-bar .error { margin:0 0 12px; padding:8px 10px; border:1px solid rgba(255,140,123,.45); background:rgba(255,140,123,.08); color:#ffc4b9; font-size:12px; line-height:1.5; }
   .action-bar .error:empty { display:none; }
+  .analysis-signin { display:inline-block; margin:0 0 12px; color:var(--ws-aqua-2); font-size:12px; text-decoration:underline; }
+  .analysis-signin[hidden] { display:none; }
 
   /* Model */
   .drawing-panel>.panel-header { flex-wrap:wrap; row-gap:10px; }
@@ -231,6 +237,7 @@
   .input-section-svg { display:block; width:100%; max-height:150px; }
   .section-name { display:block; margin-top:8px; color:var(--ws-orange-2); font:400 8px/1.4 var(--pixel); text-align:center; }
   .input-beam .in-text,.input-beam .in-dimtext { fill:var(--ws-text); font:500 13px var(--sans); }
+  .input-beam .in-point-label { fill:var(--ws-aqua-2); font:600 16px var(--sans); font-variant-numeric:tabular-nums; }
   .input-beam .in-note,.input-section-svg .in-note { fill:var(--ws-dim); font:500 12px var(--sans); }
   .input-beam .in-reaction-name { fill:var(--ws-orange-2); font:650 16px var(--sans); }
   .input-beam .in-reaction-value { fill:var(--ws-aqua-2); font:600 18px var(--sans); font-variant-numeric:tabular-nums; }
@@ -271,11 +278,6 @@
   .deflection-readout.is-over .deflection-value { color:var(--ws-coral); }
   /* The beam turns red for as long as its sag exceeds the deflection limit. */
   .input-beam.is-over-limit .in-beam { stroke:var(--ws-coral); filter:drop-shadow(0 0 7px rgba(255,140,123,.65)); }
-  .model-point-list { display:flex; flex-wrap:wrap; gap:6px; padding:2px 0 8px; }
-  .model-point-list button { padding:5px 9px 3px; border:1px solid var(--ws-line-2); border-radius:0; background:rgba(8,15,26,.6); color:var(--ws-text); font:17px/1 var(--term); letter-spacing:.03em; }
-  .model-point-list button:hover { border-color:var(--ws-aqua); }
-  .model-point-list button span { margin-right:6px; color:var(--ws-aqua-2); }
-  .model-point-list small { margin-left:4px; color:var(--ws-dim); font-size:inherit; }
   .input-brace-summary { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; padding:4px 0 12px; border:0; color:var(--ws-dim); font:12px/1.5 var(--sans); }
   .model-flange-braces { display:flex; flex-flow:row wrap; align-items:center; gap:6px 16px; min-width:0; }
   .model-restraints { max-width:100%; padding:2px 0 1px; border:0; border-bottom:1px dashed #4b5d78; border-radius:0; background:none; color:var(--ws-muted); font:17px/1.2 var(--term); letter-spacing:.03em; text-align:left; overflow-wrap:anywhere; }
@@ -312,13 +314,13 @@
   .verdict-action { display:inline-flex; align-items:center; min-height:36px; margin-top:14px; padding:4px 12px 2px; border:1px dashed rgba(61,217,201,.5); border-radius:0; background:transparent; color:var(--ws-aqua-2); font:18px/1 var(--term); letter-spacing:.04em; text-transform:uppercase; }
   .verdict-action:hover { border-style:solid; background:rgba(61,217,201,.08); }
   .meters { display:grid; gap:10px; margin-top:14px; padding-top:14px; border-top:1px dashed var(--ws-line-2); }
-  .meter { display:grid; grid-template-columns:minmax(140px,max-content) minmax(0,1fr) 62px; align-items:center; gap:12px; }
+  .meter { display:grid; grid-template-columns:minmax(140px,max-content) minmax(0,1fr) minmax(62px,max-content); align-items:center; gap:12px; }
   .meter-deflection { padding-top:10px; border-top:1px dotted var(--ws-line-2); }
   .meter-label { color:var(--ws-muted); font:17px/1 var(--term); letter-spacing:.04em; text-transform:uppercase; white-space:nowrap; }
   .meter-track { position:relative; height:16px; border:1px solid var(--ws-line-2); background:rgba(6,11,21,.7); }
   .meter-track::after { content:''; position:absolute; top:-4px; bottom:-4px; right:-2px; width:2px; background:var(--ws-text); opacity:.45; }
   .meter-fill { position:absolute; top:2px; bottom:2px; left:2px; width:calc((100% - 4px) * var(--fill)); background:var(--meter); -webkit-mask:repeating-linear-gradient(90deg,#000 0 7px,transparent 7px 9px); mask:repeating-linear-gradient(90deg,#000 0 7px,transparent 7px 9px); animation:ws-fill .9s steps(12) .15s both; }
-  .meter-value { color:var(--meter); font:400 10px/1 var(--pixel); text-align:right; font-variant-numeric:tabular-nums; }
+  .meter-value { color:var(--meter); font:700 15px/1.2 var(--sans); text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .meter-ok { --meter:var(--ws-aqua); }
   .meter-near { --meter:var(--ws-orange-2); }
   .meter-over { --meter:var(--ws-coral); }
@@ -493,8 +495,9 @@
   .property-content span { display:block; color:var(--ws-dim); font:17px/1 var(--term); letter-spacing:.03em; }
   .property-content strong { display:block; margin-top:5px; color:var(--ws-text); font:600 13px/1.3 var(--sans); font-variant-numeric:tabular-nums; }
   .property-content small { color:var(--ws-dim); font-size:11px; font-weight:400; }
-  .terms-panel { padding:2px 4px 0; border:0; color:var(--ws-dim); font-size:11.5px; line-height:1.6; }
-  .terms-panel strong { color:var(--ws-muted); font:17px/1 var(--term); letter-spacing:.05em; text-transform:uppercase; }
+  .terms-panel { padding:2px 4px 0; border:0; color:var(--ws-muted); font-size:13px; line-height:1.65; }
+  .terms-panel h2 { margin:0; color:var(--ws-text); font:21px/1.2 var(--term); letter-spacing:.05em; text-transform:uppercase; }
+  .terms-panel h3 { margin:16px 0 0; color:var(--ws-text); font:650 13px/1.4 var(--sans); }
   .terms-panel p { margin:6px 0 0; }
   .error { color:#ffc4b9; }
 
@@ -553,6 +556,7 @@
   .drawing-panel .schematic { padding:6px 12px 0; }
   .input-beam { max-height:none; }
   .input-beam .in-text,.input-beam .in-dimtext { font-size:22px; }
+  .input-beam .in-point-label { font-size:25px; }
   .input-beam .in-note { font-size:18px; }
   .input-beam .in-reaction-name { font-size:22px; }
   .input-beam .in-reaction-value { font-size:24px; }
@@ -571,7 +575,7 @@
   .result-grid>div:nth-child(n) { grid-column:auto; }
   .result-grid>div:last-child { grid-column:1/-1; }
   .result-grid strong { font-size:23px; }
-  .meter { grid-template-columns:minmax(0,1fr) 58px; gap:6px 10px; }
+  .meter { grid-template-columns:minmax(0,1fr) minmax(58px,max-content); gap:6px 10px; }
   .meter-label { grid-column:1/-1; }
   .response-extrema.has-limit { grid-template-columns:1fr 1fr; }
   .response-extrema .extrema-limit { grid-column:1/-1; border-left:0!important; border-top:1px solid var(--ws-line); padding-left:12px; }

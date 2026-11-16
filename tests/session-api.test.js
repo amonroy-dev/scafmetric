@@ -48,3 +48,21 @@ test('session reports acceptance and stores it only when current terms are expli
   r=response(); await handler(req('POST',{ idToken:'good', acceptTermsVersion:TERMS_VERSION }),r); assert.equal(r.body.termsAccepted,true);
   r=response(); await handler(req('GET',null,{cookie}),r); assert.equal(r.body.termsAccepted,true);
 });
+
+test('profile completion is validated and bound to the verified identity', async () => {
+  let account = { termsVersion:TERMS_VERSION, termsAcceptedAt:new Date().toISOString() }, captured;
+  const handler = createSessionHandler({ env, verifyToken:async () => decoded,
+    accountFor:async data => { captured=data; if (data.profile) account={...account, profile:data.profile}; return account; },
+    accountStatus:async () => ({ termsAccepted:true, profileComplete:Boolean(account.profile) }) });
+  let r=response(); await handler(req('POST', { idToken:'good' }), r);
+  assert.equal(r.body.profileComplete, false);
+  r=response(); await handler(req('POST', { idToken:'good', profile:{ name:' ', company:'Example', discovery:'Search' } }), r);
+  assert.equal(r.statusCode, 400);
+  r=response(); await handler(req('POST', { idToken:'good', uid:'someone-else', profile:{ name:'Alex', company:'Example', discovery:'Search' } }, { origin:'https://elsewhere.example' }), r);
+  assert.equal(r.statusCode, 403);
+  r=response(); await handler(req('POST', { idToken:'good', uid:'someone-else', profile:{ name:'Alex', company:'Example', discovery:'Search' } }), r);
+  assert.equal(r.statusCode, 200); assert.equal(captured.uid, decoded.uid); assert.equal(r.body.profileComplete, true);
+  const cookie = r.headers['Set-Cookie'].split(';')[0];
+  r=response(); await handler(req('GET', null, { cookie }), r); assert.equal(r.body.profileComplete, true);
+  assert.equal(r.body.profile, undefined);
+});

@@ -58,7 +58,7 @@ function loadSchedule(r) {
  return table('Applied loads — downward positive; x measured from left support A', ['ID','Type / category','Magnitude','Unit','Location'], rows)
  + row('Total distributed dead load', 'w<sub>DL</sub> = Σw<sub>D,applied</sub> + w<sub>SW</sub>', `${fromKips(r.dead)} + ${fromKips(r.self)}`, `${fromKips(r.dead+r.self)} lb/ft; includes beam self-weight once`)
  + row('Uniform service load', 'w<sub>service</sub> = w<sub>DL</sub> + w<sub>LL</sub>', `${fromKips(r.dead+r.self)} + ${fromKips(r.live)}`, `${fromKips(r.total)} lb/ft`)
- + `<p class="report-note">Beam self-weight is included once. Every point load has separate downward dead and live portions at the same position; its service total is D + LL. Service analysis uses 1.0D + 1.0L; this is the supported load case, not an envelope of all required project load combinations.</p>`;
+ + `<p class="report-note">Beam self-weight is included once. Every point load has separate downward dead and live portions at the same position; its service total is D + LL. Service analysis uses 1.0D + 1.0L; this is the supported load case, not an envelope of all required project load combinations. Wind, snow, rain, and earthquake loads are not added or checked separately. Any such load entered as dead or live load is treated only as a downward static load.</p>`;
 }
 function bracingSchedule(r) {
  const top = r.braces.top?.locations || r.braces.locations;

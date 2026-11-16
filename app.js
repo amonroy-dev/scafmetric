@@ -16,8 +16,11 @@ import { parseFlangeBracing } from './src/bracing.js';
 import { renderCalculationReport } from './src/calculation-report.js';
 import { createDeflectionView } from './src/deflection-view.js';
 import { initializeStepWizard } from './src/step-wizard.js';
+import { createProjectSaver } from './src/project-save.js';
+import { getAnalysisAccess } from './src/analysis-access.js';
 
 const $ = id => document.getElementById(id);
+const projectSaver = createProjectSaver({ status:$('project-save-status'), message:$('project-save-message'), retry:$('project-save-retry'), signIn:$('project-save-signin') });
 const bracingHelp = initializeBracingHelp();
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
 const ratio = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
@@ -272,6 +275,7 @@ function run(e) {
   const checks = {...memberChecks({section:s, analysis, pointLoads, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison}), deflection};
   record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, sectionProperties:s, span, dead, live, self, total, uniformLoads, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); scanModel(); $('report').disabled = false;
+  projectSaver.capture(record.project, record.preparer);
   const resultsPanel = document.querySelector('.results-panel');
   resultsPanel.focus({preventScroll:true});
   if (window.matchMedia('(max-width: 760px)').matches) resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
@@ -430,7 +434,32 @@ $('load-rows').addEventListener('click', e => {
  labelLoadRows();
  invalidate(); drawSchematic(); $('add-load').focus();
 });
-$('beam-form').addEventListener('submit', e => { if (stepWizard.canSubmit()) run(e); else e.preventDefault(); });
+let checkingAnalysisAccess = false;
+$('beam-form').addEventListener('submit', async e => {
+ e.preventDefault();
+ if (checkingAnalysisAccess || !stepWizard.canSubmit()) return;
+ checkingAnalysisAccess = true;
+ $('calculate').disabled = true;
+ $('error').textContent = '';
+ $('analysis-signin').hidden = true;
+ try {
+  const access = await getAnalysisAccess();
+  if (access !== 'allowed') {
+   invalidate();
+   $('error').textContent = access === 'signin'
+    ? 'Sign in before running an analysis. Return to this page and select Run analysis again.'
+    : access === 'onboarding'
+     ? 'Complete your account details and accept the current terms before running an analysis. Return here and try again.'
+     : 'Account verification is temporarily unavailable. Please try Run analysis again later.';
+   $('analysis-signin').hidden = access === 'unavailable';
+   return;
+  }
+  if (stepWizard.canSubmit()) run(e);
+ } finally {
+  checkingAnalysisAccess = false;
+  $('calculate').disabled = false;
+ }
+});
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
 const responseTabs = [...document.querySelectorAll('[data-response-tab]')];
 function selectResponse(name, focus = false) {
@@ -509,11 +538,13 @@ for (const editor of document.querySelectorAll('.brace-editor')) {
  };
  const next = () => {
   const row = document.createElement('div'); row.className = 'brace-entry';
-  const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.placeholder = 'Position · ft'; input.setAttribute('aria-label', `${flange} flange brace position in feet`);
+  const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.placeholder = 'e.g. 5'; input.setAttribute('aria-label', `${flange} flange brace position from left support in feet`);
+  const field = document.createElement('div'); field.className = 'input-unit';
+  const unit = document.createElement('span'); unit.textContent = 'ft'; unit.setAttribute('aria-hidden', 'true'); field.append(input, unit);
   const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove brace');
   remove.addEventListener('click', () => { row.remove(); sync(); }); input.addEventListener('input', sync);
   input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); if (input.value !== '') next(); } });
-  row.append(input, remove); list.append(row); input.focus();
+  row.append(field, remove); list.append(row); input.focus();
   $('brace-cleared').textContent = '';
  };
  editor.querySelector('.next-brace').addEventListener('click', next);

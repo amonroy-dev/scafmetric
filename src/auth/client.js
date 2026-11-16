@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail, updateProfile, signOut } from 'firebase/auth';
 
 const $ = id => document.getElementById(id);
-let auth, view = 'signin', busy = false, pendingTermsUser = null, pendingTermsVersion = null;
+let auth, view = 'signin', busy = false, pendingTermsUser = null, pendingTermsVersion = null, pendingProfileUser = null;
 const settings = () => ({ url: `${location.origin}/signin.html`, handleCodeInApp: false });
 const notify = (message = '') => { $('auth-status').textContent = message; $('auth-status').hidden = !message; };
 const errors = {
@@ -18,27 +18,30 @@ function setBusy(value) {
  busy = value; $('auth-fields').disabled = value; $('google-signin').disabled = value;
  $('check-verified').disabled = value; $('resend-verification').disabled = value;
  $('accept-terms').disabled = value; $('decline-terms').disabled = value;
+ $('profile-fields').disabled = value; $('cancel-profile').disabled = value;
 }
 function setView(next) {
  view = next; notify(); $('password').value = ''; $('password').type = 'password'; $('show-password').textContent = 'Show'; $('show-password').setAttribute('aria-pressed', 'false');
- const signup = next === 'signup', reset = next === 'reset', verify = next === 'verify', terms = next === 'terms';
- $('auth-form').hidden = verify || terms; $('verify-view').hidden = !verify; $('terms-view').hidden = !terms;
- $('google-signin').hidden = terms; document.querySelector('.divider').hidden = terms;
+ const signup = next === 'signup', reset = next === 'reset', verify = next === 'verify', terms = next === 'terms', profile = next === 'profile';
+ $('auth-form').hidden = verify || terms || profile; $('verify-view').hidden = !verify; $('terms-view').hidden = !terms; $('profile-view').hidden = !profile;
+ $('google-signin').hidden = terms || profile; document.querySelector('.divider').hidden = terms || profile;
  $('signin-tab').parentElement.hidden = reset; $('name-row').hidden = !signup; $('password-row').hidden = reset;
  $('forgot-password').hidden = signup; $('back-to-signin').hidden = !reset;
  $('signin-tab').setAttribute('aria-selected', String(next === 'signin')); $('signup-tab').setAttribute('aria-selected', String(signup));
  $('password').autocomplete = signup ? 'new-password' : 'current-password';
  $('submit-auth').textContent = reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in';
 }
-async function finish(user, acceptTermsVersion) {
+async function finish(user, acceptTermsVersion, profile) {
  const idToken = await user.getIdToken(true);
- const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken, acceptTermsVersion}) });
+ const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken, acceptTermsVersion, profile}) });
  if (response.status === 409) throw new Error('The terms have changed. Reload this page to review them.');
  if (!response.ok) throw new Error('Session could not be created.');
  const session=await response.json();
  if (session.termsVersion !== TERMS_VERSION) { notify('The terms have changed. Reload this page to review them.'); return; }
  if (!session.termsAccepted) { pendingTermsUser=user; pendingTermsVersion=session.termsVersion; setView('terms'); return; }
  pendingTermsUser=null; pendingTermsVersion=null;
+ if (!session.profileComplete) { pendingProfileUser=user; $('profile-name').value ||= user.displayName || ''; setView('profile'); return; }
+ pendingProfileUser=null;
  location.replace('/calculator.html');
 }
 $('accept-terms').addEventListener('click', async () => {
@@ -46,10 +49,19 @@ $('accept-terms').addEventListener('click', async () => {
  notify(); setBusy(true);
  try { await finish(pendingTermsUser, pendingTermsVersion); } catch (e) { failure(e); } finally { setBusy(false); }
 });
-$('decline-terms').addEventListener('click', async () => {
+async function cancelOnboarding() {
  if (busy) return; setBusy(true);
- try { const response=await fetch('/api/auth/session', { method:'DELETE' }); if (!response.ok) throw new Error('Sign out failed'); if (auth) await signOut(auth); pendingTermsUser=null; pendingTermsVersion=null; setView('signin'); }
+ try { const response=await fetch('/api/auth/session', { method:'DELETE' }); if (!response.ok) throw new Error('Sign out failed'); if (auth) await signOut(auth); pendingTermsUser=null; pendingTermsVersion=null; pendingProfileUser=null; $('profile-form').reset(); setView('signin'); }
  catch (e) { failure(e); } finally { setBusy(false); }
+}
+$('decline-terms').addEventListener('click', cancelOnboarding);
+$('cancel-profile').addEventListener('click', cancelOnboarding);
+$('profile-form').addEventListener('submit', async e => {
+ e.preventDefault(); if (busy || !pendingProfileUser) return;
+ const profile = { name:$('profile-name').value.trim(), company:$('profile-company').value.trim(), discovery:$('profile-discovery').value.trim() };
+ if (!profile.name || !profile.company || !profile.discovery) return notify('Enter your name, company, and how you found Scafmetric.');
+ notify(); setBusy(true);
+ try { await finish(pendingProfileUser, undefined, profile); } catch (err) { failure(err); } finally { setBusy(false); }
 });
 $('signin-tab').addEventListener('click', () => setView('signin'));
 $('signup-tab').addEventListener('click', () => setView('signup'));

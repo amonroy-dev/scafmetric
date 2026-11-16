@@ -63,3 +63,36 @@ test('acceptance is explicit, versioned and persists without extending trial', a
   db.docs.get(identity.uid).termsVersion = 'older-version';
   assert.equal((await readAccount(db, identity)).termsAccepted, false);
 });
+
+test('an account that accepted the previous draft must accept the updated draft', async () => {
+  const db = fakeDatabase();
+  const account = await ensureAccount(db, identity);
+  db.docs.set(identity.uid, { ...account, termsVersion:'draft-2026-11-14', termsAcceptedAt:'2026-11-14T12:00:00.000Z' });
+  assert.equal((await readAccount(db, identity)).termsAccepted, false);
+  await assert.rejects(ensureAccount(db, { ...identity, acceptTermsVersion:'draft-2026-11-14' }));
+  const accepted = await ensureAccount(db, { ...identity, acceptTermsVersion:TERMS_VERSION });
+  assert.equal((await readAccount(db, identity)).termsAccepted, true);
+  assert.equal(accepted.trialEndsAt, account.trialEndsAt);
+});
+
+test('profile completion stores bounded, trimmed fields on the verified account without altering its trial or terms', async () => {
+  const db = fakeDatabase();
+  const original = await ensureAccount(db, { ...identity, acceptTermsVersion: TERMS_VERSION });
+  assert.equal((await readAccount(db, identity)).profileComplete, false);
+  const updated = await ensureAccount(db, { ...identity, profile: { name: '  Alex Rivera ', company: '  Example Co  ', discovery: ' Colleague ', ignored: 'not stored' } });
+  assert.deepEqual(updated.profile, { name: 'Alex Rivera', company: 'Example Co', discovery: 'Colleague' });
+  assert.ok(Number.isFinite(Date.parse(updated.profileUpdatedAt)));
+  assert.equal(updated.trialEndsAt, original.trialEndsAt);
+  assert.equal(updated.termsAcceptedAt, original.termsAcceptedAt);
+  assert.equal((await readAccount(db, identity)).profileComplete, true);
+  assert.deepEqual((await ensureAccount(db, identity)).profile, updated.profile);
+});
+
+test('invalid profile fields never write partial account data', async () => {
+  const db = fakeDatabase();
+  await ensureAccount(db, identity);
+  const badProfiles = [null, {}, { name:' ', company:'Example', discovery:'Search' }, { name:'Alex', company:'X'.repeat(121), discovery:'Search' }, { name:'Alex\nAdmin', company:'Example', discovery:'Search' }, { name:'Alex', company:'Example', discovery:42 }];
+  for (const profile of badProfiles.slice(1)) await assert.rejects(ensureAccount(db, { ...identity, profile }));
+  assert.equal((await readAccount(db, identity)).profileComplete, false);
+  assert.equal(db.docs.get(identity.uid).profile, undefined);
+});
