@@ -295,6 +295,10 @@
   .meter-over .meter-track { border-color:rgba(255,140,123,.6); box-shadow:0 0 12px rgba(255,140,123,.25); }
   .suggestion:not(:empty) { padding:14px 18px 0; }
   .suggestion-card { height:100%; padding:16px 18px; border:1px solid rgba(61,217,201,.38); border-radius:0; background:linear-gradient(135deg,rgba(61,217,201,.09),rgba(61,217,201,.01)); animation:ws-pop .35s var(--ease) .08s both; }
+  .suggestion-bracing { display:block; width:100%; padding:0; border:0; background:transparent; color:var(--ws-aqua-2); font:650 16px/1.45 var(--sans); text-align:left; cursor:pointer; }
+  .suggestion-bracing:hover { color:var(--ws-aqua); text-decoration:underline; text-underline-offset:4px; }
+  .suggestion-or { display:flex; align-items:center; gap:14px; margin:24px 0; color:var(--ws-dim); font:18px/1 var(--term); letter-spacing:.1em; }
+  .suggestion-or::before,.suggestion-or::after { content:''; flex:1; border-top:1px solid var(--ws-line-2); }
   .suggestion-label { display:block; margin-bottom:10px; color:var(--ws-aqua); font:16px/1 var(--term); letter-spacing:.1em; }
   .suggestion-card>strong { display:block; color:var(--ws-text); font:400 14px/1.5 var(--pixel); }
   .suggestion-card strong small { color:var(--ws-muted); font:19px/1 var(--term); letter-spacing:.02em; }

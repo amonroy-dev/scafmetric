@@ -4,6 +4,7 @@ import { beamSelfWeight } from './src/beam-self-weight.js';
 import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
 import { checkDeflection } from './src/deflection-check.js';
 import { suggestBeamSize } from './src/suggest-beam-size.js';
+import { canConsiderLateralBracing } from './src/bracing-suggestion.js';
 import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
 import { strengthComparisonLoads } from './src/strength-comparison.js';
@@ -309,6 +310,9 @@ function verdictHtml(check) {
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
  if (status.status === 'incomplete' || status.unavailable?.length) { $('suggestion').innerHTML = ''; return; }
+ const bracingOption = canConsiderLateralBracing(r.checks)
+  ? '<button type="button" class="suggestion-bracing" data-review-bracing>Consider adding lateral bracing?</button><div class="suggestion-or"><span>OR</span></div>'
+  : '';
  let found;
  try {
   found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
@@ -320,12 +324,12 @@ function renderSuggestion(r) {
   $('suggestion').innerHTML = ''; return;
  }
  if (found.status !== 'suggested') {
-  $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">SIZE SCREEN</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p></div>`;
+  $('suggestion').innerHTML = `<div class="suggestion-card">${bracingOption}<span class="suggestion-label">Suggested size</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p></div>`;
   return;
  }
  const name = found.section.AISC_Manual_Label;
  const button = name === r.section ? '<span class="suggestion-current">Currently selected</span>' : `<button type="button" class="suggestion-button" data-use-suggestion="${escape(name)}">Use ${escape(name)} →</button>`;
- $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">PRELIMINARY SIZE TO CONSIDER</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}</div>`;
+ $('suggestion').innerHTML = `<div class="suggestion-card">${bracingOption}<span class="suggestion-label">Suggested size</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}</div>`;
 }
 function render(r) {
  const a = r.analysis; const max = a.maxDeflection;
@@ -461,6 +465,13 @@ $('verdict').addEventListener('click', e => {
  $('capacity-confirmed').focus();
 });
 $('suggestion').addEventListener('click', e => {
+ if (e.target.closest('[data-review-bracing]')) {
+  const target = document.querySelector('.brace-editor[data-flange="top"] .next-brace');
+  revealField(target);
+  target.focus({preventScroll:true});
+  target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
+  return;
+ }
  const button = e.target.closest('[data-use-suggestion]');
  if (!button) return;
  const name = button.dataset.useSuggestion;
