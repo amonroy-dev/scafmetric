@@ -62,7 +62,7 @@ function labelLoadRows() {
   row.dataset.loadId = label;
   row.querySelector('.load-number').textContent = label;
   let picker = row.querySelector('.row-load-type');
-  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; setLoadType(row); labelLoadRows(); if (row === $('load-rows').firstElementChild) $('new-load-type').value = picker.value; invalidate(); drawSchematic(); }); }
+  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; setLoadType(row); labelLoadRows(); invalidate(); drawSchematic(); }); }
   picker.value = isPoint ? 'point' : 'uniform'; picker.setAttribute('aria-label', `${label} load type`);
   row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
   row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, pounds per foot`);
@@ -110,6 +110,7 @@ function properties() {
 function invalidate() {
  if (!record) return;
  record = null;
+ document.querySelector('.drawing-panel')?.classList.remove('has-results', 'is-scanning');
  $('verdict').innerHTML = '<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Inputs changed</strong><p class="verdict-detail">Calculate again to update your beam check.</p></div>';
  $('results').innerHTML = emptyMetrics;
  $('suggestion').innerHTML = '';
@@ -229,20 +230,48 @@ function run(e) {
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
   const checks = memberChecks({section:s, analysis, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison});
   record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, sectionProperties:s, span, dead, live, self, total, uniformLoads, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
-  render(record); $('report').disabled = false;
+  render(record); scanModel(); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
   resultsPanel.focus({preventScroll:true});
   if (window.matchMedia('(max-width: 760px)').matches) resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
  } catch(err) { invalidate(); $('error').textContent = err.message; }
 }
+// Demand-to-capacity ratios for each evaluated check, in the same order as the verdict.
+function utilizationItems(check) {
+ if (check?.status !== 'evaluated') return [];
+ const items = [];
+ const add = (name, result, flexure = false) => {
+  const value = flexure ? result?.governingSegment?.utilization : result?.utilization;
+  if (result?.status === 'evaluated' && Number.isFinite(value)) items.push({name, value});
+ };
+ add('Bending', check.flexure, true);
+ add('Shear', check.shear);
+ if (check.extra) {
+  const label = check.comparisonSelection === 'four' ? '4:1' : 'Custom SF';
+  add(`${label} bending`, check.extra.bending, true);
+  add(`${label} shear`, check.extra.shearing);
+ }
+ return items;
+}
+// Segmented ratio meters. The bar caps at 1.0; a value that only rounds to 1.000
+// while exceeding it is shown as >1.000 so the display never contradicts the verdict.
+function metersHtml(check) {
+ const items = utilizationItems(check);
+ if (!items.length) return '';
+ return `<div class="meters" aria-label="Demand to allowable ratios">${items.map(({name, value}) => {
+  const state = value > 1 ? 'over' : value > 0.9 ? 'near' : 'ok';
+  const shown = value > 1 && ratio(value) === '1.000' ? '>1.000' : ratio(value);
+  return `<div class="meter meter-${state}"><span class="meter-label">${escape(name)}</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" style="--fill:${Math.min(Math.max(value, 0), 1).toFixed(4)}"></span></span><strong class="meter-value">${shown}</strong></div>`;
+ }).join('')}</div>`;
+}
 function verdictHtml(check) {
  const result = summarizeChecks(check);
  const scope = '<p class="verdict-scope">These are preliminary bending and shear checks only. Bearing, connections, deflection limits, bracing and scaffold requirements need separate review.</p>';
- if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p><button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
+ if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p>${metersHtml(check)}<button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
  const item = result.governing;
  const governing = `${escape(item.name)} · ${fmt(item.utilization * 100, 4)}% of allowable (compared without rounding)`;
- if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
- return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — listed bending and shear checks</strong><p class="verdict-detail"><strong>${governing}</strong><br>The evaluated demand is within the allowable strength.</p>${scope}</div>`;
+ if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${metersHtml(check)}${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — listed bending and shear checks</strong><p class="verdict-detail"><strong>${governing}</strong><br>The evaluated demand is within the allowable strength.</p>${metersHtml(check)}${scope}</div>`;
 }
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
@@ -292,11 +321,58 @@ function render(r) {
  ${calculationRow('Bottom flange braces', 'Recorded separately; does not reduce top-flange Lb', `${r.braces.bottom.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
  <p class="capacity-note">Beam bending only; shear deformation excluded. No overall adequacy or independent verification. Bearing, connections, and scaffold-specific capacity are not evaluated. AISC v15 section data is from a third-party mirror; verify against the official source.</p>
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
- $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid"><div><span>Left reaction</span><strong>${fmt(a.reactions.leftLb/1000)} <small>kip</small></strong></div><div><span>Right reaction</span><strong>${fmt(a.reactions.rightLb/1000)} <small>kip</small></strong></div><div><span>Maximum moment</span><strong>${fmt(a.maxMoment.momentKipFt)} <small>kip-ft</small></strong></div><div><span>Nominal EI deflection</span><strong>${fmt(max.nominalDeflectionIn,4)} <small>in</small></strong></div><div><span>Adjusted EI deflection · 0.8 EI</span><strong>${fmt(max.reducedDeflectionIn,4)} <small>in</small></strong></div></div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
+ const kpi = (label, value, digits, unit) => `<div><span>${label}</span><strong><span class="kpi-value" data-value="${value}" data-digits="${digits}">${fmt(value, digits)}</span> <small>${unit}</small></strong></div>`;
+ $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid">${kpi('Left reaction', a.reactions.leftLb/1000, 3, 'kip')}${kpi('Right reaction', a.reactions.rightLb/1000, 3, 'kip')}${kpi('Maximum moment', a.maxMoment.momentKipFt, 3, 'kip-ft')}${kpi('Nominal EI deflection', max.nominalDeflectionIn, 4, 'in')}${kpi('Adjusted EI deflection · 0.8 EI', max.reducedDeflectionIn, 4, 'in')}</div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
  $('calculation-report').innerHTML = renderCalculationReport(r, {
   schematic:$('schematic').innerHTML,
   diagrams:['shear', 'moment', 'deflection'].map(name => ({name, html:$(`${name}-chart`).innerHTML}))
  });
+ // Screen-only additions, made after the report snapshot so they never print.
+ overlayDeflection(a);
+ countUp($('results'));
+}
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Results count up to their exact formatted values; the final text is always fmt(value).
+function countUp(container) {
+ if (prefersReducedMotion()) return;
+ const nodes = [...container.querySelectorAll('.kpi-value')];
+ const start = performance.now(), duration = 650;
+ const step = now => {
+  const t = Math.min(1, (now - start) / duration), eased = 1 - (1 - t) ** 3;
+  for (const node of nodes) if (node.isConnected) node.textContent = fmt(Number(node.dataset.value) * (t < 1 ? eased : 1), Number(node.dataset.digits));
+  if (t < 1) requestAnimationFrame(step);
+ };
+ requestAnimationFrame(step);
+}
+// Exaggerated deflected shape over the input model, scaled to the peak adjusted
+// deflection. It uses the drawing's own coordinates (supports at x = 77 and 643).
+function overlayDeflection(analysis) {
+ const beam = document.querySelector('#schematic .input-beam .in-beam');
+ const span = analysis.input.spanFt, peak = analysis.maxDeflection.reducedDeflectionIn;
+ if (!beam || !(span > 0) || !(peak > 0)) return;
+ const points = Array.from({length: 97}, (_, i) => {
+  const deflection = analysis.at(span * i / 96, i === 96 ? 'left' : 'right').reducedDeflectionIn;
+  return `${(77 + 566 * i / 96).toFixed(1)} ${(138 + 26 * deflection / peak).toFixed(1)}`;
+ });
+ const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+ path.setAttribute('class', 'in-deflected');
+ path.setAttribute('d', `M${points.join('L')}`);
+ beam.after(path);
+ document.querySelector('.drawing-panel')?.classList.add('has-results');
+}
+function scanModel() {
+ const drawing = document.querySelector('.drawing-panel');
+ if (!drawing || prefersReducedMotion()) return;
+ drawing.classList.remove('is-scanning');
+ void drawing.offsetWidth;
+ drawing.classList.add('is-scanning');
+}
+function setLibraryStatus(online, text) {
+ const status = $('library-status');
+ if (!status) return;
+ status.classList.toggle('is-online', online);
+ status.classList.toggle('is-offline', !online);
+ status.lastElementChild.textContent = text;
 }
 $('report').disabled = true;
 // A verified account's current acceptance covers the general preliminary-use
@@ -312,22 +388,14 @@ updateSafetyFactor();
 $('add-load').addEventListener('click', () => {
  const type = $('new-load-type').value;
  const row = addLoad({type});
-
  invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-load' : '.uniform-dead').focus();
 });
 $('load-rows').addEventListener('click', e => {
  const button = e.target.closest('.remove-load');
  if (!button) return;
  button.closest('.load-row').remove();
- if ($('load-rows').firstElementChild) $('new-load-type').value = $('load-rows').firstElementChild.dataset.loadType;
  labelLoadRows();
-
  invalidate(); drawSchematic(); $('add-load').focus();
-});
-$('new-load-type').addEventListener('change', () => {
- const row = $('load-rows').firstElementChild || addLoad();
- row.dataset.loadType = $('new-load-type').value;
- setLoadType(row); labelLoadRows(); invalidate(); drawSchematic();
 });
 $('beam-form').addEventListener('submit', run);
 $('beam-form').addEventListener('invalid', e => revealField(e.target), true);
@@ -384,8 +452,12 @@ $('report').addEventListener('click', () => { if (record) window.print(); });
 fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Section library failed to load.');return r.json();}).then(data=>{
  sections = data.sort((a,b)=>a.AISC_Manual_Label.localeCompare(b.AISC_Manual_Label,undefined,{numeric:true}));
  $('section').innerHTML = sections.map(s=>`<option value="${escape(s.AISC_Manual_Label)}">${escape(s.AISC_Manual_Label)}</option>`).join('');
- $('section').value = 'W16X31'; properties(); drawSchematic();
-}).catch(err=>{$('error').textContent = err.message + ' Run the app through a local web server.';});
+ // A size chosen in the landing page's section library arrives as ?section=W14X22.
+ const requested = new URLSearchParams(location.search).get('section');
+ $('section').value = sections.some(s => s.AISC_Manual_Label === requested) ? requested : 'W16X31';
+ properties(); drawSchematic();
+ setLibraryStatus(true, `AISC v15 library · ${sections.length} W-shapes`);
+}).catch(err=>{$('error').textContent = err.message + ' Run the app through a local web server.'; setLibraryStatus(false, 'Section library offline');});
 
 for (const editor of document.querySelectorAll('.brace-editor')) {
  const flange = editor.dataset.flange;

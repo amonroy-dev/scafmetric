@@ -5,38 +5,54 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1220">
   <title>Scafmetric — Beam analysis</title>
+  <link rel="preload" href="public/fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="public/fonts/vt323.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="diagram.css">
   <link rel="stylesheet" href="input-diagram.css">
-  <link rel="stylesheet" href="refined.css">
   <link rel="stylesheet" href="capacity.css">
   <link rel="stylesheet" href="public/calculator.css">
   <link rel="stylesheet" href="report-print.css">
 </head>
 <body>
 <div class="app-shell"><main id="top">
-<header class="topbar"><a class="workspace-brand" href="index.html" aria-label="Scafmetric home"><svg class="workspace-logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#ffa41b" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3dd9c9"/></svg><span>scafmetric<span class="brand-accent">.</span></span></a><span class="workspace-title">Beam workspace</span><a class="account-nav" href="signin.html" id="account-link">Sign in</a></header>
+<header class="topbar">
+  <a class="workspace-brand" href="index.html" aria-label="Scafmetric home"><svg class="workspace-logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#ffa41b" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3dd9c9"/></svg><span>scafmetric<span class="brand-accent">.</span></span></a>
+  <span class="workspace-title">Beam workspace</span>
+  <span class="topbar-status" id="library-status"><i aria-hidden="true"></i><span>Loading section library…</span></span>
+  <a class="account-nav" href="signin.html" id="account-link">Sign in</a>
+</header>
 <div class="page" id="beam">
-  <div class="heading-row"><div><h1>Beam analysis</h1><span class="model-caption">Simply supported · Steel W section</span></div><button class="outline-button" type="button" id="report">Export PDF <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
+  <div class="heading-row">
+    <div><span class="model-caption">Simply supported · Steel W section</span><h1>Beam analysis</h1></div>
+    <button class="outline-button" type="button" id="report">Export PDF <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+  </div>
   <div class="workspace">
     <section class="panel input-panel" aria-labelledby="inputs-heading">
       <div class="panel-header"><h2 id="inputs-heading">Configure beam</h2><span class="inspector-unit">US units</span></div>
       <form id="beam-form">
-        <div class="inspector-scroll"><div class="essential-fields">
-            <div class="form-section project-info"><div class="section-title"><h3>Project info</h3><span class="optional">Report details</span></div>
-              <div class="field-grid"><div><label for="project">Project name</label><input id="project" type="text" placeholder="Project name" autocomplete="off"></div>
-              <div><label for="preparer">Prepared by</label><input id="preparer" type="text" placeholder="Name or company" autocomplete="name"></div></div>
+        <div class="inspector-scroll">
+          <div class="essential-fields">
+            <div class="form-section project-info">
+              <div class="section-title"><span class="step" aria-hidden="true">01</span><h3>Project info</h3><span class="optional">Report details</span></div>
+              <div class="field-grid">
+                <div><label for="project">Project name</label><input id="project" type="text" placeholder="Project name" autocomplete="off"></div>
+                <div><label for="preparer">Prepared by</label><input id="preparer" type="text" placeholder="Name or company" autocomplete="name"></div>
+              </div>
             </div>
-            <div class="form-section">
-
-              <div class="field-grid beam-fields"><div><label for="section">Beam size</label><select id="section"><option value="">Loading…</option></select></div><div><label for="span">Span</label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div></div></div>
-
+            <div class="form-section beam-section">
+              <div class="section-title"><span class="step" aria-hidden="true">02</span><h3>Beam</h3><span>AISC v15 W-shapes</span></div>
+              <div class="field-grid beam-fields">
+                <div><label for="section">Beam size</label><select id="section"><option value="">Loading…</option></select></div>
+                <div><label for="span">Span</label><div class="input-unit"><input id="span" type="number" min="0.01" step="any" value="20" required><span>ft</span></div></div>
+              </div>
             </div>
-            <div class="form-section loads-section"><div class="section-title"><h3>Loads</h3></div>
-              <div class="load-picker"><div><label for="new-load-type">Load type</label><select id="new-load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select></div></div>
-              <p class="field-help load-picker-help">Choose a type, then enter the load below.</p>
+            <div class="form-section loads-section">
+              <div class="section-title"><span class="step" aria-hidden="true">03</span><h3>Loads</h3><span>Downward</span></div>
+              <div class="load-picker"><div><label for="new-load-type">Add a load</label><div class="load-add-row"><select id="new-load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select><button type="button" id="add-load" class="add-load">+ Add</button></div></div></div>
+              <p class="field-help load-picker-help">Pick a type and add as many loads as you need. Change a load's type from its row.</p>
               <input id="dead-load" type="hidden" value="0.2"><input id="live-load" type="hidden" value="0.8">
-              <div id="load-rows"></div><button type="button" id="add-load" class="add-load">+ Another load</button>
+              <div id="load-rows"></div>
               <template id="load-template"><div class="load-row">
                 <div class="load-row-header"><span class="load-number">U1</span><strong class="load-kind">Uniform load</strong><button class="remove-load" type="button" aria-label="Remove load">×</button></div>
                 <div class="uniform-fields field-grid">
@@ -55,39 +71,65 @@
                 <p id="safety-factor-note" class="field-help">AISC ASD · service loads, no additional factor.</p>
               </div>
             </div>
-            <div class="form-section bracing-section"><div class="section-title"><h3>Lateral bracing</h3><span>Positions from left support</span></div>
+            <div class="form-section bracing-section">
+              <div class="section-title"><span class="step" aria-hidden="true">04</span><h3>Lateral bracing</h3><span>From left support</span></div>
               <label for="top-brace-locations">Top flange</label><input id="top-brace-locations" type="hidden"><div class="brace-editor" data-flange="top"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <label for="bottom-brace-locations">Bottom flange</label><input id="bottom-brace-locations" type="hidden"><div class="brace-editor" data-flange="bottom"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <p id="bracing-help" class="field-help">Enter each interior brace position in feet. End restraints are included. Top flange governs for downward loads.</p>
               <output id="bracing-summary" class="bracing-summary"></output>
             </div>
-</div>
-        <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary><details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div><p class="field-help">Strong-axis bending; nominal section stiffness.</p>
+            <div class="form-section assumptions-section">
+              <div class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>AISC 360-16 · ASD</span></div>
+              <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
+                <li>ASTM A992 steel, F<sub>y</sub> = 50 ksi and E = 29,000 ksi.</li>
+                <li>Both flanges have adequate lateral and twist restraint at the supports. Each entered interior brace adequately restrains its specified flange.</li>
+                <li>Major-axis bending with no axial force, torsion, or destabilizing load-induced torsion.</li>
+              </ul></div>
+              <label class="check-row" for="capacity-confirmed"><input type="checkbox" id="capacity-confirmed"><span>I confirm these assumptions for this beam.</span></label>
+            </div>
+          </div>
+          <details class="settings-group"><summary>Design settings <span>AISC ASD</span></summary>
+            <details class="input-details"><summary>Section properties <span>Optional</span></summary><div class="form-section">
+              <div class="field-grid"><div><label for="elastic-modulus">Elastic modulus <em>E</em></label><div class="input-unit"><input id="elastic-modulus" type="number" min="0.01" step="any" value="29000" required><span>ksi</span></div></div><div><label for="inertia">Moment of inertia <em>I<sub>x</sub></em></label><div class="input-unit"><input id="inertia" type="number" min="0.01" step="any" value="375" required><span>in⁴</span></div></div></div>
+              <p class="field-help">Strong-axis bending; nominal section stiffness.</p>
               <input id="stiffness-factor" type="hidden" value="0.8">
-            </div></details><details class="input-details"><summary>Steel strength checks <span>AISC 360-16 · ASD</span></summary>            <div class="form-section" id="member-check-setup">
+            </div></details>
+            <details class="input-details"><summary>Steel strength checks <span>AISC 360-16 · ASD</span></summary><div class="form-section" id="member-check-setup">
               <label class="check-row" for="enable-capacity"><input type="checkbox" id="enable-capacity" checked><span>Evaluate selected AISC member checks <small>AISC 360-16, ASD, ASTM A992 steel (F<sub>y</sub> = 50 ksi); service load 1.0D + 1.0L.</small></span></label>
               <div id="capacity-fields">
                 <label for="cb-method">Moment-gradient factor <em>C<sub>b</sub></em></label><select id="cb-method"><option value="unity">Use Cb = 1.0</option><option value="quarter">Calculate Cb for each unbraced segment</option></select><p class="field-help">The specified brace locations define the unbraced segments; braces are not vertical supports.</p>
                 <p class="field-help">The no-factor ASD checks use service load. If selected, the safety-factor comparison is also shown separately. Bearing, connections, concentrated forces, and scaffold-specific requirements remain separate.</p>
               </div>
-            </div>
-</details></details>
+            </div></details>
+          </details>
         </div>
-        <div class="action-bar"><div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
-                  <li>ASTM A992 steel, F<sub>y</sub> = 50 ksi and E = 29,000 ksi.</li>
-                  <li>Both flanges have adequate lateral and twist restraint at the supports. Each entered interior brace adequately restrains its specified flange.</li>
-                  <li>Major-axis bending with no axial force, torsion, or destabilizing load-induced torsion.</li>
-
-                </ul></div>
-                <label class="check-row" for="capacity-confirmed"><input type="checkbox" id="capacity-confirmed"><span>I confirm these assumptions for this beam.</span></label>
-                            <div class="form-section acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
-            <p id="error" class="error" role="alert"></p><button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
+        <div class="action-bar">
+          <div class="acknowledgement"><label class="check-row" for="acknowledgement"><input id="acknowledgement" type="checkbox" required><span>Preliminary analysis. I agree to the <a href="#terms">terms of use</a>.</span></label></div>
+          <p id="error" class="error" role="alert"></p>
+          <button id="calculate" class="primary-button" type="submit">Run analysis <svg class="button-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+        </div>
       </form>
     </section>
     <div class="output-column">
-      <section class="panel drawing-panel"><div class="panel-header inline"><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div><span class="chip"><i></i>Beam model</span></div><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"></div><div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span>Click a marker to edit</span></div></section>
-      <section class="panel results-panel" tabindex="-1" aria-label="Analysis results"><div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div><div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">No analysis yet</strong><p class="verdict-detail">Set the beam and loads, then run analysis.</p></div></div><div id="suggestion" class="suggestion"></div><div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>kip</small></strong></div><div><span>Right reaction</span><strong>— <small>kip</small></strong></div><div><span>Max. moment</span><strong>— <small>kip-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div></section>
-      <section class="panel chart-panel" aria-label="Response diagrams"><div class="response-toolbar"><div class="response-tabs" role="tablist" aria-label="Response diagram"><button type="button" role="tab" id="tab-shear" aria-controls="panel-shear" aria-selected="true" tabindex="0" data-response-tab="shear">Shear</button><button type="button" role="tab" id="tab-moment" aria-controls="panel-moment" aria-selected="false" tabindex="-1" data-response-tab="moment">Moment</button><button type="button" role="tab" id="tab-deflection" aria-controls="panel-deflection" aria-selected="false" tabindex="-1" data-response-tab="deflection">Deflection</button></div><span>Service load</span></div><div class="chart-grid"><div class="chart is-active" id="panel-shear" data-response-panel="shear" role="tabpanel" aria-labelledby="tab-shear" tabindex="0"><div id="shear-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the shear diagram</span></div></div></div><div class="chart " id="panel-moment" data-response-panel="moment" role="tabpanel" aria-labelledby="tab-moment" tabindex="0"><div id="moment-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the moment diagram</span></div></div></div><div class="chart " id="panel-deflection" data-response-panel="deflection" role="tabpanel" aria-labelledby="tab-deflection" tabindex="0"><div id="deflection-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the deflection diagram</span></div></div></div></div></section>
+      <section class="panel drawing-panel" aria-labelledby="model-heading">
+        <div class="panel-header inline"><div class="model-title"><h2 id="model-heading">Model</h2><div class="model-meta"><span id="model-section">W16X31</span><span id="model-span">20 ft span</span></div></div><span class="chip live-chip"><i aria-hidden="true"></i>Live</span></div>
+        <div class="schematic-wrap"><div id="schematic" class="schematic" aria-label="Beam arrangement diagram"></div><span class="scan-line" aria-hidden="true"></span></div>
+        <div class="model-legend"><span><i class="beam-swatch"></i>Beam</span><span><i class="load-swatch"></i>Loads</span><span class="deflected-key"><i class="deflected-swatch"></i>Deflected shape · exaggerated</span><span>Click a label to edit</span></div>
+      </section>
+      <section class="panel results-panel" tabindex="-1" aria-label="Analysis results">
+        <div class="results-heading"><h2>Analysis</h2><span class="chip orange">Preliminary</span></div>
+        <div id="verdict" class="verdict" role="status" aria-live="polite"><div class="verdict-card verdict-incomplete"><strong class="verdict-title">No analysis yet</strong><p class="verdict-detail">Set the beam and loads, then run analysis.</p></div></div>
+        <div id="suggestion" class="suggestion"></div>
+        <div id="results" class="results"><div class="result-grid metric-empty"><div><span>Left reaction</span><strong>— <small>kip</small></strong></div><div><span>Right reaction</span><strong>— <small>kip</small></strong></div><div><span>Max. moment</span><strong>— <small>kip-ft</small></strong></div><div><span>Nominal deflection</span><strong>— <small>in</small></strong></div><div><span>Adjusted deflection</span><strong>— <small>in</small></strong></div></div></div>
+      </section>
+      <section class="panel chart-panel" aria-label="Response diagrams">
+        <div class="response-toolbar"><div class="response-tabs" role="tablist" aria-label="Response diagram"><button type="button" role="tab" id="tab-shear" aria-controls="panel-shear" aria-selected="true" tabindex="0" data-response-tab="shear">Shear</button><button type="button" role="tab" id="tab-moment" aria-controls="panel-moment" aria-selected="false" tabindex="-1" data-response-tab="moment">Moment</button><button type="button" role="tab" id="tab-deflection" aria-controls="panel-deflection" aria-selected="false" tabindex="-1" data-response-tab="deflection">Deflection</button></div><span>Service load</span></div>
+        <div class="chart-grid">
+          <div class="chart is-active" id="panel-shear" data-response-panel="shear" role="tabpanel" aria-labelledby="tab-shear" tabindex="0"><div id="shear-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the shear diagram</span></div></div></div>
+          <div class="chart" id="panel-moment" data-response-panel="moment" role="tabpanel" aria-labelledby="tab-moment" tabindex="0"><div id="moment-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the moment diagram</span></div></div></div>
+          <div class="chart" id="panel-deflection" data-response-panel="deflection" role="tabpanel" aria-labelledby="tab-deflection" tabindex="0"><div id="deflection-chart" class="chart-area"><div class="diagram-empty"><svg viewBox="0 0 520 160" aria-hidden="true"><path d="M30 120H490M30 20V130" fill="none" stroke="currentColor" stroke-width="1"/><path d="M30 110Q260 10 490 110" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 6"/></svg><span>Run analysis to see the deflection diagram</span></div></div></div>
+        </div>
+      </section>
       <details class="panel properties-panel"><summary>Section properties <span>AISC v15</span></summary><div id="section-properties" class="property-content">Select a beam size.</div></details>
       <section class="terms-panel" id="terms"><strong>Terms of use · draft</strong><p>This tool supports preliminary planning and does not replace review by a qualified professional. Verify inputs, applicable standards, connections, bearing, stability, and all scaffold-specific requirements before use. No certification or construction approval is provided.</p></section>
     </div>
