@@ -35,10 +35,14 @@ export async function ensureAccount(db, input) {
       if (!data || data.uid !== uid || data.email !== normalized || data.active !== true || data.trialStartedAt !== new Date(created).toISOString() || data.trialEndsAt !== new Date(created + TRIAL_MS).toISOString()) throw new Error('Account record is invalid or disabled');
       const updates = {};
       if (acceptTermsVersion === TERMS_VERSION && (data.termsVersion !== TERMS_VERSION || !Number.isFinite(Date.parse(data.termsAcceptedAt)))) Object.assign(updates, { termsVersion: TERMS_VERSION, termsAcceptedAt: new Date().toISOString() });
-      if (cleanProfile) Object.assign(updates, { profile: cleanProfile, profileUpdatedAt: new Date().toISOString() });
+      if (cleanProfile && !hasProfile(data)) {
+        if (!(acceptTermsVersion === TERMS_VERSION || (data.termsVersion === TERMS_VERSION && Number.isFinite(Date.parse(data.termsAcceptedAt))))) throw new Error('Accept the terms before saving a profile');
+        Object.assign(updates, { profile: cleanProfile, profileUpdatedAt: new Date().toISOString() });
+      }
       if (Object.keys(updates).length) tx.update(ref, updates);
       return { ...data, ...updates };
     }
+    if (cleanProfile && acceptTermsVersion !== TERMS_VERSION) throw new Error('Accept the terms before saving a profile');
     const data = { uid, email: normalized, active: true, trialStartedAt: new Date(created).toISOString(), trialEndsAt: new Date(created + TRIAL_MS).toISOString(), ...(acceptTermsVersion === TERMS_VERSION ? { termsVersion: TERMS_VERSION, termsAcceptedAt: new Date().toISOString() } : {}), ...(cleanProfile ? { profile: cleanProfile, profileUpdatedAt: new Date().toISOString() } : {}) };
     tx.create(ref, data);
     return data;

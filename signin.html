@@ -22,6 +22,18 @@
         <header class="form-heading"><h2 id="mode-title">Sign in or create an account</h2><p id="mode-description">Use Google or your email. A 14-day free trial is planned once account setup is complete.</p></header>
         <p class="config-notice" id="config-notice" role="status">Account sign-in is not connected yet. Please check back when setup is complete.</p>
         <p class="message" id="auth-status" role="status" aria-live="polite" hidden></p>
+        <div class="tabs" id="auth-tabs" role="tablist" aria-label="Account access">
+          <button type="button" role="tab" id="signin-tab" aria-selected="true">Sign in</button>
+          <button type="button" role="tab" id="signup-tab" aria-selected="false">Create account</button>
+        </div>
+        <fieldset id="signup-details" class="signup-details" disabled hidden>
+          <h3>Tell us about yourself</h3>
+          <p>We save these details with your account to understand who uses Scafmetric and how people find us.</p>
+          <div class="field"><label for="signup-name">Your name</label><input id="signup-name" type="text" autocomplete="name" maxlength="80" required></div>
+          <div class="field"><label for="signup-company">Company</label><input id="signup-company" type="text" autocomplete="organization" maxlength="120" required></div>
+          <div class="field"><label for="signup-discovery">How did you find Scafmetric?</label><select id="signup-discovery" required><option value="">Select an option</option><option>Google Search</option><option>LinkedIn</option><option>Reddit</option><option>YouTube</option><option>Facebook</option><option>Colleague or referral</option><option>Other</option></select></div>
+          <p id="signup-help">Complete these fields to continue with Google or email. Your answers stay in this browser while you finish signing up.</p>
+        </fieldset>
         <button type="button" id="google-signin" class="google-button" disabled><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.17-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.71-1.58 2.69-3.91 2.69-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.92v2.32A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.71A5.41 5.41 0 0 1 3.68 9c0-.59.1-1.17.29-1.71V4.97H.92A9 9 0 0 0 0 9c0 1.45.35 2.83.92 4.03l3.05-2.32z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .92 4.97l3.05 2.32C4.68 5.16 6.66 3.58 9 3.58z"/></svg>Continue with Google</button>
         <div class="divider"><span>or use your email</span></div>
         <section id="verify-view" class="verification" aria-labelledby="verification-title" hidden>
@@ -47,7 +59,7 @@
             <fieldset id="profile-fields">
               <div class="field"><label for="profile-name">Your name</label><input id="profile-name" type="text" autocomplete="name" maxlength="80" required></div>
               <div class="field"><label for="profile-company">Company</label><input id="profile-company" type="text" autocomplete="organization" maxlength="120" required></div>
-              <div class="field"><label for="profile-discovery">How did you find Scafmetric?</label><input id="profile-discovery" type="text" maxlength="160" placeholder="For example, a colleague or a web search" required></div>
+              <div class="field"><label for="profile-discovery">How did you find Scafmetric?</label><select id="profile-discovery" required><option value="">Select an option</option><option>Google Search</option><option>LinkedIn</option><option>Reddit</option><option>YouTube</option><option>Facebook</option><option>Colleague or referral</option><option>Other</option></select></div>
               <button type="submit" class="submit-button">Continue</button>
             </fieldset>
           </form>
@@ -55,11 +67,6 @@
         </section>
         <form id="auth-form" novalidate>
           <fieldset id="auth-fields" disabled>
-            <div class="tabs" role="tablist" aria-label="Email sign-in">
-              <button type="button" role="tab" id="signin-tab" aria-selected="true">Sign in</button>
-              <button type="button" role="tab" id="signup-tab" aria-selected="false">Create account</button>
-            </div>
-            <div class="field" id="name-row" hidden><label for="name">Your name</label><input id="name" name="name" type="text" autocomplete="name" placeholder="Alex Rivera" maxlength="80"></div>
             <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@example.com" required></div>
             <div class="field" id="password-row"><div class="label-row"><label for="password">Password</label><button id="forgot-password" class="text-button" type="button">Forgot password?</button></div><div class="password-wrap"><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Your password" required><button type="button" id="show-password" class="show-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
             <button class="submit-button" id="submit-auth" type="submit">Sign in <span aria-hidden="true">→</span></button>

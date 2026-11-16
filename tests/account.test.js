@@ -96,3 +96,19 @@ test('invalid profile fields never write partial account data', async () => {
   assert.equal((await readAccount(db, identity)).profileComplete, false);
   assert.equal(db.docs.get(identity.uid).profile, undefined);
 });
+
+test('signup profile is saved only after acceptance and cannot overwrite an existing completed profile', async () => {
+  const db = fakeDatabase();
+  const first = { name:'First User', company:'First Company', discovery:'LinkedIn' };
+  const second = { name:'Other User', company:'Other Company', discovery:'Reddit' };
+  await assert.rejects(ensureAccount(db, { ...identity, profile:first }));
+  assert.equal(db.docs.size, 0);
+  await ensureAccount(db, identity);
+  await assert.rejects(ensureAccount(db, { ...identity, profile:first }));
+  const [saved] = await Promise.all([
+    ensureAccount(db, { ...identity, profile:first, acceptTermsVersion:TERMS_VERSION }),
+    ensureAccount(db, { ...identity, profile:second, acceptTermsVersion:TERMS_VERSION })
+  ]);
+  assert.deepEqual(saved.profile, first);
+  assert.deepEqual((await ensureAccount(db, { ...identity, profile:second })).profile, first);
+});
