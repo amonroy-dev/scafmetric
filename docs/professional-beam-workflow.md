@@ -16,8 +16,8 @@ The official [RISA load-help URL](https://risa.com/risahelp/risa3d/Content/Loads
 
 ## Input workflow
 
-- Make the load-type selector visible and explicit: **Uniform load** or **Point load**. A load editor is a collection of records, not a single global switch that silently discards other loads.
-- Each point-load record needs a unique visible label, a magnitude in kip, and an **x distance in ft from the left support**. Repeated additions must preserve each existing load. Coincident points are valid and superpose; positions outside `0 ≤ x ≤ L` are invalid. Do not impose an arbitrary small load-count limit.
+- Use one main load-type selector: **Uniform load** or **Point load**. Changing it clears the load list and creates one empty row of the selected type, as stated in the adjacent help text. Each row shows its type as a plain label.
+- Each point-load record needs a unique visible label, separate D and LL magnitudes in pounds, and an **x distance in ft from the left support**. **+ Add** preserves existing loads and appends another row. Coincident points are valid and superpose; positions outside `0 ≤ x ≤ L` are invalid. Do not impose an arbitrary small load-count limit.
 - Keep a load schedule in the PDF with every magnitude and x position. Enter separate downward dead and live portions for both point loads and full-span uniform loads; section self-weight is added once. Service point loads use D + LL, and optional comparison multipliers apply only to LL.
 - Record **top-flange** and **bottom-flange** lateral-restraint stations independently. They are positions along the beam, not additional vertical supports. Show the support restraints and any assumed endpoints explicitly.
 
@@ -76,7 +76,7 @@ Unsupported checks must be identified as not evaluated. In particular, point-loa
 
 - A single off-center point load reproduces `R_A = P(L−a)/L`, `R_B = Pa/L`; multiple points superpose with the uniform load.
 - Every input point appears once in the load schedule, including coincident points and support-position loads.
-- The load-type selector chooses the next record to add; switching it does not alter existing loads. Each added record includes only its applicable inputs in analysis and validation. Adding/removing/changing a load invalidates prior results and reports.
+- Changing the main load-type selector removes existing rows and adds one empty row of the selected type. **+ Add** appends a row without changing existing loads. Each row includes only its applicable inputs in analysis and validation. Adding/removing/changing a load invalidates prior results and reports.
 - Extra bottom-only braces do not improve positive-bending capacity; extra effective top braces change the actual F2 segments. Invalid flange stations reject the calculation.
 - PDF content is generated from the same immutable calculation record as the screen result, and all detailed calculations print regardless of screen disclosure state.
 - Report equations, substituted values, result units, and governing values agree with the engine; all service diagrams and explicit scope limits are present.

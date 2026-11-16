@@ -49,15 +49,6 @@ function syncUniformLoads() {
   $(field).value = values.every(value => Number.isFinite(value) && value >= 0) ? values.reduce((sum, value) => sum + value / 1000, 0) : 'NaN';
  }
 }
-// Changing a row's type starts it fresh, as if newly added, so values entered
-// for the other type never linger hidden or reappear on switching back.
-function resetLoadValues(row) {
- row.querySelector('.uniform-dead').value = '0';
- row.querySelector('.uniform-live').value = '0';
- row.querySelector('.point-dead').value = '0';
- row.querySelector('.point-live').value = '0';
- row.querySelector('.point-location').value = '';
-}
 function setLoadType(row) {
  const isPoint = row.dataset.loadType === 'point';
  row.classList.toggle('point-load-row', isPoint);
@@ -78,9 +69,7 @@ function labelLoadRows() {
   const label = isPoint ? `P${++point}` : `U${++uniform}`;
   row.dataset.loadId = label;
   row.querySelector('.load-number').textContent = label;
-  let picker = row.querySelector('.row-load-type');
-  if (!picker) { picker = document.createElement('select'); picker.className = 'row-load-type'; row.querySelector('.load-kind').replaceWith(picker); picker.innerHTML = '<option value="uniform">Uniform load</option><option value="point">Point load</option>'; picker.addEventListener('change', () => { row.dataset.loadType = picker.value; resetLoadValues(row); setLoadType(row); labelLoadRows(); invalidate(); drawSchematic(); }); }
-  picker.value = isPoint ? 'point' : 'uniform'; picker.setAttribute('aria-label', `${label} load type`);
+  row.querySelector('.load-kind').textContent = isPoint ? 'Point load' : 'Uniform load';
   row.querySelector('.remove-load').setAttribute('aria-label', `Remove ${isPoint ? 'point' : 'uniform'} load ${label}`);
   row.querySelector('.uniform-dead').setAttribute('aria-label', `${label} dead load, pounds per foot`);
   row.querySelector('.uniform-live').setAttribute('aria-label', `${label} live load, pounds per foot`);

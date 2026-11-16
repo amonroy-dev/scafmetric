@@ -111,7 +111,6 @@
   .load-row-header .load-number { display:inline-grid; place-items:center; min-width:32px; height:24px; padding:0 5px; border:1px solid rgba(61,217,201,.45); border-radius:0; background:rgba(61,217,201,.08); color:var(--ws-aqua-2); font:400 8px/1 var(--pixel); }
   .point-load-row .load-row-header .load-number { border-color:rgba(255,164,27,.5); background:rgba(255,164,27,.08); color:var(--ws-orange-2); }
   .load-row-header .load-kind { color:var(--ws-text); font-size:12px; font-weight:600; }
-  .input-panel .load-row-header .row-load-type { flex:1; width:auto; min-width:0; height:32px; min-height:32px; margin:0; font-size:12px; }
   .remove-load { display:grid; place-items:center; flex:none; width:32px; height:32px; margin:0 0 0 auto; padding:0; border:1px solid transparent; border-radius:0; background:transparent; color:var(--ws-dim); font-size:20px; line-height:1; }
   .remove-load:hover { border-color:rgba(255,140,123,.5); background:rgba(255,140,123,.1); color:#ffc4b9; }
   .load-row .field-grid>label { margin:0; font-size:11.5px; }
@@ -471,7 +470,6 @@
   .panel-header,.results-heading,.response-toolbar { padding:12px 14px; }
   .form-section { padding:16px 14px; }
   .input-panel input:not([type=checkbox]):not([type=hidden]):not([type=range]),.input-panel select { height:46px; min-height:46px; font-size:16px; }
-  .input-panel .load-row-header .row-load-type { height:38px; min-height:38px; font-size:15px; }
   .remove-load { width:38px; height:38px; }
   .add-load,.next-brace { min-height:46px; }
   .action-bar { padding:12px 14px 14px; }
