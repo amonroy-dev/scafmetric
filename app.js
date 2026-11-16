@@ -5,6 +5,7 @@ import { summarizeChecks, formatUtilization, describeUtilization } from './src/c
 import { checkDeflection } from './src/deflection-check.js';
 import { suggestBeamSize } from './src/suggest-beam-size.js';
 import { canConsiderLateralBracing } from './src/bracing-suggestion.js';
+import { initializeBracingHelp } from './src/bracing-help.js';
 import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
 import { strengthComparisonLoads } from './src/strength-comparison.js';
@@ -16,6 +17,7 @@ import { renderCalculationReport } from './src/calculation-report.js';
 import { createDeflectionView } from './src/deflection-view.js';
 
 const $ = id => document.getElementById(id);
+const bracingHelp = initializeBracingHelp();
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
 const ratio = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 // Display units: forces in lbs, moments in lb-ft, distributed loads in lb/ft and
@@ -29,7 +31,7 @@ const deflectionView = createDeflectionView({ panel: document.querySelector('.dr
 deflectionView.clear();
 function drawSchematic() {
  syncUniformLoads();
- drawBeamSchematic();
+ drawBeamSchematic({analysis:record?.analysis ?? null});
  $('model-section').textContent = $('section').value || 'Choose a section';
  $('model-span').textContent = `${$('span').value || '—'} ft span`;
  try {
@@ -311,7 +313,7 @@ function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
  if (status.status === 'incomplete' || status.unavailable?.length) { $('suggestion').innerHTML = ''; return; }
  const bracingOption = canConsiderLateralBracing(r.checks)
-  ? '<button type="button" class="suggestion-bracing" data-review-bracing>Consider adding lateral bracing?</button><div class="suggestion-or"><span>OR</span></div>'
+  ? '<div class="suggestion-bracing-actions"><button type="button" class="suggestion-bracing" data-review-bracing>Consider adding lateral bracing?</button><button type="button" class="bracing-help-trigger" data-open-bracing-help>What is lateral bracing?</button></div><div class="suggestion-or"><span>OR</span></div>'
   : '';
  let found;
  try {
@@ -467,6 +469,7 @@ $('verdict').addEventListener('click', e => {
 $('suggestion').addEventListener('click', e => {
  if (e.target.closest('[data-review-bracing]')) {
   const target = document.querySelector('.brace-editor[data-flange="top"] .next-brace');
+  bracingHelp.highlight();
   revealField(target);
   target.focus({preventScroll:true});
   target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});

@@ -73,6 +73,7 @@
             </div>
             <div class="form-section bracing-section">
               <div class="section-title"><span class="step" aria-hidden="true">04</span><h3>Lateral bracing</h3><span>From left support</span></div>
+              <button type="button" class="bracing-help-trigger bracing-help-section-trigger" data-open-bracing-help>What is lateral bracing?</button>
               <p id="brace-cleared" class="brace-cleared" role="status"></p>
               <label for="top-brace-locations">Top flange</label><input id="top-brace-locations" type="hidden"><div class="brace-editor" data-flange="top"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
               <label for="bottom-brace-locations">Bottom flange</label><input id="bottom-brace-locations" type="hidden"><div class="brace-editor" data-flange="bottom"><div class="brace-list"></div><button type="button" class="next-brace">+ Enter next brace</button></div>
@@ -84,7 +85,8 @@
               </div>
               <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
                 <li>ASTM A992 steel, F<sub>y</sub> = 50,000 psi and E = 29,000,000 psi.</li>
-                <li>Both flanges have adequate lateral and twist restraint at the supports. Each entered interior brace adequately restrains its specified flange.</li>
+                <li>Both flanges have adequate lateral and twist restraint at the supports.</li>
+                <li>Entered lateral-brace connections are rigid in the required restraint directions. The connected tubes, members and supports provide adequate brace strength and stiffness.</li>
                 <li>Major-axis bending with no axial force, torsion, or destabilizing load-induced torsion.</li>
               </ul></div>
               <label class="check-row" for="capacity-confirmed"><input type="checkbox" id="capacity-confirmed"><span>I confirm these assumptions for this beam.</span></label>
@@ -139,6 +141,59 @@
 </div>
 </main></div>
 <section id="calculation-report" aria-label="Calculation report"></section>
+<dialog id="bracing-help-dialog" class="bracing-help-dialog" aria-labelledby="bracing-help-title" aria-describedby="bracing-help-intro">
+  <div class="bracing-help-header"><h2 id="bracing-help-title">What is lateral bracing?</h2><button type="button" class="bracing-help-close" data-close-bracing-help autofocus aria-label="Close lateral bracing explanation">Close <span aria-hidden="true">×</span></button></div>
+  <div class="bracing-help-content">
+    <section id="bracing-help-meaning" class="bracing-help-section">
+      <p id="bracing-help-intro">A bending steel beam can buckle sideways and twist. Lateral bracing restrains sideways movement of its compression flange; torsional bracing restrains twist. In this calculator's simply supported, downward-load model, the top flange is in compression. Effective bracing can improve buckling resistance; it does not reduce the calculated vertical sag.</p>
+      <figure class="bracing-help-diagram">
+        <svg viewBox="0 0 600 225" role="img" aria-labelledby="bracing-diagram-title bracing-diagram-desc">
+          <title id="bracing-diagram-title">Concept of compression-flange restraint</title><desc id="bracing-diagram-desc">A beam cross-section has a restrained top compression flange connected through a brace to a braced restraint system. Arrows show possible sideways movement and twist. Connection details require their own design.</desc>
+          <defs><marker id="bracing-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto-start-reverse"><path d="M0 0L6 3L0 6" fill="#ffa41b"/></marker></defs>
+          <path d="M80 68H200V85H150V155H200V172H80V155H130V85H80Z" fill="#243752" stroke="#a9b6ca" stroke-width="2"/>
+          <path d="M80 68H200V85H80Z" fill="#3dd9c9" stroke="#9ff3e9" stroke-width="2"/>
+          <path d="M201 76H440" fill="none" stroke="#3dd9c9" stroke-width="8"/>
+          <circle cx="204" cy="76" r="5" fill="#9ff3e9"/><circle cx="439" cy="76" r="5" fill="#9ff3e9"/>
+          <path d="M446 52H552V172H446ZM446 52L552 172M552 52L446 172" fill="none" stroke="#8493ab" stroke-width="4"/>
+          <path d="M102 111H178" stroke="#ffa41b" stroke-width="2" marker-start="url(#bracing-arrow)" marker-end="url(#bracing-arrow)"/>
+          <path d="M105 180C42 170 39 102 66 87" fill="none" stroke="#ffa41b" stroke-width="2" marker-end="url(#bracing-arrow)"/>
+          <g fill="#e8ecf4" font-family="Inter,Arial,sans-serif" font-size="14"><text x="75" y="34">Compression flange</text><text x="278" y="57">Brace</text><text x="446" y="199">Restraint system</text></g>
+          <path d="M140 41V61" stroke="#9ff3e9" stroke-width="1.5"/>
+        </svg>
+        <figcaption>Concept only: the connections and the complete restraint system must be verified.</figcaption>
+      </figure>
+    </section>
+    <section id="bracing-help-practice" class="bracing-help-section">
+      <h3>What makes a brace effective?</h3>
+      <ul>
+        <li><strong>Restrain the right flange.</strong> For lateral restraint, verify attachment near the compression flange. This model does not count a bottom-only restraint as a top-flange brace.</li>
+        <li><strong>Check the whole arrangement.</strong> Trace forces from the beam through the clamps and tubes into the receiving beam, scaffold and supports. Paired beams can form an effective braced system when their lacing, diagonals or moment-resisting connections are designed together.</li>
+        <li><strong>Check strength and stiffness.</strong> A brace must resist the force and limit movement. Include tube buckling or bending, clamp slip and rotation, connection offsets, and movement of the receiving structure.</li>
+        <li><strong>Use the exact hardware instructions.</strong> Clamp number, placement, installation torque and permitted force direction depend on the component. Inspect for loose connections, damage and changes during erection or loading.</li>
+      </ul>
+    </section>
+    <section id="bracing-help-tube" class="bracing-help-section">
+      <h3>Is 1.9″ OD × 0.095″ wall tube stiff enough?</h3>
+      <p>This size appears in manufactured scaffold braces. That does not rate a beam-to-beam tube-and-clamp assembly. Its effective restraint depends on tube grade and condition, unsupported length, orientation, connections, beam spacing and the receiving system.</p>
+      <p><strong>For 5–7 ft parallel ties with rigid connections:</strong> top-to-top and bottom-to-bottom tubes may provide restraint through the frame action of the connected beams and tubes. Verify the complete frame's strength and stiffness, including receiving-beam and support movement. Rigid connections do not make the tubes or the complete assembly infinitely stiff.</p>
+      <p><strong>The calculator's assumption:</strong> an entered lateral-brace connection is rigid in the required restraint directions, and the complete brace/support system has adequate strength and stiffness. The proprietary hardware's documented behavior must support that connection assumption.</p>
+      <p><strong>There is no universal cutoff length from these dimensions.</strong> A structural engineer can establish a standard detail with limits for tube length, brace spacing, beam loads, connection fixity and installation.</p>
+      <p>Enter verified restraint positions in this calculator. It assumes effective lateral braces; it does not design tube-and-clamp assemblies or analyze torsional bracing of paired beams.</p>
+    </section>
+    <section id="bracing-help-sources" class="bracing-help-section">
+      <h3>Sources and further reading</h3>
+      <ul>
+        <li><a href="https://ej.aisc.org/index.php/engj/article/view/750" target="_blank" rel="noopener noreferrer">AISC Engineering Journal: Fundamentals of Beam Bracing</a> — strength, stiffness and lateral/torsional restraint.</li>
+        <li><a href="https://www.worksafe.govt.nz/topic-and-industry/working-at-height/scaffolding-in-new-zealand/" target="_blank" rel="noopener noreferrer">WorkSafe New Zealand, §13.5</a> — tube-and-coupler lacing and bracing of paired beams/trusses; contextual guidance, not a US spacing rule.</li>
+        <li><a href="https://a1scaffoldmfg.com/pdf_files/uniscaff_tech_manual.pdf" target="_blank" rel="noopener noreferrer">Uniscaff Technical Manual, printed page 5</a> — a manufactured diagonal brace using 1.9 × 0.095 tube; its ratings do not transfer to other assemblies.</li>
+        <li><a href="https://alumasafway.com/uploads/files/orn471__bsl_forged_right_angle_beam_clamp_installation_instructions.pdf" target="_blank" rel="noopener noreferrer">BrandSafway CRA2B instructions</a> — an example of component-specific installation and directional ratings, not a rating for unidentified clamps.</li>
+        <li><a href="https://www.mdpi.com/2075-4701/12/1/40" target="_blank" rel="noopener noreferrer">Experimental tube-and-fitting scaffold research</a> — connection movement and cyclic response.</li>
+        <li><a href="https://www.osha.gov/laws-regs/regulations/standardnumber/1926/1926.451" target="_blank" rel="noopener noreferrer">OSHA 1926.451</a> — scaffold design and inspection responsibilities.</li>
+        <li><a href="https://www.eng-tips.com/threads/lateral-torsional-bracing.424232/" target="_blank" rel="noopener noreferrer">Eng-Tips: Lateral/Torsional Bracing</a> — practitioner discussion; use the primary guidance for design.</li>
+      </ul>
+    </section>
+  </div>
+</dialog>
 <script type="module" src="app.js"></script>
 <script type="module" src="account.js"></script>
 </body></html>

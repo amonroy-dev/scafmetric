@@ -33,7 +33,32 @@ function editableField(id) {
  if (id === 'top-brace-locations' || id === 'bottom-brace-locations') return document.querySelector(`[data-flange="${id.split('-')[0]}"] input`) || document.querySelector(`[data-flange="${id.split('-')[0]}"] .next-brace`);
  return $(id);
 }
-export function drawSchematic() {
+// The same formatter and update path serve the full-load drawing and animation.
+// Reactions come from the existing analysis; this view does not solve the beam.
+export function updateSupportReactions(svg, analysis, loadFraction = 1) {
+ if (!svg) return;
+ const fraction = Number.isFinite(loadFraction) ? Math.min(1, Math.max(0, loadFraction)) : 1;
+ for (const group of svg.querySelectorAll('[data-support-reaction]')) {
+  const key = group.dataset.supportReaction;
+  const value = analysis?.reactions?.[key];
+  const available = Number.isFinite(value);
+  const reaction = available ? value * fraction : null;
+  const number = reaction === null ? '—' : reaction !== 0 && (Math.abs(reaction) < 0.1 || Math.abs(reaction) >= 1e9)
+   ? reaction.toExponential(3) : (Object.is(reaction, -0) ? 0 : reaction).toLocaleString('en-US', { maximumFractionDigits: 1 });
+  const text = group.querySelector('[data-reaction-value]');
+  const label = `${number} lbs`;
+  text.textContent = label;
+  if (available) text.dataset.reactionLb = String(reaction); else delete text.dataset.reactionLb;
+  if (label.length > 10) { text.setAttribute('textLength', '134'); text.setAttribute('lengthAdjust', 'spacingAndGlyphs'); }
+  else { text.removeAttribute('textLength'); text.removeAttribute('lengthAdjust'); }
+  const name = key === 'leftLb' ? 'R1, left support' : 'R2, right support';
+  group.setAttribute('aria-label', available ? `${name}: ${label} upward at ${Math.round(fraction * 100)}% of service load` : `${name}: reaction not calculated`);
+  const arrow = group.querySelector('.in-reaction-arrow');
+  arrow.setAttribute('transform', `translate(0 ${251 * (1 - fraction)}) scale(1 ${fraction})`);
+  arrow.style.opacity = available ? String(fraction) : '0.35';
+ }
+}
+export function drawSchematic({ analysis = null } = {}) {
  const container = $('schematic'); if (!container) return;
  const span = numeric('span'), validSpan = Number.isFinite(span) && span > 0;
  let bracing = null;
@@ -63,8 +88,8 @@ export function drawSchematic() {
  }).filter(p => p.deadLb >= 0 && p.liveLb >= 0 && p.magnitude > 0 && Number.isFinite(p.magnitude) && Number.isFinite(p.location) && validSpan && p.location >= 0 && p.location <= span);
  const pointArrows = pointLoads.map(p => `<g class="input-hotspot" role="button" tabindex="0" data-point-index="${p.index}" data-x-ft="${p.location}" aria-label="Edit point load ${p.index+1}: dead ${fmt(p.deadLb)} plus live ${fmt(p.liveLb)} equals ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft"><title>D ${fmt(p.deadLb)} + LL ${fmt(p.liveLb)} = ${fmt(p.magnitude)} lbs at ${fmt(p.location)} ft</title><rect class="input-hit-area" x="${x(p.location)-13}" y="77" width="26" height="52" rx="4" fill="transparent" stroke="none"/><path d="M${x(p.location)} 80v45m-6-8 6 8 6-8" fill="none" stroke="#ffa41b" stroke-width="3"/></g>`).join('');
  container.innerHTML = `<div class="input-drawings"><div class="input-elevation"><div class="input-scroll" role="region" aria-label="Interactive beam model">
- <svg class="input-beam" viewBox="0 0 720 266" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations, schematic not to scale.">
- <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="266" fill="url(#input-grid)"/>
+ <svg class="input-beam" viewBox="0 0 720 310" role="group" aria-label="Simply supported beam with downward uniform and point loads and lateral brace locations. R1 is the upward left support reaction and R2 is the upward right support reaction under service load. Schematic not to scale.">
+ <defs><pattern id="input-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#22304b" stroke-width=".5"/></pattern></defs><rect width="720" height="310" fill="url(#input-grid)"/>
  <g class="in-load">${arrows}${anyLoad?'<path data-load-bar d="M77 64H643"/>':''}</g>${pointArrows}
  ${showUniform ? editTarget('dead-load',155,14,190,36,'uniform dead load',`<text class="in-text" x="250" y="37" text-anchor="middle">Dead · ${loadValid ? fmt(dead*1000) : '—'} lb/ft</text>`) : ''}
  ${showUniform ? editTarget('live-load',365,14,190,36,'uniform live load',`<text class="in-text" x="460" y="37" text-anchor="middle">Live · ${loadValid ? fmt(live*1000) : '—'} lb/ft</text>`) : ''}
@@ -73,8 +98,10 @@ export function drawSchematic() {
  <path class="in-dim" d="M77 186v37M643 186v37M77 211H643M77 206v10M643 206v10"/>
  ${editTarget('span',295,219,130,35,'span',`<text class="in-dimtext" x="360" y="242" text-anchor="middle">${validSpan ? fmt(span) : '—'} ft span</text>`)}
  <text class="in-note" x="77" y="193" text-anchor="middle">A</text><text class="in-note" x="643" y="193" text-anchor="middle">B</text>
+ ${[['leftLb','R1',77],['rightLb','R2',643]].map(([key,name,station])=>`<g class="in-reaction" data-support-reaction="${key}" role="img"><path class="in-reaction-arrow" d="M${station} 251V231m-6 7 6-7 6 7" fill="none" stroke="#3dd9c9" stroke-width="2"/><text class="in-reaction-name" x="${station}" y="267" text-anchor="middle" font-size="14" fill="#ffc266">${name}</text><text class="in-reaction-value" data-reaction-value="${key}" x="${station}" y="293" text-anchor="middle" font-size="15" fill="#9ff3e9">— lbs</text></g>`).join('')}
  </svg></div>${pointLoads.length ? `<div class="model-point-list">${pointLoads.map(p => `<button type="button" data-point-index="${p.index}" aria-label="Edit point load ${p.index+1}"><span>P${p.index+1}</span> ${fmt(p.magnitude)} lbs <small>D ${fmt(p.deadLb)} + LL ${fmt(p.liveLb)} · at ${fmt(p.location)} ft</small></button>`).join('')}</div>` : ''}<div class="input-brace-summary"><div class="model-flange-braces"><button type="button" data-field="top-brace-locations" class="model-restraints">Top braces · ${escapeText(braceLabel('top'))}</button><button type="button" data-field="bottom-brace-locations" class="model-restraints">Bottom braces · ${escapeText(braceLabel('bottom'))}</button></div><span>Self-weight included${pointLoads.length ? ` · ${pointLoads.length} point load${pointLoads.length === 1 ? '' : 's'}` : ''}</span></div></div>
  <div class="input-section"><svg class="input-section-svg" viewBox="0 0 300 200" role="group" aria-label="Wide-flange section, major-axis bending"><path class="in-section-shape" d="M74 30H226V49H166V151H226V170H74V151H134V49H74Z"/><path class="in-axis" d="M51 100H249"/><text class="in-note" x="42" y="104">x</text><text class="in-note" x="253" y="104">x</text>${editTarget('section',65,20,170,160,'beam size')}</svg><span class="section-name">${escapeText(fieldValue('section'))}</span></div></div>`;
+ updateSupportReactions(container.querySelector('.input-beam'), analysis);
  const focused = modelFieldId(document.activeElement);
  container.querySelectorAll('[data-field]').forEach(el => el.classList.toggle('is-active', el.dataset.field === focused));
 }

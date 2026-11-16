@@ -5,6 +5,7 @@
    δ(x). Loads and brace marks move with the beam at their own stations. When a
    deflection limit is given, the beam turns red while its sag exceeds the limit. */
 import { MODEL, SCALE_OPTIONS, deflectedShape, dropUnits, autoScale, fitsDrawing, drawnPoints } from './deflection-shape.js';
+import { updateSupportReactions } from './input-visual.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const fmt = (n, digits) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
@@ -81,6 +82,7 @@ export function createDeflectionView({ panel, button, select, readout, status })
     svg.querySelector('[data-load-bar]')?.setAttribute('d', pathOf(points.map(([x, y]) => [x, y - (MODEL.beamY - MODEL.loadBarY)])));
     const loadOpacity = String(0.25 + 0.75 * loadFraction);
     svg.querySelectorAll('.in-load, .input-hotspot[data-point-index]').forEach(element => { element.style.opacity = loadOpacity; });
+    updateSupportReactions(svg, analysis, loadFraction);
     describe(final);
   }
 
@@ -126,6 +128,7 @@ export function createDeflectionView({ panel, button, select, readout, status })
     clear() {
       cancelAnimationFrame(frame);
       analysis = null; shape = null; limit = null; playing = false; loadFraction = 1;
+      updateSupportReactions(model(), null);
       button.disabled = true; select.disabled = true;
       setButton();
       readout.classList.remove('is-over');
