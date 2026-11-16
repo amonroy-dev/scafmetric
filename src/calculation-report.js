@@ -56,7 +56,8 @@ function loadSchedule(r) {
   [escape(p.id),'Point — live LL',fromKips(p.liveKip),'lbs',`x = ${n(p.locationFt)} ft`]
  );
  return table('Applied loads — downward positive; x measured from left support A', ['ID','Type / category','Magnitude','Unit','Location'], rows)
- + row('Uniform service load', 'w = Σw<sub>D</sub> + W + Σw<sub>L</sub>', `${fromKips(r.dead)} + ${fromKips(r.self)} + ${fromKips(r.live)}`, `${fromKips(r.total)} lb/ft`)
+ + row('Total distributed dead load', 'w<sub>DL</sub> = Σw<sub>D,applied</sub> + w<sub>SW</sub>', `${fromKips(r.dead)} + ${fromKips(r.self)}`, `${fromKips(r.dead+r.self)} lb/ft; includes beam self-weight once`)
+ + row('Uniform service load', 'w<sub>service</sub> = w<sub>DL</sub> + w<sub>LL</sub>', `${fromKips(r.dead+r.self)} + ${fromKips(r.live)}`, `${fromKips(r.total)} lb/ft`)
  + `<p class="report-note">Beam self-weight is included once. Every point load has separate downward dead and live portions at the same position; its service total is D + LL. Service analysis uses 1.0D + 1.0L; this is the supported load case, not an envelope of all required project load combinations.</p>`;
 }
 function bracingSchedule(r) {
@@ -185,10 +186,22 @@ function comparisonReport(r) {
  const response=(w,multiplier)=>analyzeBeam({...r.analysis.input,uniformLoadPlf:w*1000,pointLoads:pointLoadsForAnalysis(categorizedPoints,multiplier)});
  const bend=response(bendingLoad,sf/1.67), shear=response(shearLoad,sf/1.5);
  const points=table('Requested point-load comparison values', ['Point','D (lbs)','LL (lbs)','Service D + LL (lbs)','Bending D + (SF/1.67)LL (lbs)','Shear D + (SF/1.50)LL (lbs)'],categorizedPoints.map(p=>[escape(p.id),fromKips(p.deadKip),fromKips(p.liveKip),fromKips(p.loadKip),fromKips(p.deadKip+p.liveKip*sf/1.67),fromKips(p.deadKip+p.liveKip*sf/1.5)]));
+ const pointCalculations=categorizedPoints.map(p=>{
+  const bendingLive=p.liveKip*sf/1.67, shearLive=p.liveKip*sf/1.5;
+  return `<h3>${escape(p.id)} — point comparison at x = ${n(p.locationFt)} ft</h3>`
+   + row(`${escape(p.id)} bending adjusted live load`,'P<sub>LL,adj,b</sub> = P<sub>LL</sub> × (SF/1.67)',`${fromKips(p.liveKip)} × (${n(sf)} / 1.67)`,`${fromKips(bendingLive)} lbs`)
+   + row(`${escape(p.id)} bending dead + adjusted live`,'P<sub>b</sub> = P<sub>D</sub> + P<sub>LL,adj,b</sub>',`${fromKips(p.deadKip)} + ${fromKips(bendingLive)}`,`${fromKips(p.deadKip+bendingLive)} lbs at x = ${n(p.locationFt)} ft`)
+   + row(`${escape(p.id)} shear adjusted live load`,'P<sub>LL,adj,v</sub> = P<sub>LL</sub> × (SF/1.50)',`${fromKips(p.liveKip)} × (${n(sf)} / 1.50)`,`${fromKips(shearLive)} lbs`)
+   + row(`${escape(p.id)} shear dead + adjusted live`,'P<sub>v</sub> = P<sub>D</sub> + P<sub>LL,adj,v</sub>',`${fromKips(p.deadKip)} + ${fromKips(shearLive)}`,`${fromKips(p.deadKip+shearLive)} lbs at x = ${n(p.locationFt)} ft`);
+ }).join('');
  return section(`Requested ${n(sf)}:1 comparison — illustrative`, `<p class="report-status"><strong>Not a verified OSHA load combination or compliance check.</strong> The selected factor is applied to entered live loads only. Service reactions, deflections and diagrams remain unfactored. This arithmetic comparison does not establish maximum intended load, failure capacity, scaffold capacity or approval for use.</p>`
- + row('Bending comparison load','w<sub>b</sub> = D + SW + (SF/1.67)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.67) × ${fromKips(r.live)}`,`${fromKips(bendingLoad)} lb/ft; point live-load multiplier = ${n(sf/1.67)}`)
- + row('Shear comparison load','w<sub>v</sub> = D + SW + (SF/1.50)L',`${fromKips(r.dead)} + ${fromKips(r.self)} + (${n(sf)}/1.50) × ${fromKips(r.live)}`,`${fromKips(shearLoad)} lb/ft; point live-load multiplier = ${n(sf/1.5)}`)
+ + row('Distributed dead load used in comparisons','w<sub>DL</sub> = Σw<sub>D,applied</sub> + w<sub>SW</sub>',`${fromKips(r.dead)} + ${fromKips(r.self)}`,`${fromKips(r.dead+r.self)} lb/ft; includes beam self-weight once`)
+ + row('Bending uniform adjusted live load','w<sub>LL,adj,b</sub> = w<sub>LL</sub> × (SF/1.67)',`${fromKips(r.live)} × (${n(sf)} / 1.67)`,`${fromKips(r.live*sf/1.67)} lb/ft`)
+ + row('Bending uniform comparison total','w<sub>b</sub> = w<sub>DL</sub> + w<sub>LL,adj,b</sub>',`${fromKips(r.dead+r.self)} + ${fromKips(r.live*sf/1.67)}`,`${fromKips(bendingLoad)} lb/ft`)
+ + row('Shear uniform adjusted live load','w<sub>LL,adj,v</sub> = w<sub>LL</sub> × (SF/1.50)',`${fromKips(r.live)} × (${n(sf)} / 1.50)`,`${fromKips(r.live*sf/1.5)} lb/ft`)
+ + row('Shear uniform comparison total','w<sub>v</sub> = w<sub>DL</sub> + w<sub>LL,adj,v</sub>',`${fromKips(r.dead+r.self)} + ${fromKips(r.live*sf/1.5)}`,`${fromKips(shearLoad)} lb/ft`)
  + (r.pointLoads.length?points:'')
+ + pointCalculations
  + analysisSchedule(bend,pointIds(r),'Bending-comparison equilibrium')
  + row('Bending-comparison maximum','M(x) = R<sub>A</sub>x − wx²/2 − ΣP<sub>i</sub>⟨x−a<sub>i</sub>⟩',`R_A = ${pounds(bend.reactions.leftLb)} lbs; w = ${fromKips(bendingLoad)} lb/ft; x = ${n(bend.maxMoment.xFt)} ft`,`${fromKips(bend.maxMoment.momentKipFt)} lb-ft`)
  + analysisSchedule(shear,pointIds(r),'Shear-comparison equilibrium')

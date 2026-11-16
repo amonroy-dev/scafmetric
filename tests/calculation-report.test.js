@@ -8,8 +8,8 @@ import { checkDeflection } from '../src/deflection-check.js';
 import { normalizePointLoads, pointLoadsForAnalysis } from '../src/point-loads.js';
 
 const section = { Type:'W', AISC_Manual_Label:'W16X31', W:31, A:9.13, d:15.9, bf:5.53, tf:.44, tw:.275, kdes:.842, Ix:375, Iy:12.4, Sx:47.2, Zx:54, ry:1.17, rts:1.42, J:.461, ho:15.5 };
-function fixture({points=[],braces=[0,5,10,15,20],zero=false,factor=null,unconfirmed=false,cb='unity',stiffnessFactor=.8}={}) {
- const dead=zero?0:.2, live=zero?0:.8, self=zero?0:.031, total=dead+live+self, span=20;
+function fixture({points=[],braces=[0,5,10,15,20],zero=false,pointOnly=false,factor=null,unconfirmed=false,cb='unity',stiffnessFactor=.8}={}) {
+ const dead=zero||pointOnly?0:.2, live=zero||pointOnly?0:.8, self=zero?0:.031, total=dead+live+self, span=20;
  const pointLoads=normalizePointLoads(points,span);
  const response=(w,multiplier=1)=>analyzeBeam({spanFt:span,uniformLoadPlf:w*1000,pointLoads:pointLoadsForAnalysis(pointLoads,multiplier),Eksi:29000,Iin4:375,stiffnessFactor});
  const analysis=response(total);
@@ -18,10 +18,15 @@ function fixture({points=[],braces=[0,5,10,15,20],zero=false,factor=null,unconfi
  const checks=unconfirmed?{status:'not_evaluated',reason:'Confirm the beam assumptions.'}:{status:'evaluated',section,flexure:flex(analysis),shear:shear(analysis),cbMethod:cb};
  checks.deflection=checkDeflection({analysis,limitRatio:240});
  if(factor&&!unconfirmed) checks.extra={sf:factor,bendingLoad:dead+self+factor/1.67*live,shearLoad:dead+self+factor/1.5*live,bending:flex(response(dead+self+factor/1.67*live,factor/1.67)),shearing:shear(response(dead+self+factor/1.5*live,factor/1.5))};
- return {project:'Bridge scaffold',preparer:'A. Contractor',timestamp:'2026-11-14T12:00:00.000Z',section:'W16X31',sectionProperties:section,span,dead,live,self,total,E:29000,I:375,factor:stiffnessFactor,uniformLoads:[{id:'U1',deadKipFt:dead,liveKipFt:live}],pointLoads,braces:{top:{locations:braces},bottom:{locations:[0,20]},locations:braces},analysis,checks,comparison:factor?{numerator:factor}:null};
+ return {project:'Bridge scaffold',preparer:'A. Contractor',timestamp:'2026-11-14T12:00:00.000Z',section:'W16X31',sectionProperties:section,span,dead,live,self,total,E:29000,I:375,factor:stiffnessFactor,uniformLoads:pointOnly?[]:[{id:'U1',deadKipFt:dead,liveKipFt:live}],pointLoads,braces:{top:{locations:braces},bottom:{locations:[0,20]},locations:braces},analysis,checks,comparison:factor?{numerator:factor}:null};
 }
 function tableContaining(html,caption) {
  return html.slice(html.indexOf(`<caption>${caption}`)).split('</table>')[0];
+}
+function equationContaining(html,label) {
+ const index=html.indexOf(`<h4>${label}</h4>`);
+ assert.ok(index>=0,`Missing equation: ${label}`);
+ return html.slice(index).split('<div class="report-equation">')[0];
 }
 
 test('full service report gives independently checked uniform-load results and every AISC segment',()=>{
@@ -119,6 +124,38 @@ test('dead-only point loads stay unchanged in service and both comparison reacti
  assert.equal(reactions.length,3);
  assert.equal(reactions[1],reactions[0]);
  assert.equal(reactions[2],reactions[0]);
+});
+
+test('point-load comparison shows adjusted live and dead plus adjusted live, with self-weight distributed once',()=>{
+ const r=fixture({pointOnly:true,factor:4,points:[{id:'P1',deadKip:.01,liveKip:.02,locationFt:5}]});
+ const html=renderCalculationReport(r);
+ const schedule=tableContaining(html,'Applied loads');
+ assert.equal((schedule.match(/<td>SW<\/td>/g)||[]).length,1);
+ assert.match(schedule,/<td>SW<\/td><td>Uniform — beam self-weight<\/td><td>31<\/td><td>lb\/ft<\/td>/);
+ assert.equal(r.analysis.reactions.leftLb,332.5);
+ assert.equal(r.analysis.reactions.rightLb,317.5);
+ const dead=equationContaining(html,'Total distributed dead load');
+ assert.match(dead,/0 \+ 31/);assert.match(dead,/31 lb\/ft; includes beam self-weight once/);
+ const bendingLive=equationContaining(html,'P1 bending adjusted live load');
+ assert.match(bendingLive,/20 × \(4 \/ 1\.67\)/);assert.match(bendingLive,/47\.904 lbs/);
+ const bendingTotal=equationContaining(html,'P1 bending dead + adjusted live');
+ assert.match(bendingTotal,/10 \+ 47\.904/);assert.match(bendingTotal,/57\.904 lbs at x = 5 ft/);
+ const shearLive=equationContaining(html,'P1 shear adjusted live load');
+ assert.match(shearLive,/20 × \(4 \/ 1\.50\)/);assert.match(shearLive,/53\.333 lbs/);
+ const shearTotal=equationContaining(html,'P1 shear dead + adjusted live');
+ assert.match(shearTotal,/10 \+ 53\.333/);assert.match(shearTotal,/63\.333 lbs at x = 5 ft/);
+ const uniform=equationContaining(html,'Bending uniform comparison total');
+ assert.match(uniform,/31 \+ 0/);assert.match(uniform,/31 lb\/ft/);
+ assert.doesNotMatch(uniform,/\+ SW|\+ 31 \+/);
+ const reactions=html.split('<caption>Individual load contributions to reactions').slice(1).map(part=>part.split('</table>')[0]);
+ assert.equal(reactions.length,3);
+ // 31 lb/ft over 20 ft contributes exactly 620 lb and 310 lb at each support
+ // in all cases; the independently adjusted point force contributes the rest.
+ for(const content of reactions) assert.match(content,/<td>Uniform<\/td><td>620<\/td><td>10<\/td><td>310<\/td><td>310<\/td>/);
+ assert.match(reactions[1],/<td>P1<\/td><td>57\.904<\/td><td>5<\/td><td>43\.428<\/td><td>14\.476<\/td>/);
+ assert.match(reactions[2],/<td>P1<\/td><td>63\.333<\/td><td>5<\/td><td>47\.5<\/td><td>15\.833<\/td>/);
+ assert.match(html,/353\.428 lbs/);assert.match(html,/324\.476 lbs/);
+ assert.match(html,/357\.5 lbs/);assert.match(html,/325\.833 lbs/);
 });
 
 test('support-applied point load remains in equilibrium but endpoint table only reports span-side shear',()=>{

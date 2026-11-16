@@ -160,10 +160,28 @@ function memberChecks({section, analysis, pointLoads, topBracesFt, bottomBracesF
   catch (e) { shearing = {status:'not_evaluated', reason:e instanceof Error ? e.message : 'Outside supported scope.'}; }
   extra = {sf, bendingLoad, shearLoad, bending, shearing};
  }
- return {status:'evaluated', flexure, shear, extra, dead, live, self, section, spanFt:analysis.input.spanFt, comparisonSelection:$('load-comparison').value, cbMethod:$('cb-method').value};
+ return {status:'evaluated', flexure, shear, extra, dead, live, self, pointLoads, section, spanFt:analysis.input.spanFt, comparisonSelection:$('load-comparison').value, cbMethod:$('cb-method').value};
 }
 function calculationRow(label, equation, result, reference = '') {
  return `<div class="capacity-row"><span class="capacity-label">${label}</span><span class="capacity-equation">${equation}</span><strong class="capacity-value">${result}</strong><span class="capacity-reference">${reference}</span></div>`;
+}
+function deadLoadRows({dead, self}) {
+ return calculationRow('Beam self-weight', 'Included once in uniform DL', `${lb(self,3)} lb/ft`)
+  + calculationRow('Uniform DL', `Entered DL + beam self-weight = ${lb(dead,3)} + ${lb(self,3)}`, `${lb(dead+self,3)} lb/ft`);
+}
+function comparisonLoadRows({dead, live, self, pointLoads = []}, sf, divisor, label) {
+ const multiplier = sf / divisor;
+ let html = '';
+ if (dead > 0 || live > 0 || !pointLoads.length) {
+  html += calculationRow(`${label} uniform LL`, `${lb(live,3)} × (${fmt(sf,8)} / ${divisor.toFixed(2)})`, `${lb(live*multiplier,1)} lb/ft`)
+   + calculationRow(`${label} uniform load`, `DL + LL = ${lb(dead+self,3)} + ${lb(live*multiplier,1)}`, `${lb(dead+self+live*multiplier,1)} lb/ft`);
+ }
+ for (const point of pointLoads) {
+  const name = escape(point.id);
+  html += calculationRow(`${name} ${label.toLowerCase()} LL`, `${lb(point.liveKip,3)} × (${fmt(sf,8)} / ${divisor.toFixed(2)})`, `${lb(point.liveKip*multiplier,1)} lbs`)
+   + calculationRow(`${name} ${label.toLowerCase()} load`, `DL + LL = ${lb(point.deadKip,3)} + ${lb(point.liveKip*multiplier,1)}; x = ${fmt(point.locationFt,3)} ft`, `${lb(point.deadKip+point.liveKip*multiplier,1)} lbs`);
+ }
+ return html;
 }
 function memberChecksHtml(check) {
  if (check.status === 'not_requested') return '<div class="calculation-detail"><h3>Steel member strength</h3><p>Not evaluated. Select the optional AISC member checks and confirm their assumptions to evaluate the supported limit states.</p></div>';
@@ -217,11 +235,11 @@ function memberChecksHtml(check) {
   const bendRows = fb.status === 'evaluated' ? calculationRow('Moment ratio', `${lb(fb.governingSegment.MmaxKipFt)} / ${lb(fb.governingSegment.allowableKipFt)} lb-ft`, ratio(fb.governingSegment.utilization), fb.flangeLocalBuckling ? 'AISC F3' : 'AISC F2') : `<p class="capacity-note">Bending not evaluated: ${escape(fb.reason || 'Outside supported scope.')}</p>`;
   const shearRows = vs.status === 'evaluated' ? calculationRow('Shear ratio', `${lb(vs.demandKip)} / ${lb(vs.allowableKip)} lbs`, ratio(vs.utilization), 'AISC G2.1(a)') : `<p class="capacity-note">Shear not evaluated: ${escape(vs.reason || 'Outside supported scope.')}</p>`;
   extraHtml = `<div class="capacity-section"><h4>ASD — ${check.comparisonSelection === 'four' ? '4:1' : 'custom factor'} comparison</h4><p class="capacity-note"><strong>Illustrative only.</strong> Not a verified OSHA or ASD load combination; maximum intended load and failure-capacity basis require review.</p>
-  ${calculationRow('Bending load', `D + self-weight + (SF / 1.67)L = ${lb(check.dead,2)} + ${lb(check.self,2)} + (${fmt(x.sf,8)} / 1.67 × ${lb(check.live,2)})`, `${lb(x.bendingLoad,1)} lb/ft`, '')}
+  ${deadLoadRows(check)}
+  ${comparisonLoadRows(check, x.sf, 1.67, 'Bending')}
   ${fb.status === 'evaluated' ? calculationRow('Moment demand', `Peak combined moment, segment ${fmt(fb.governingSegment.startFt,3)}–${fmt(fb.governingSegment.endFt,3)} ft`, `${lb(fb.governingSegment.MmaxKipFt)} lb-ft`, '') : ''}
   ${bendRows}
-  <p class="capacity-note">Each point load uses D + (SF / 1.67)LL for bending and D + (SF / 1.50)LL for shear. Only its live portion receives the additional multiplier.</p>
-  ${calculationRow('Shear load', `D + self-weight + (SF / 1.50)L = ${lb(check.dead,2)} + ${lb(check.self,2)} + (${fmt(x.sf,8)} / 1.50 × ${lb(check.live,2)})`, `${lb(x.shearLoad,1)} lb/ft`, '')}
+  ${comparisonLoadRows(check, x.sf, 1.5, 'Shear')}
   ${vs.status === 'evaluated' ? calculationRow('Shear demand', 'Peak combined shear', `${lb(vs.demandKip)} lbs`, '') : ''}
   ${shearRows}</div>`;
  }
@@ -320,13 +338,13 @@ function render(r) {
  if (r.comparison && r.checks.status !== 'evaluated') {
   const multiplier = r.comparison.multiplier;
   const compared = analyzeBeam({ ...a.input, uniformLoadPlf:r.comparison.totalKipFt * 1000, pointLoads:pointLoadsForAnalysis(r.pointLoads, multiplier) });
-  comparisonHtml = `<div class="calculation-detail"><h3>Safety factor comparison · illustrative</h3><p>Live uniform and point loads × ${fmt(multiplier,5)} (SF / 1.67). Left reaction ${fmt(compared.reactions.leftLb, 0)} lbs; right reaction ${fmt(compared.reactions.rightLb, 0)} lbs; maximum moment ${lb(compared.maxMoment.momentKipFt)} lb-ft.</p><p>Not a verified OSHA combination or capacity check. Service diagrams remain unfactored.</p></div>`;
+  comparisonHtml = `<div class="capacity-checks"><h3>Safety factor comparison · illustrative</h3>${deadLoadRows(r)}${comparisonLoadRows(r, r.comparison.numerator, 1.67, 'Bending')}<p>Left reaction ${fmt(compared.reactions.leftLb, 0)} lbs; right reaction ${fmt(compared.reactions.rightLb, 0)} lbs; maximum moment ${lb(compared.maxMoment.momentKipFt)} lb-ft.</p><p>Not a verified OSHA combination or capacity check. Service diagrams remain unfactored.</p></div>`;
  }
  const basis = `<div class="capacity-checks analysis-basis"><h3>Service analysis</h3>
  ${calculationRow('Section', `${escape(r.section)} · E = ${lb(r.E)} psi`, `I<sub>x</sub> = ${fmt(r.I,3)} in⁴`, '')}
- ${calculationRow('Beam self-weight', 'AISC section weight', `${lb(r.self,2)} lb/ft`, '')}
- ${calculationRow('Uniform load', `D + self-weight + L = ${lb(r.dead,2)} + ${lb(r.self,2)} + ${lb(r.live,2)}`, `${lb(r.total,2)} lb/ft`, '')}
- ${calculationRow('Point loads', 'D + LL; positions measured from left support', r.pointLoads.length ? r.pointLoads.map(p=>`${escape(p.id)}: D ${lb(p.deadKip,2)} + LL ${lb(p.liveKip,2)} = ${lb(p.loadKip,2)} lbs at ${fmt(p.locationFt,3)} ft`).join('; ') : 'None', '')}
+ ${deadLoadRows(r)}
+ ${calculationRow('Uniform service load', `DL + LL = ${lb(r.dead+r.self,3)} + ${lb(r.live,3)}`, `${lb(r.total,3)} lb/ft`)}
+ ${r.pointLoads.map(p => calculationRow(`${escape(p.id)} service load`, `DL + LL = ${lb(p.deadKip,3)} + ${lb(p.liveKip,3)}; x = ${fmt(p.locationFt,3)} ft`, `${lb(p.loadKip,3)} lbs`)).join('')}
  ${calculationRow('Left reaction', 'Combined loads', `${fmt(a.reactions.leftLb,0)} lbs`, '')}
  ${calculationRow('Right reaction', 'Combined loads', `${fmt(a.reactions.rightLb,0)} lbs`, '')}
  ${calculationRow('Maximum moment', `Combined loads at x = ${fmt(a.maxMoment.xFt,3)} ft`, `${lb(a.maxMoment.momentKipFt)} lb-ft`, '')}
