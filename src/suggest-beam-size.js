@@ -7,11 +7,13 @@ import { resolveFlangeBracing } from './bracing.js';
 
 /**
  * Find the lowest weight-per-foot catalogue section that meets the implemented
- * AISC F2 bending and G2.1(a) shear checks. This is preliminary candidate
- * screening, not an overall member, scaffold, deflection, or compliance design.
- * Each proposed section's properties must be independently verified.
+ * AISC F2/F3 bending and G2.1(a) shear checks and, when a limit is given, the
+ * service deflection limit (span / deflectionLimitRatio, using the same stiffness
+ * factor as the calculator). This is preliminary candidate screening, not an
+ * overall member, scaffold or compliance design. Each proposed section's
+ * properties must be independently verified.
  */
-export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, pointLoads = [], bracesFt, topBracesFt, bottomBracesFt, cbMethod = 'unity', safetyFactor = null, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
+export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt, pointLoads = [], bracesFt, topBracesFt, bottomBracesFt, cbMethod = 'unity', safetyFactor = null, deflectionLimitRatio = null, stiffnessFactor = 1, Eksi = 29000, confirmedLateralBracing = false, confirmedScope = false } = {}) {
   if (!confirmedLateralBracing || !confirmedScope) throw new Error('Confirm the material, restraint and loading assumptions before suggesting a size.');
   if (Eksi !== 29000) throw new Error('Suggested sizes require E = 29,000 ksi and A992 steel.');
   if (!Number.isFinite(spanFt) || spanFt <= 0 || ![deadLoadKipFt, liveLoadKipFt].every(n => Number.isFinite(n) && n >= 0)) throw new Error('A positive span and finite nonnegative loads are required.');
@@ -20,6 +22,8 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
   if (!['unity', 'quarter'].includes(cbMethod)) throw new Error('Select a supported Cb method.');
   const bracing = resolveFlangeBracing({ spanFt, bracesFt, topBracesFt, bottomBracesFt });
   if (safetyFactor !== null && (!Number.isFinite(safetyFactor) || safetyFactor < 1)) throw new Error('Safety factor must be at least 1.');
+  if (deflectionLimitRatio !== null && (!Number.isFinite(deflectionLimitRatio) || deflectionLimitRatio <= 0)) throw new Error('Deflection limit must be a positive span ratio.');
+  if (!Number.isFinite(stiffnessFactor) || stiffnessFactor <= 0 || stiffnessFactor > 1) throw new Error('Stiffness factor must be greater than zero and at most 1.');
 
   let considered = 0, skipped = 0;
   const candidates = [];
@@ -27,7 +31,9 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
     try {
       if (section?.Type !== 'W' || typeof section.AISC_Manual_Label !== 'string' || !section.AISC_Manual_Label || !Number.isFinite(section.Ix) || section.Ix <= 0) throw new Error('Invalid W section.');
       const self = beamSelfWeight(section);
-      const base = { spanFt, Eksi, Iin4: section.Ix, stiffnessFactor: 1 };
+      // Strength results do not depend on stiffness; the deflection check uses the
+      // calculator's stiffness factor so it matches the adjusted deflection shown.
+      const base = { spanFt, Eksi, Iin4: section.Ix, stiffnessFactor };
       // Point loads are live loads. Use the complete response for both checks:
       // eccentric loads make the end reactions, and hence shear demand, unequal.
       const response = (load, pointMultiplier = 1) => analyzeBeam({ ...base, uniformLoadPlf: load * 1000, pointLoads: pointLoads.map(p => ({ loadLb: p.loadKip * pointMultiplier * 1000, locationFt: p.locationFt })) });
@@ -46,10 +52,11 @@ export function suggestBeamSize({ sections, spanFt, deadLoadKipFt, liveLoadKipFt
         comparisonShearRatio = comparisonShear.utilization;
       }
       const bendingRatio = bending.governingSegment.utilization, shearRatio = shearing.utilization;
-      const ratios = [bendingRatio, shearRatio, ...(safetyFactor === null ? [] : [comparisonBendingRatio, comparisonShearRatio])];
+      const deflectionRatio = deflectionLimitRatio === null ? null : service.maxDeflection.reducedDeflectionIn / (spanFt * 12 / deflectionLimitRatio);
+      const ratios = [bendingRatio, shearRatio, ...(safetyFactor === null ? [] : [comparisonBendingRatio, comparisonShearRatio]), ...(deflectionRatio === null ? [] : [deflectionRatio])];
       if (!ratios.every(Number.isFinite)) throw new Error('Invalid ratio.');
       considered++;
-      if (ratios.every(n => n <= 1)) candidates.push({ section, bendingRatio, shearRatio, comparisonBendingRatio, comparisonShearRatio, selfWeightKipFt: self });
+      if (ratios.every(n => n <= 1)) candidates.push({ section, bendingRatio, shearRatio, comparisonBendingRatio, comparisonShearRatio, deflectionRatio, selfWeightKipFt: self });
     } catch {
       skipped++;
     }

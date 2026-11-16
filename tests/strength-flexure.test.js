@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeBeam } from '../src/beam.js';
 import { checkFlexure } from '../src/strength-flexure.js';
+import { readFileSync } from 'node:fs';
 
 const w16x31 = { Type:'W', d:15.9, bf:5.53, tf:0.44, tw:0.275, kdes:0.842, Sx:47.2, Zx:54, ry:1.17, rts:1.42, J:0.461, ho:15.5 };
 const near = (actual, expected, tolerance=1e-6) => assert.ok(Math.abs(actual-expected)<=tolerance, `${actual} != ${expected}`);
@@ -48,10 +49,36 @@ test('rejects unsupported material, geometry, loading, section or unconfirmed co
  assert.throws(()=>checkFlexure({...baseline,Eksi:28000}),/29,000/);
  const otherE = analyzeBeam({spanFt:20,uniformLoadPlf:1031,Eksi:28000,Iin4:375});
  assert.throws(()=>checkFlexure({...baseline,analysis:otherE}),/modulus must match/);
- assert.throws(()=>checkFlexure({...baseline,section:{...w16x31,tf:.1}}),/not compact/);
+ assert.throws(()=>checkFlexure({...baseline,section:{...w16x31,tw:.1}}),/web is not compact/);
  assert.throws(()=>checkFlexure({...baseline,section:{...w16x31,rts:undefined}}),/missing/);
  assert.throws(()=>checkFlexure({...baseline,bracesFt:[0,10,9,20]}),/Brace/);
 
+});
+
+test('F3 noncompact flange: W21x48 matches AISC Design Example F.3A (Mn = 442 kip-ft, Mn/Ω = 265 kip-ft)', () => {
+ const all = JSON.parse(readFileSync(new URL('../public/data/aisc-w-shapes-v15.json', import.meta.url)));
+ const w21x48 = all.find(s => s.AISC_Manual_Label === 'W21X48');
+ const a = analyzeBeam({spanFt:6, uniformLoadPlf:19500, Eksi:29000, Iin4:w21x48.Ix});
+ const r = checkFlexure({...baseline, section:w21x48, analysis:a, bracesFt:[0,1,2,3,4,5,6]});
+ assert.equal(r.compactness.flangeClass, 'noncompact');
+ const root = Math.sqrt(29000/50), lam = 8.14/(2*.43);
+ const hand = (50*107 - (50*107 - .7*50*93)*(lam - .38*root)/(root - .38*root))/12;
+ near(r.flangeLocalBuckling.MnKipFt, hand, 1e-9);
+ assert.ok(Math.abs(r.flangeLocalBuckling.MnKipFt - 442) < 0.5);
+ assert.equal(r.governingSegment.limitState, 'flange local buckling');
+ assert.equal(Math.round(r.governingSegment.allowableKipFt), 265);
+ // Unbraced, lateral-torsional buckling governs instead and FLB still caps nothing lower.
+ const long = checkFlexure({...baseline, section:w21x48, analysis:analyzeBeam({spanFt:20,uniformLoadPlf:1000,Eksi:29000,Iin4:w21x48.Ix}), bracesFt:[0,20]});
+ assert.equal(long.governingSegment.limitState, 'elastic LTB');
+ near(long.governingSegment.MnKipFt, Math.min(long.governingSegment.MnLtbKipFt, long.governingSegment.MnFlbKipFt));
+ // Exactly the shapes AISC 360-16 F3 lists as noncompact at Fy = 50 ksi are classed so.
+ const noncompact = all.filter(s => { try { return checkFlexure({...baseline, section:s, analysis:analyzeBeam({spanFt:20,uniformLoadPlf:100,Eksi:29000,Iin4:s.Ix}), bracesFt:[0,20]}).compactness.flangeClass !== 'compact'; } catch { return false; } }).map(s => s.AISC_Manual_Label).sort();
+ assert.deepEqual(noncompact, ['W10X12','W12X65','W14X90','W14X99','W21X48','W6X15','W6X8.5','W6X9','W8X10','W8X31']);
+ // A slender flange uses F3-2 with kc bounded to 0.35–0.76.
+ const slender = checkFlexure({...baseline, section:{...w16x31, tf:.1}});
+ assert.equal(slender.compactness.flangeClass, 'slender');
+ const kc = Math.min(.76, Math.max(.35, 4/Math.sqrt((15.9-2*.842)/.275)));
+ near(slender.flangeLocalBuckling.MnKipFt, .9*29000*kc*47.2/(5.53/.2)**2/12, 1e-9);
 });
 
 test('point loads are included in segment maximum and quarter-point Cb', () => {

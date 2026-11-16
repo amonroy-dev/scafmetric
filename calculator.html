@@ -80,7 +80,10 @@
               <output id="bracing-summary" class="bracing-summary"></output>
             </div>
             <div class="form-section assumptions-section">
-              <div class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>AISC 360-16 · ASD</span></div>
+              <div class="section-title"><span class="step" aria-hidden="true">05</span><h3>Steel check</h3><span>Strength · deflection</span></div>
+              <div class="deflection-limit-control"><label for="deflection-limit">Deflection limit</label><select id="deflection-limit" aria-describedby="deflection-limit-note"><option value="240" selected>L/240 · default</option><option value="360">L/360 · stricter</option><option value="180">L/180 · less strict</option></select>
+                <p id="deflection-limit-note" class="field-help">Checked on every run: the beam's maximum sag under service load (0.8 EI) must stay within this fraction of the span. A beam can pass bending and shear and still fail it. L/240 is the default beam criterion for this preliminary calculation. OSHA 1926.451(f)(16) and ANSI/ASSP A10.8-2019 §5.1.1.3 give L/60 platform provisions; they do not establish this support-beam criterion. A qualified designer must confirm the project requirements.</p>
+              </div>
               <div class="capacity-assumptions"><p>Confirm these assumptions for this beam:</p><ul>
                 <li>ASTM A992 steel, F<sub>y</sub> = 50,000 psi and E = 29,000,000 psi.</li>
                 <li>Both flanges have adequate lateral and twist restraint at the supports. Each entered interior brace adequately restrains its specified flange.</li>

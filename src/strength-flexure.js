@@ -1,7 +1,11 @@
 import { resolveFlangeBracing } from './bracing.js';
 
 /**
- * AISC 360-16 ASD F2 / B4.1b: rolled W section, major-axis flexure.
+ * AISC 360-16 ASD F2 / F3 / B4.1b: rolled W section, major-axis flexure.
+ * Compact flanges use F2 (yielding and lateral-torsional buckling). Noncompact or
+ * slender flanges use F3: the lower of F2.2 lateral-torsional buckling and
+ * compression-flange local buckling (F3-1 or F3-2). Webs must be compact; F4 and
+ * F5 are not implemented (every library W shape has a compact web at Fy = 50 ksi).
  * Units: ksi, inches, feet, kips. Strengths use nominal E and section properties;
  * the analysis stiffness multiplier is never applied to the member strengths.
  * This is an individual member check, not a scaffold, stability-system, bearing,
@@ -28,11 +32,23 @@ export function checkFlexure({ section, analysis, bracesFt, topBracesFt, bottomB
   const root = Math.sqrt(Eksi / Fyksi);
   const flangeRatio = section.bf / (2 * section.tf);
   const webRatio = (section.d - 2 * section.kdes) / section.tw;
-  const flangeLimit = 0.38 * root;
-  const webLimit = 3.76 * root;
-  if (flangeRatio > flangeLimit || webRatio > webLimit) throw new Error('Section is not compact in flexure; local buckling checks for this section are not implemented.');
+  const flangeLimit = 0.38 * root;        // λpf, Table B4.1b case 10
+  const flangeSlenderLimit = 1.0 * root;  // λrf, Table B4.1b case 10
+  const webLimit = 3.76 * root;           // λpw, Table B4.1b case 15
+  if (webRatio > webLimit) throw new Error('The web is not compact in flexure; AISC F4 and F5 are not implemented for this section.');
+  const flangeClass = flangeRatio <= flangeLimit ? 'compact' : flangeRatio <= flangeSlenderLimit ? 'noncompact' : 'slender';
 
   const MpKipIn = Fyksi * section.Zx;
+  // F3.2 compression-flange local buckling. It does not depend on Lb or Cb, so it
+  // is the same for every segment; each segment then takes the lower of LTB and FLB.
+  let flb = null;
+  if (flangeClass === 'noncompact') {
+    flb = { equation: 'F3-1', kc: null, MnKipIn: MpKipIn - (MpKipIn - 0.7 * Fyksi * section.Sx) * (flangeRatio - flangeLimit) / (flangeSlenderLimit - flangeLimit) };
+  } else if (flangeClass === 'slender') {
+    const kc = Math.min(0.76, Math.max(0.35, 4 / Math.sqrt(webRatio)));
+    flb = { equation: 'F3-2', kc, MnKipIn: 0.9 * Eksi * kc * section.Sx / flangeRatio ** 2 };
+  }
+  if (flb && (!Number.isFinite(flb.MnKipIn) || flb.MnKipIn <= 0)) throw new Error('Section properties do not produce a valid F3 flange local buckling strength.');
   const LpIn = 1.76 * section.ry * root;
   const jr = section.J / (section.Sx * section.ho); // c = 1 for doubly symmetric I-shapes
   const LrIn = 1.95 * section.rts * Eksi / (0.7 * Fyksi) * Math.sqrt(jr + Math.sqrt(jr ** 2 + 6.76 * (0.7 * Fyksi / Eksi) ** 2));
@@ -53,20 +69,25 @@ export function checkFlexure({ section, analysis, bracesFt, topBracesFt, bottomB
     const MaKipFt = moment(startFt + LbFt / 4), MbKipFt = moment(startFt + LbFt / 2), McKipFt = moment(startFt + 3 * LbFt / 4);
     // A zero-moment interval has no meaningful moment-gradient factor; use 1.0.
     const Cb = cbMethod === 'quarter' && MmaxKipFt > 0 ? 12.5 * MmaxKipFt / (2.5 * MmaxKipFt + 3 * MaKipFt + 4 * MbKipFt + 3 * McKipFt) : 1;
-    let MnKipIn, ltbRegime, FcrKsi = null;
-    if (LbIn <= LpIn) { MnKipIn = MpKipIn; ltbRegime = 'yielding'; }
+    // F2.2 lateral-torsional buckling (F3.1 applies the same provisions); for
+    // Lb ≤ Lp the yielding limit state F2.1 gives Mp.
+    let MnLtbKipIn, ltbRegime, FcrKsi = null;
+    if (LbIn <= LpIn) { MnLtbKipIn = MpKipIn; ltbRegime = 'yielding'; }
     else if (LbIn <= LrIn) {
-      MnKipIn = Math.min(MpKipIn, Cb * (MpKipIn - (MpKipIn - 0.7 * Fyksi * section.Sx) * (LbIn - LpIn) / (LrIn - LpIn)));
+      MnLtbKipIn = Math.min(MpKipIn, Cb * (MpKipIn - (MpKipIn - 0.7 * Fyksi * section.Sx) * (LbIn - LpIn) / (LrIn - LpIn)));
       ltbRegime = 'inelastic LTB';
     } else {
       const slenderness = LbIn / section.rts;
       FcrKsi = Cb * Math.PI ** 2 * Eksi / slenderness ** 2 * Math.sqrt(1 + 0.078 * jr * slenderness ** 2);
-      MnKipIn = Math.min(MpKipIn, FcrKsi * section.Sx); ltbRegime = 'elastic LTB';
+      MnLtbKipIn = Math.min(MpKipIn, FcrKsi * section.Sx); ltbRegime = 'elastic LTB';
     }
+    const flbGoverns = flb !== null && flb.MnKipIn < MnLtbKipIn;
+    const MnKipIn = flbGoverns ? flb.MnKipIn : MnLtbKipIn;
+    const limitState = flbGoverns ? 'flange local buckling' : ltbRegime;
     const MnKipFt = MnKipIn / 12, allowableKipFt = MnKipFt / 1.67, utilization = MmaxKipFt / allowableKipFt;
     if (![Cb, MmaxKipFt, MaKipFt, MbKipFt, McKipFt, MnKipFt, allowableKipFt, utilization].every(Number.isFinite) || allowableKipFt <= 0) throw new Error('The flexural result is outside the numerical range supported.');
-    return Object.freeze({ startFt, endFt, LbFt, Cb, MmaxKipFt, MaKipFt, MbKipFt, McKipFt, MnKipFt, allowableKipFt, utilization, ltbRegime, FcrKsi });
+    return Object.freeze({ startFt, endFt, LbFt, Cb, MmaxKipFt, MaKipFt, MbKipFt, McKipFt, MnLtbKipFt: MnLtbKipIn / 12, MnFlbKipFt: flb ? flb.MnKipIn / 12 : null, MnKipFt, allowableKipFt, utilization, ltbRegime, limitState, FcrKsi });
   });
   const governingSegment = segments.reduce((best, segment) => segment.utilization > best.utilization ? segment : best);
-  return Object.freeze({ compactness: Object.freeze({ flangeRatio, webRatio, flangeLimit, webLimit }), LpFt: LpIn / 12, LrFt: LrIn / 12, MpKipFt: MpKipIn / 12, omegaB: 1.67, cbMethod, compressionFlange: 'top', topBracesFt: bracing.top.locations, bottomBracesFt: bracing.bottom.locations, segments: Object.freeze(segments), governingSegment });
+  return Object.freeze({ compactness: Object.freeze({ flangeRatio, webRatio, flangeLimit, flangeSlenderLimit, webLimit, flangeClass }), flangeLocalBuckling: flb && Object.freeze({ equation: flb.equation, kc: flb.kc, MnKipFt: flb.MnKipIn / 12 }), LpFt: LpIn / 12, LrFt: LrIn / 12, MpKipFt: MpKipIn / 12, omegaB: 1.67, cbMethod, compressionFlange: 'top', topBracesFt: bracing.top.locations, bottomBracesFt: bracing.bottom.locations, segments: Object.freeze(segments), governingSegment });
 }

@@ -4,17 +4,19 @@ import { analyzeBeam } from '../src/beam.js';
 import { checkFlexure } from '../src/strength-flexure.js';
 import { checkMajorAxisShear } from '../src/strength-shear.js';
 import { renderCalculationReport } from '../src/calculation-report.js';
+import { checkDeflection } from '../src/deflection-check.js';
 
 const section = { Type:'W', AISC_Manual_Label:'W16X31', W:31, A:9.13, d:15.9, bf:5.53, tf:.44, tw:.275, kdes:.842, Ix:375, Iy:12.4, Sx:47.2, Zx:54, ry:1.17, rts:1.42, J:.461, ho:15.5 };
-function fixture({points=[],braces=[0,5,10,15,20],zero=false,factor=null,unconfirmed=false,cb='unity'}={}) {
+function fixture({points=[],braces=[0,5,10,15,20],zero=false,factor=null,unconfirmed=false,cb='unity',stiffnessFactor=.8}={}) {
  const dead=zero?0:.2, live=zero?0:.8, self=zero?0:.031, total=dead+live+self, span=20;
- const response=(w,multiplier=1)=>analyzeBeam({spanFt:span,uniformLoadPlf:w*1000,pointLoads:points.map(p=>({loadLb:p.loadKip*multiplier*1000,locationFt:p.locationFt})),Eksi:29000,Iin4:375,stiffnessFactor:.8});
+ const response=(w,multiplier=1)=>analyzeBeam({spanFt:span,uniformLoadPlf:w*1000,pointLoads:points.map(p=>({loadLb:p.loadKip*multiplier*1000,locationFt:p.locationFt})),Eksi:29000,Iin4:375,stiffnessFactor});
  const analysis=response(total);
  const flex=a=>({status:'evaluated',...checkFlexure({section,analysis:a,bracesFt:braces,cbMethod:cb,Eksi:29000,Fyksi:50,confirmedLateralBracing:true,confirmedScope:true})});
  const shear=a=>checkMajorAxisShear({section,FyKsi:50,Eksi:29000,demandKip:Math.max(Math.abs(a.maxShear.shearLb),Math.abs(a.minShear.shearLb))/1000});
  const checks=unconfirmed?{status:'not_evaluated',reason:'Confirm the beam assumptions.'}:{status:'evaluated',section,flexure:flex(analysis),shear:shear(analysis),cbMethod:cb};
+ checks.deflection=checkDeflection({analysis,limitRatio:240});
  if(factor&&!unconfirmed) checks.extra={sf:factor,bendingLoad:dead+self+factor/1.67*live,shearLoad:dead+self+factor/1.5*live,bending:flex(response(dead+self+factor/1.67*live,factor/1.67)),shearing:shear(response(dead+self+factor/1.5*live,factor/1.5))};
- return {project:'Bridge scaffold',preparer:'A. Contractor',timestamp:'2026-11-14T12:00:00.000Z',section:'W16X31',sectionProperties:section,span,dead,live,self,total,E:29000,I:375,factor:.8,uniformLoads:[{id:'U1',deadKipFt:dead,liveKipFt:live}],pointLoads:points,braces:{top:{locations:braces},bottom:{locations:[0,20]},locations:braces},analysis,checks,comparison:factor?{numerator:factor}:null};
+ return {project:'Bridge scaffold',preparer:'A. Contractor',timestamp:'2026-11-14T12:00:00.000Z',section:'W16X31',sectionProperties:section,span,dead,live,self,total,E:29000,I:375,factor:stiffnessFactor,uniformLoads:[{id:'U1',deadKipFt:dead,liveKipFt:live}],pointLoads:points,braces:{top:{locations:braces},bottom:{locations:[0,20]},locations:braces},analysis,checks,comparison:factor?{numerator:factor}:null};
 }
 function tableContaining(html,caption) {
  return html.slice(html.indexOf(`<caption>${caption}`)).split('</table>')[0];
@@ -34,6 +36,20 @@ test('full service report gives independently checked uniform-load results and e
  assert.match(html,/Euler–Bernoulli/);assert.match(html,/not AISC strength equations/);
  assert.match(html,/Top<\/td><td>0, 5, 10, 15, 20/);assert.match(html,/Bottom<\/td><td>0, 20/);
  assert.match(html,/J10/);assert.match(html,/Shear deformation is excluded/);
+});
+
+test('report fails on excessive deflection even when bending and shear pass',()=>{
+ const r=fixture({stiffnessFactor:.2});
+ assert.ok(r.checks.flexure.governingSegment.utilization < 1);
+ assert.ok(r.checks.shear.utilization < 1);
+ assert.ok(r.checks.deflection.utilization > 1);
+ const html=renderCalculationReport(r);
+ assert.match(html,/FAIL — deflection exceeds the selected limit/);
+ assert.match(html,/Deflection limit check/);
+ assert.match(html,/EXCEEDS the selected L\/240 limit/);
+ assert.match(html,/240 \/ 240 = 1 in/);
+ assert.match(html,/1926\.451\(f\)\(16\)/);
+ assert.doesNotMatch(html,/PASS —/);
 });
 
 test('report includes yielding, inelastic and elastic formulas and all comparison segments',()=>{

@@ -1,6 +1,7 @@
 import { analyzeBeam } from './src/beam.js';
 import { beamSelfWeight } from './src/beam-self-weight.js';
-import { summarizeChecks, formatUtilization } from './src/check-verdict.js';
+import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
+import { checkDeflection } from './src/deflection-check.js';
 import { suggestBeamSize } from './src/suggest-beam-size.js';
 import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
@@ -177,29 +178,37 @@ function memberChecksHtml(check) {
  let flex = `<p class="capacity-note"><strong>Bending: not evaluated.</strong> ${escape(f.reason || 'Outside supported scope.')}</p>`;
  if (f.status === 'evaluated') {
   const g = f.governingSegment;
-  const rows = f.segments.map(seg => `<tr><td>${fmt(seg.startFt,3)}–${fmt(seg.endFt,3)}</td><td>${fmt(seg.LbFt,3)}</td><td>${ratio(seg.Cb)}</td><td>${lb(seg.MmaxKipFt)}</td><td>${lb(seg.MnKipFt)}</td><td>${lb(seg.allowableKipFt)}</td><td>${ratio(seg.utilization)}</td></tr>`).join('');
+  const rows = f.segments.map(seg => `<tr><td>${fmt(seg.startFt,3)}–${fmt(seg.endFt,3)}</td><td>${fmt(seg.LbFt,3)}</td><td>${ratio(seg.Cb)}</td><td>${lb(seg.MmaxKipFt)}</td><td>${lb(seg.MnKipFt)}</td><td>${lb(seg.allowableKipFt)}</td><td>${ratio(seg.utilization)}</td><td>${escape(seg.limitState)}</td></tr>`).join('');
+  const c = f.compactness, flb = f.flangeLocalBuckling;
   let cbEquation = 'Specified';
   if (check.cbMethod === 'quarter') cbEquation = g.MmaxKipFt === 0 ? 'Zero moment: C<sub>b</sub> = 1.0' : `(12.5 × ${lb(g.MmaxKipFt)}) / (2.5 × ${lb(g.MmaxKipFt)} + 3 × ${lb(g.MaKipFt)} + 4 × ${lb(g.MbKipFt)} + 3 × ${lb(g.McKipFt)})`;
-  const nominalEq = g.ltbRegime === 'yielding'
+  const nominalEq = g.limitState === 'flange local buckling'
+   ? (flb.equation === 'F3-1' ? `M<sub>p</sub> − (M<sub>p</sub> − 0.7F<sub>y</sub>S<sub>x</sub> / 12)(λ − λ<sub>pf</sub>)/(λ<sub>rf</sub> − λ<sub>pf</sub>); flange local buckling governs` : `0.9Ek<sub>c</sub>S<sub>x</sub> / (12λ²); flange local buckling governs`)
+   : g.ltbRegime === 'yielding'
    ? `M<sub>p</sub> = F<sub>y</sub>Z<sub>x</sub> / 12 = 50,000 × ${fmt(props.Zx,3)} / 12`
    : g.ltbRegime === 'inelastic LTB'
     ? `min[M<sub>p</sub>, C<sub>b</sub>(M<sub>p</sub> − (M<sub>p</sub> − 0.7F<sub>y</sub>S<sub>x</sub> / 12)(L<sub>b</sub> − L<sub>p</sub>)/(L<sub>r</sub> − L<sub>p</sub>))]`
     : 'min(M<sub>p</sub>, F<sub>cr</sub>S<sub>x</sub> / 12); F<sub>cr</sub> per F2-4';
-  const nominalRef = g.ltbRegime === 'yielding' ? 'AISC F2-1' : g.ltbRegime === 'inelastic LTB' ? 'AISC F2-2' : 'AISC F2-3, F2-4';
+  const nominalRef = g.limitState === 'flange local buckling' ? `AISC ${flb.equation}` : g.ltbRegime === 'yielding' ? 'AISC F2-1' : g.ltbRegime === 'inelastic LTB' ? 'AISC F2-2' : 'AISC F2-3, F2-4';
+  const flangeRow = c.flangeClass === 'compact'
+   ? calculationRow('Flange compactness', 'b<sub>f</sub> / 2t<sub>f</sub> ≤ 0.38√(E / F<sub>y</sub>)', `${fmt(c.flangeRatio,3)} ≤ ${fmt(c.flangeLimit,3)}`, 'AISC B4.1b')
+   : calculationRow('Flange compactness', `${c.flangeClass} flange: 0.38√(E / F<sub>y</sub>) &lt; b<sub>f</sub> / 2t<sub>f</sub> ${c.flangeClass === 'noncompact' ? '≤' : '&gt;'} 1.0√(E / F<sub>y</sub>)`, `${fmt(c.flangeLimit,3)} &lt; ${fmt(c.flangeRatio,3)} ${c.flangeClass === 'noncompact' ? '≤' : '&gt;'} ${fmt(c.flangeSlenderLimit,3)}`, 'AISC B4.1b, F3');
+  const flbRow = flb ? calculationRow('Flange local buckling', flb.equation === 'F3-1' ? 'M<sub>p</sub> − (M<sub>p</sub> − 0.7F<sub>y</sub>S<sub>x</sub> / 12)(λ − λ<sub>pf</sub>)/(λ<sub>rf</sub> − λ<sub>pf</sub>)' : `0.9Ek<sub>c</sub>S<sub>x</sub> / (12λ²); k<sub>c</sub> = ${fmt(flb.kc,3)}`, `${lb(flb.MnKipFt)} lb-ft`, `AISC ${flb.equation}`) : '';
   const cbRef = check.cbMethod === 'quarter' && g.MmaxKipFt !== 0 ? 'AISC F1-1' : '';
   flex = `<div class="capacity-section"><div class="capacity-heading"><h4>Flexure · major axis</h4><span>${g.utilization <= 1 ? 'Meets listed check' : 'Does not meet listed check'}</span></div>
-  ${calculationRow('Flange compactness', 'b<sub>f</sub> / 2t<sub>f</sub> ≤ 0.38√(E / F<sub>y</sub>)', `${fmt(f.compactness.flangeRatio,3)} ≤ ${fmt(f.compactness.flangeLimit,3)}`, 'AISC B4.1b')}
+  ${flangeRow}
   ${calculationRow('Web compactness', '(d − 2k) / t<sub>w</sub> ≤ 3.76√(E / F<sub>y</sub>)', `${fmt(f.compactness.webRatio,3)} ≤ ${fmt(f.compactness.webLimit,3)}`, 'AISC B4.1b')}
   ${calculationRow('Plastic moment', `F<sub>y</sub>Z<sub>x</sub> / 12 = 50,000 × ${fmt(props.Zx,3)} / 12`, `${lb(f.MpKipFt)} lb-ft`, 'AISC F2-1')}
   ${calculationRow('L<sub>p</sub>', '1.76r<sub>y</sub>√(E / F<sub>y</sub>) / 12', `${fmt(f.LpFt,3)} ft`, 'AISC F2-5')}
   ${calculationRow('L<sub>r</sub>', '1.95r<sub>ts</sub>E/(0.7F<sub>y</sub>) × √[J/(S<sub>x</sub>h<sub>o</sub>) + √((J/(S<sub>x</sub>h<sub>o</sub>))² + 6.76(0.7F<sub>y</sub>/E)²)] / 12', `${fmt(f.LrFt,3)} ft`, 'AISC F2-6')}
-  ${calculationRow('Governing segment', `${fmt(g.startFt,3)}–${fmt(g.endFt,3)} ft · ${escape(g.ltbRegime)}`, `L<sub>b</sub> = ${fmt(g.LbFt,3)} ft`, '')}
+  ${flbRow}
+  ${calculationRow('Governing segment', `${fmt(g.startFt,3)}–${fmt(g.endFt,3)} ft · ${escape(g.limitState)}`, `L<sub>b</sub> = ${fmt(g.LbFt,3)} ft`, '')}
   ${calculationRow('C<sub>b</sub>', cbEquation, ratio(g.Cb), cbRef)}
   ${g.ltbRegime === 'elastic LTB' && Number.isFinite(g.FcrKsi) ? calculationRow('Critical stress', 'C<sub>b</sub>π²E/(L<sub>b</sub>/r<sub>ts</sub>)² × √[1 + 0.078(J/(S<sub>x</sub>h<sub>o</sub>))(L<sub>b</sub>/r<sub>ts</sub>)²]', `${lb(g.FcrKsi)} psi`, 'AISC F2-4') : ''}
   ${calculationRow('Nominal moment', nominalEq, `${lb(g.MnKipFt)} lb-ft`, nominalRef)}
-  ${calculationRow('Allowable moment', `M<sub>n</sub> / Ω<sub>b</sub> = ${lb(g.MnKipFt)} / 1.67`, `${lb(g.allowableKipFt)} lb-ft`, 'AISC F2')}
+  ${calculationRow('Allowable moment', `M<sub>n</sub> / Ω<sub>b</sub> = ${lb(g.MnKipFt)} / 1.67`, `${lb(g.allowableKipFt)} lb-ft`, flb ? 'AISC F3' : 'AISC F2')}
   ${calculationRow('Moment ratio', `M / M<sub>allow</sub> = ${lb(g.MmaxKipFt)} / ${lb(g.allowableKipFt)}`, ratio(g.utilization), '')}
-  <p class="capacity-scroll-hint">Swipe table to see all columns</p><div class="capacity-table-wrap"><table class="capacity-table"><caption>Unbraced segments · service load (moments in lb-ft)</caption><thead><tr><th>Segment (ft)</th><th>L<sub>b</sub> (ft)</th><th>C<sub>b</sub></th><th>M</th><th>M<sub>n</sub></th><th>M<sub>allow</sub></th><th>Ratio</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  <p class="capacity-scroll-hint">Swipe table to see all columns</p><div class="capacity-table-wrap"><table class="capacity-table"><caption>Unbraced segments · service load (moments in lb-ft)</caption><thead><tr><th>Segment (ft)</th><th>L<sub>b</sub> (ft)</th><th>C<sub>b</sub></th><th>M</th><th>M<sub>n</sub></th><th>M<sub>allow</sub></th><th>Ratio</th><th>Limit state</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
  }
  let shear = `<p class="capacity-note"><strong>Shear: not evaluated.</strong> ${escape(sh.reason || 'Outside supported scope.')}</p>`;
  if (sh.status === 'evaluated') shear = `<div class="capacity-section"><div class="capacity-heading"><h4>Shear · major axis</h4><span>${sh.meets ? 'Meets listed check' : 'Does not meet listed check'}</span></div>
@@ -211,7 +220,7 @@ function memberChecksHtml(check) {
  let extraHtml = '';
  if (check.extra) {
   const x = check.extra, fb = x.bending, vs = x.shearing;
-  const bendRows = fb.status === 'evaluated' ? calculationRow('Moment ratio', `${lb(fb.governingSegment.MmaxKipFt)} / ${lb(fb.governingSegment.allowableKipFt)} lb-ft`, ratio(fb.governingSegment.utilization), 'AISC F2') : `<p class="capacity-note">Bending not evaluated: ${escape(fb.reason || 'Outside supported scope.')}</p>`;
+  const bendRows = fb.status === 'evaluated' ? calculationRow('Moment ratio', `${lb(fb.governingSegment.MmaxKipFt)} / ${lb(fb.governingSegment.allowableKipFt)} lb-ft`, ratio(fb.governingSegment.utilization), fb.flangeLocalBuckling ? 'AISC F3' : 'AISC F2') : `<p class="capacity-note">Bending not evaluated: ${escape(fb.reason || 'Outside supported scope.')}</p>`;
   const shearRows = vs.status === 'evaluated' ? calculationRow('Shear ratio', `${lb(vs.demandKip)} / ${lb(vs.allowableKip)} lbs`, ratio(vs.utilization), 'AISC G2.1(a)') : `<p class="capacity-note">Shear not evaluated: ${escape(vs.reason || 'Outside supported scope.')}</p>`;
   extraHtml = `<div class="capacity-section"><h4>ASD — ${check.comparisonSelection === 'four' ? '4:1' : 'custom factor'} comparison</h4><p class="capacity-note"><strong>Illustrative only.</strong> Not a verified OSHA or ASD load combination; maximum intended load and failure-capacity basis require review.</p>
   ${calculationRow('Bending load', `D + self-weight + (SF / 1.67)L = ${lb(check.dead,2)} + ${lb(check.self,2)} + (${fmt(x.sf,8)} / 1.67 × ${lb(check.live,2)})`, `${lb(x.bendingLoad,1)} lb/ft`, '')}
@@ -222,7 +231,7 @@ function memberChecksHtml(check) {
   ${vs.status === 'evaluated' ? calculationRow('Shear demand', 'Peak combined shear', `${lb(vs.demandKip)} lbs`, '') : ''}
   ${shearRows}</div>`;
  }
- return `<div class="capacity-checks"><h3>ASD — no additional factor</h3><p class="capacity-basis">AISC 360-16 ASD · A992 F<sub>y</sub> = 50,000 psi · nominal E = 29,000,000 psi · service 1.0D + 1.0L · C<sub>b</sub> ${check.cbMethod === 'quarter' ? 'quarter-point' : '= 1.0'}</p>${flex}${shear}${extraHtml}<p class="capacity-note"><strong>Not evaluated:</strong> bearing, local web forces, connections, axial force, torsion, deflection limits, brace design, and scaffold-specific requirements. No overall adequacy is determined; verify section data independently.</p></div>`;
+ return `<div class="capacity-checks"><h3>ASD — no additional factor</h3><p class="capacity-basis">AISC 360-16 ASD · A992 F<sub>y</sub> = 50,000 psi · nominal E = 29,000,000 psi · service 1.0D + 1.0L · C<sub>b</sub> ${check.cbMethod === 'quarter' ? 'quarter-point' : '= 1.0'}</p>${flex}${shear}${extraHtml}<p class="capacity-note"><strong>Not evaluated:</strong> bearing, local web forces, connections, axial force, torsion, brace design, and scaffold-specific requirements. The deflection limit is checked separately (see the verdict and the service analysis below). No overall adequacy is determined; verify section data independently.</p></div>`;
 }
 function run(e) {
  e.preventDefault(); $('error').textContent = '';
@@ -244,7 +253,9 @@ function run(e) {
   const self = beamSelfWeight(s), total = dead+live+self, br = readBracing();
   const analysis = analyzeBeam({spanFt:span, uniformLoadPlf:total*1000, pointLoads:pointLoads.map(p=>({loadLb:p.loadKip*1000, locationFt:p.locationFt})), Eksi:E, Iin4:I, stiffnessFactor:factor});
   const comparison = requestedLoadComparison({selection:$('load-comparison').value, customSafetyFactor:$('custom-safety-factor').value === '' ? NaN : Number($('custom-safety-factor').value), deadLoadKipFt:dead, liveLoadKipFt:live, selfWeightKipFt:self, spanFt:span});
-  const checks = memberChecks({section:s, analysis, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison});
+  // Deflection is checked on every run, whether or not the AISC strength checks are on.
+  const deflection = checkDeflection({analysis, limitRatio:Number($('deflection-limit').value)});
+  const checks = {...memberChecks({section:s, analysis, topBracesFt:br.top.locations, bottomBracesFt:br.bottom.locations, Eksi:E, dead, live, self, comparison}), deflection};
   record = Object.freeze({comparison, checks, project:$('project').value || 'Untitled project', preparer:$('preparer').value || 'Not specified', section:s.AISC_Manual_Label, sectionProperties:s, span, dead, live, self, total, uniformLoads, pointLoads, E, I, factor, braces:br, analysis, timestamp:new Date().toISOString()});
   render(record); scanModel(); $('report').disabled = false;
   const resultsPanel = document.querySelector('.results-panel');
@@ -252,41 +263,39 @@ function run(e) {
   if (window.matchMedia('(max-width: 760px)').matches) resultsPanel.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'start'});
  } catch(err) { invalidate(); $('error').textContent = err.message; }
 }
-// Demand-to-capacity ratios for each evaluated check, in the same order as the verdict.
-function utilizationItems(check) {
- if (check?.status !== 'evaluated') return [];
- const items = [];
- const add = (name, result, flexure = false) => {
-  const value = flexure ? result?.governingSegment?.utilization : result?.utilization;
-  if (result?.status === 'evaluated' && Number.isFinite(value)) items.push({name, value});
- };
- add('Bending', check.flexure, true);
- add('Shear', check.shear);
- if (check.extra) {
-  const label = check.comparisonSelection === 'four' ? '4:1' : 'Custom SF';
-  add(`${label} bending`, check.extra.bending, true);
-  add(`${label} shear`, check.extra.shearing);
- }
- return items;
-}
-// Segmented meters showing percent of allowable. The bar caps at 100%; the label
-// is rounded up to one decimal so it never contradicts the verdict.
-function metersHtml(check) {
- const items = utilizationItems(check);
+// Segmented meters, in verdict order: percent of allowable for strength and percent
+// of the selected limit for deflection. The bar caps at 100%; the label is rounded
+// up to one decimal so it never contradicts the verdict.
+function metersHtml(items) {
  if (!items.length) return '';
- return `<div class="meters" aria-label="Percent of allowable strength">${items.map(({name, value}) => {
+ return `<div class="meters" aria-label="Percent of allowable strength and of the deflection limit">${items.map(({label, utilization:value, kind}) => {
   const state = value > 1 ? 'over' : value > 0.9 ? 'near' : 'ok';
-  return `<div class="meter meter-${state}"><span class="meter-label">${escape(name)}</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" style="--fill:${Math.min(Math.max(value, 0), 1).toFixed(4)}"></span></span><strong class="meter-value">${formatUtilization(value)}</strong></div>`;
+  return `<div class="meter meter-${state}${kind === 'deflection' ? ' meter-deflection' : ''}"><span class="meter-label">${escape(label)}</span><span class="meter-track" aria-hidden="true"><span class="meter-fill" style="--fill:${Math.min(Math.max(value, 0), 1).toFixed(4)}"></span></span><strong class="meter-value">${formatUtilization(value)}</strong></div>`;
  }).join('')}</div>`;
+}
+// Plain-language sag statement used whenever the deflection result is shown.
+function sagText(d) {
+ return `The beam sags <strong>${fmt(d.deflectionIn,4)} in</strong> at ${fmt(d.xFt,3)} ft under service load; the L/${d.limitRatio} limit for this ${fmt(d.spanFt,3)} ft span is <strong>${fmt(d.allowableIn,4)} in</strong>.`;
 }
 function verdictHtml(check) {
  const result = summarizeChecks(check);
- const scope = '<p class="verdict-scope">These are preliminary bending and shear checks only. Bearing, connections, deflection limits, bracing and scaffold requirements need separate review.</p>';
- if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p>${metersHtml(check)}<button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
- const item = result.governing;
- const governing = `${escape(item.name)} · ${formatUtilization(item.utilization)} of allowable`;
- if (result.status === 'fail') return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — listed check</strong><p class="verdict-detail"><strong>${governing}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.</p>${metersHtml(check)}${result.unavailable.length ? `<p class="verdict-detail">Other checks not evaluated: ${escape(result.unavailable.join(' '))}</p>` : ''}${scope}</div>`;
- return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — listed bending and shear checks</strong><p class="verdict-detail"><strong>${governing}</strong><br>The evaluated demand is within the allowable strength.</p>${metersHtml(check)}${scope}</div>`;
+ const d = check.deflection;
+ const meters = metersHtml(result.items);
+ const scope = '<p class="verdict-scope">Preliminary bending, shear and deflection checks only. Bearing, connections, bracing and scaffold requirements need separate review.</p>';
+ if (result.status === 'incomplete') return `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Strength check pending</strong><p class="verdict-detail">${escape(result.detail)}</p>${meters}<button type="button" class="verdict-action" data-open-checks>Review settings</button></div>`;
+ const notEvaluated = result.unavailable.length ? `<p class="verdict-detail">Not evaluated: ${escape(result.unavailable.join(' '))}</p>` : '';
+ if (result.status === 'fail') {
+  const strengthFailures = result.failed.filter(item => item.kind !== 'deflection');
+  const deflectionFails = result.failed.some(item => item.kind === 'deflection');
+  if (!strengthFailures.length) {
+   // Deflection is the only failure: say so in plain words, because the strength meters look fine.
+   const strong = check.status === 'evaluated' && !result.unavailable.length;
+   return `<div class="verdict-card verdict-fail verdict-deflection"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — deflection</strong><p class="verdict-detail"><strong>${strong ? 'Strong enough, but it bends too much.' : 'It bends too much.'}</strong> ${sagText(d)} Use a deeper or heavier section, a shorter span or less load, then calculate again.</p>${meters}${notEvaluated}${scope}</div>`;
+  }
+  const extra = deflectionFails ? `<br><strong>Deflection also fails.</strong> ${sagText(d)}` : '';
+  return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong><br>Demand exceeds the allowable strength. Try a larger section or review the loads and brace locations, then calculate again.${extra}</p>${meters}${notEvaluated}${scope}</div>`;
+ }
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong><br>Bending and shear are within the allowable strength, and the sag (${fmt(d.deflectionIn,4)} in) is within the L/${d.limitRatio} limit of ${fmt(d.allowableIn,4)} in.</p>${meters}${scope}</div>`;
 }
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
@@ -296,11 +305,12 @@ function renderSuggestion(r) {
   found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
    topBracesFt:r.braces.top.locations, bottomBracesFt:r.braces.bottom.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
    safetyFactor:r.comparison ? r.comparison.numerator : null,
+   deflectionLimitRatio:r.checks.deflection.limitRatio, stiffnessFactor:r.factor,
    confirmedLateralBracing:true, confirmedScope:true});
  } catch {
   $('suggestion').innerHTML = ''; return;
  }
- const scope = '<p>Screened for the listed bending and shear checks only, including any selected comparison. Verify this section’s properties. Deflection limits, depth, availability, bearing, connections, brace design and scaffold requirements are not checked.</p>';
+ const scope = `<p>Screened for the listed bending and shear checks, including any selected comparison, and the L/${r.checks.deflection.limitRatio} deflection limit. Verify this section’s properties. Depth, availability, bearing, connections, brace design and scaffold requirements are not checked.</p>`;
  if (found.status !== 'suggested') {
   $('suggestion').innerHTML = `<div class="suggestion-card"><span class="suggestion-label">SIZE SCREEN</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p>${scope}</div>`;
   return;
@@ -311,10 +321,11 @@ function renderSuggestion(r) {
 }
 function render(r) {
  const a = r.analysis; const max = a.maxDeflection;
+ const dl = r.checks.deflection?.status === 'evaluated' ? r.checks.deflection : null;
  $('verdict').innerHTML = verdictHtml(r.checks);
  renderSuggestion(r);
  drawSchematic();
- drawCharts(a);
+ drawCharts(a, {deflectionLimit:dl});
  let comparisonHtml = '';
  if (r.comparison && r.checks.status !== 'evaluated') {
   const multiplier = r.comparison.multiplier;
@@ -331,18 +342,20 @@ function render(r) {
  ${calculationRow('Maximum moment', `Combined loads at x = ${fmt(a.maxMoment.xFt,3)} ft`, `${lb(a.maxMoment.momentKipFt)} lb-ft`, '')}
  ${calculationRow('Nominal EI deflection', 'Elastic bending', `${fmt(max.nominalDeflectionIn,4)} in`, '')}
  ${calculationRow('Adjusted EI deflection', `Nominal deflection / ${fmt(r.factor,4)}`, `${fmt(max.reducedDeflectionIn,4)} in`, '')}
+ ${dl ? calculationRow('Deflection limit', `δ ≤ L / ${dl.limitRatio} = ${fmt(r.span * 12,3)} / ${dl.limitRatio} in`, `${fmt(dl.allowableIn,4)} in · ${formatUtilization(dl.utilization)} ${dl.meets ? 'used' : '— exceeds'}`, 'Selected limit') : ''}
  ${calculationRow('Top flange braces', 'Compression flange; x from left support', `${r.braces.top.locations.map(x=>fmt(x,2)).join(', ')} ft`, 'AISC F2')}
  ${calculationRow('Bottom flange braces', 'Recorded separately; does not reduce top-flange Lb', `${r.braces.bottom.locations.map(x=>fmt(x,2)).join(', ')} ft`, '')}
  <p class="capacity-note">Beam bending only; shear deformation excluded. No overall adequacy or independent verification. Bearing, connections, and scaffold-specific capacity are not evaluated. AISC v15 section data is from a third-party mirror; verify against the official source.</p>
  <p class="capacity-note">Project: ${escape(r.project)} · Prepared by: ${escape(r.preparer)} · ${escape(r.timestamp)} · Engine 0.1.0</p></div>`;
- const kpi = (label, value, digits, unit) => `<div><span>${label}</span><strong><span class="kpi-value" data-value="${value}" data-digits="${digits}">${fmt(value, digits)}</span> <small>${unit}</small></strong></div>`;
- $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid">${kpi('Left reaction', a.reactions.leftLb, 0, 'lbs')}${kpi('Right reaction', a.reactions.rightLb, 0, 'lbs')}${kpi('Maximum moment', a.maxMoment.momentKipFt * 1000, 0, 'lb-ft')}${kpi('Nominal EI deflection', max.nominalDeflectionIn, 4, 'in')}${kpi('Adjusted EI deflection · 0.8 EI', max.reducedDeflectionIn, 4, 'in')}</div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
+ const kpi = (label, value, digits, unit, note = '', state = '') => `<div${state ? ` class="kpi-${state}"` : ''}><span>${label}</span><strong><span class="kpi-value" data-value="${value}" data-digits="${digits}">${fmt(value, digits)}</span> <small>${unit}</small></strong>${note}</div>`;
+ const limitNote = dl ? `<em class="kpi-limit">${dl.meets ? 'Within' : 'Exceeds'} L/${dl.limitRatio} = ${fmt(dl.allowableIn,4)} in · ${formatUtilization(dl.utilization)}</em>` : '';
+ $('results').innerHTML = `<p class="empty-state"><strong>Service load case: 1.0D + 1.0L</strong> — results and diagrams below.</p><div class="result-grid">${kpi('Left reaction', a.reactions.leftLb, 0, 'lbs')}${kpi('Right reaction', a.reactions.rightLb, 0, 'lbs')}${kpi('Maximum moment', a.maxMoment.momentKipFt * 1000, 0, 'lb-ft')}${kpi('Nominal EI deflection', max.nominalDeflectionIn, 4, 'in')}${kpi(`Adjusted EI deflection · ${fmt(r.factor,2)} EI`, max.reducedDeflectionIn, 4, 'in', limitNote, dl ? (dl.meets ? 'within' : 'over') : '')}</div>${comparisonHtml}<details class="result-details"><summary>Strength checks &amp; calculation details</summary>${memberChecksHtml(r.checks)}${basis}</details>`;
  $('calculation-report').innerHTML = renderCalculationReport(r, {
   schematic:$('schematic').innerHTML,
   diagrams:['shear', 'moment', 'deflection'].map(name => ({name, html:$(`${name}-chart`).innerHTML}))
  });
  // Screen-only additions, made after the report snapshot so they never print.
- deflectionView.show(a);
+ deflectionView.show(a, dl);
  document.querySelector('.drawing-panel')?.classList.add('has-results');
  countUp($('results'));
 }

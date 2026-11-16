@@ -66,6 +66,10 @@
   #calculation-report .chart-zero,#calculation-report .chart-axis,#calculation-report .chart-support-guide,#calculation-report .chart-tick { stroke:#55616d!important; }
   #calculation-report .chart-cursor,#calculation-report .chart-point { display:none!important; }
   #calculation-report .chart-zero-mark { fill:#fff!important; stroke:#111!important; }
+  #calculation-report .chart-limit { stroke:#8a4b00!important; stroke-width:1.5!important; stroke-dasharray:6 4!important; }
+  #calculation-report .chart-over { stroke:#b42318!important; stroke-width:2.5!important; filter:none!important; }
+  #calculation-report .response-svg text.chart-limit-label { fill:#8a4b00!important; }
+  #calculation-report .response-svg text.chart-limit-label.is-over,#calculation-report .extrema-limit.is-over strong { fill:#b42318!important; color:#b42318!important; }
   #calculation-report .response-svg pattern line { stroke:#6c7680!important; opacity:0.45!important; }
   #calculation-report .input-drawings { display:grid; grid-template-columns:minmax(0,1fr) 1in; gap:9pt; border:0; background:#fff; }
   #calculation-report .input-elevation,#calculation-report .input-scroll,#calculation-report .input-section { display:block; min-width:0; padding:0; border:0; background:#fff; }

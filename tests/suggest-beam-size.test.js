@@ -37,6 +37,28 @@ test('selected additional comparison must pass along with the service checks', (
   assert.ok(lowerLoad.comparisonShearRatio > lowerLoad.shearRatio);
 });
 
+test('deflection screening rejects a strength-passing candidate at reduced EI', () => {
+  const input = {...base, sections:[section('W10X22')], deadLoadKipFt:0.2, liveLoadKipFt:0.7};
+  const strengthOnly = suggestBeamSize({...input, stiffnessFactor:0.8});
+  assert.equal(strengthOnly.status, 'suggested');
+  assert.ok(strengthOnly.bendingRatio < 1 && strengthOnly.shearRatio < 1);
+  // 922 lb/ft includes this candidate's 22 lb/ft self-weight. L/240 allows
+  // 1 inch here: nominal EI passes, but dividing the sag by 0.8 exceeds it.
+  const nominalSagIn = 5 * (922 / 12) * 240 ** 4 / (384 * 29000000 * 118);
+  const nominal = suggestBeamSize({...input, stiffnessFactor:1, deflectionLimitRatio:240});
+  assert.equal(nominal.status, 'suggested');
+  assert.ok(Math.abs(nominal.deflectionRatio - nominalSagIn) < 1e-12);
+  assert.ok(nominalSagIn < 1 && nominalSagIn / 0.8 > 1);
+  const reduced = suggestBeamSize({...input, stiffnessFactor:0.8, deflectionLimitRatio:240});
+  assert.deepEqual(reduced, {status:'no_candidate', considered:1, skipped:0});
+});
+
+test('a stricter selected deflection criterion excludes an otherwise passing candidate', () => {
+  const input = {...base, sections:[section('W10X22')], deadLoadKipFt:0.2, liveLoadKipFt:0.7, stiffnessFactor:1};
+  assert.equal(suggestBeamSize({...input, deflectionLimitRatio:240}).status, 'suggested');
+  assert.deepEqual(suggestBeamSize({...input, deflectionLimitRatio:360}), {status:'no_candidate', considered:1, skipped:0});
+});
+
 test('eccentric point loads contribute to the governing shear and the separate comparisons', () => {
   // Point loads of 4 kip at 2 ft and 2 kip at 15 ft produce 4.1 kip
   // of left reaction (plus half of the beam's self-weight). The right

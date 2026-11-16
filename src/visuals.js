@@ -51,11 +51,14 @@ function labelValue(value, key) {
   if (Number.isFinite(value) && value !== 0 && Math.abs(value) < 0.00005) return value.toExponential(3);
   return num(value, 4);
 }
-function makeChart(analysis, id, key, label, symbol, unit) {
+function makeChart(analysis, id, key, label, symbol, unit, deflectionLimit = null) {
   const L = analysis.input.spanFt, pts = graphSamples(analysis, key), ext = extremes(analysis,key);
   const min = valueAt(ext.min,key), max = valueAt(ext.max,key);
   const allZero = min === 0 && max === 0;
-  const maxAbs = allZero ? 1 : Math.max(Math.abs(min),Math.abs(max),1e-12);
+  // The deflection plot is scaled to include its limit, so the limit line is always visible
+  // and the curve's depth relative to it is the true deflection / limit ratio.
+  const limit = key === 'reducedDeflectionIn' && deflectionLimit?.status === 'evaluated' && deflectionLimit.basis === key ? deflectionLimit : null;
+  const maxAbs = limit ? Math.max(Math.abs(min),Math.abs(max),limit.allowableIn) : allZero ? 1 : Math.max(Math.abs(min),Math.abs(max),1e-12);
   const left=83,right=689,zero=119,scale=68/maxAbs;
   // Deflection is positive downward so its graph follows the physical direction.
   const downPositive = key === 'reducedDeflectionIn';
@@ -68,27 +71,34 @@ function makeChart(analysis, id, key, label, symbol, unit) {
   const maxDetail = allZero ? `0 ${unit} throughout span` : `${labelValue(max,key)} ${unit} at ${num(ext.max.xFt,3)} ft`;
   const minDetail = allZero ? `0 ${unit} throughout span` : key === 'shearLb' ? `${labelValue(min,key)} ${unit} at ${num(ext.min.xFt,3)} ft` : `0 ${unit} at both supports`;
   const zeroDetail = key === 'shearLb' && !allZero && zeros.length ? `Zero shear at ${zeros.map(z=>num(z,3)).join(', ')} ft.` : '';
+  const over = limit && !limit.meets;
+  const limitY = limit ? y(limit.allowableIn) : 0;
+  // Label above the line when it is low in the plot, below it when the curve passes it.
+  const limitLabelY = limitY < 160 ? limitY + 13 : limitY - 5;
+  const limitDetail = limit ? `L/${limit.limitRatio} = ${labelValue(limit.allowableIn,key)} ${unit} · ${limit.meets ? 'within the limit' : 'exceeds the limit'}` : '';
+  const limitMarks = limit ? `<clipPath id="over-${id}"><rect x="0" y="${limitY.toFixed(3)}" width="720" height="${(244-limitY).toFixed(3)}"/></clipPath>` : '';
+  const limitLayer = limit ? `<polyline class="chart-over" clip-path="url(#over-${id})" points="${poly}"/><path class="chart-limit" d="M${left} ${limitY.toFixed(3)}H${right}"/><text class="chart-limit-label${over ? ' is-over' : ''}" x="${right-6}" y="${limitLabelY.toFixed(3)}" text-anchor="end">LIMIT L/${limit.limitRatio}</text>` : '';
   // The plot and its slider share one frame so the slider's percentage margins
   // always match the plotted span, whatever width the frame is given.
   $(id).innerHTML = `<div class="response-figure"><div class="response-heading"><div><span class="response-kicker">SERVICE CASE / 1.0D + 1.0L</span><h3>${label}</h3></div><span class="response-unit">${symbol} / ${unit}</span></div>
-  <div class="plot-frame"><svg class="response-svg" viewBox="0 0 720 244" role="img" aria-label="${label} diagram, ${unit}. Minimum ${minDetail}; maximum ${maxDetail}. ${zeroDetail} Use the shared position slider to inspect values.">
-  <defs><pattern id="hatch-${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#ffa41b" stroke-width="2" opacity=".5"/></pattern><clipPath id="negative-${id}"><rect x="0" y="${downPositive ? 0 : zero}" width="720" height="${downPositive ? zero : 125}"/></clipPath></defs>
+  <div class="plot-frame"><svg class="response-svg" viewBox="0 0 720 244" role="img" aria-label="${label} diagram, ${unit}. Minimum ${minDetail}; maximum ${maxDetail}. ${zeroDetail}${limit ? ` Deflection limit ${limitDetail}.` : ''} Use the shared position slider to inspect values.">
+  <defs>${limitMarks}<pattern id="hatch-${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#ffa41b" stroke-width="2" opacity=".5"/></pattern><clipPath id="negative-${id}"><rect x="0" y="${downPositive ? 0 : zero}" width="720" height="${downPositive ? zero : 125}"/></clipPath></defs>
   <path class="chart-gridline" d="M${left} 51H${right}M${left} 85H${right}M${left} 153H${right}M${left} 187H${right}"/>
   <path class="chart-support-guide" d="M${left} 40V193M${right} 40V193"/>
   <polygon class="chart-fill" points="${area}"/><polygon fill="url(#hatch-${id})" clip-path="url(#negative-${id})" points="${area}"/>
-  <path class="chart-zero" d="M${left} ${zero}H${right}"/><polyline class="chart-line" points="${poly}"/><polyline class="chart-negative" clip-path="url(#negative-${id})" points="${poly}"/>${zeroMarks}
+  <path class="chart-zero" d="M${left} ${zero}H${right}"/><polyline class="chart-line" points="${poly}"/><polyline class="chart-negative" clip-path="url(#negative-${id})" points="${poly}"/>${limitLayer}${zeroMarks}
   <path class="chart-cursor" data-cursor-line d="M${left} 38V193"/><circle class="chart-point" data-cursor-point cx="${left}" cy="${y(valueAt(pts[0],key))}" r="5"/>
   <text class="chart-axis chart-y-tick" x="72" y="56" text-anchor="end">${allZero ? '' : (downPositive ? '−' : '')+labelValue(maxAbs,key)}</text><text class="chart-axis chart-y-tick" x="72" y="124" text-anchor="end">0</text><text class="chart-axis chart-y-tick" x="72" y="191" text-anchor="end">${allZero ? '' : (downPositive ? '' : '−')+labelValue(maxAbs,key)}</text>${axisTicks}
   <text class="chart-axis chart-x-label" x="${(left+right)/2}" y="239" text-anchor="middle">DISTANCE FROM LEFT SUPPORT / ft</text></svg>
-  <div class="plot-slider"><input type="range" class="diagram-plot-slider" aria-label="Position along ${label.toLowerCase()} diagram in feet" min="0" max="${L}" step="${L/1000}" value="0"></div></div><div class="response-extrema"><div><span>MAXIMUM</span><strong>${maxDetail}</strong></div><div><span>MINIMUM</span><strong>${minDetail}</strong></div></div>${zeroDetail ? `<p class="response-zero">${zeroDetail}</p>` : ''}</div>`;
+  <div class="plot-slider"><input type="range" class="diagram-plot-slider" aria-label="Position along ${label.toLowerCase()} diagram in feet" min="0" max="${L}" step="${L/1000}" value="0"></div></div><div class="response-extrema${limit ? ' has-limit' : ''}"><div><span>MAXIMUM</span><strong>${maxDetail}</strong></div><div><span>MINIMUM</span><strong>${minDetail}</strong></div>${limit ? `<div class="extrema-limit${over ? ' is-over' : ''}"><span>DEFLECTION LIMIT</span><strong>${limitDetail}</strong></div>` : ''}</div>${zeroDetail ? `<p class="response-zero">${zeroDetail}</p>` : ''}</div>`;
   return {id,key,y,left,right};
 }
-export function drawCharts(analysis) {
+export function drawCharts(analysis, { deflectionLimit = null } = {}) {
  const panel=$('shear-chart').closest('.chart-grid');
  let control=$('diagram-controls');
  if(!control){control=document.createElement('div');control.id='diagram-controls';control.className='diagram-controls';panel.before(control);}
  control.innerHTML=`<div class="diagram-controls-header"><div><span>POSITION</span><strong>Diagram values</strong></div><output id="diagram-position">x = 0 ft</output></div><label for="diagram-slider">Move along the beam <span>Drag, use arrow keys, or tap a diagram</span></label><input type="range" id="diagram-slider" min="0" max="${analysis.input.spanFt}" step="${analysis.input.spanFt/1000}" value="0" aria-describedby="diagram-instructions"><div class="diagram-readout" aria-live="polite"><span id="read-shear"></span><span id="read-moment"></span><span id="read-deflection"></span></div><p id="diagram-instructions">Service loads only. Positive shear equals the left reaction minus downward loads to the left of the cut; positive moment is sagging. Deflection is downward. At a point load the shear readout shows the value just to its right. Negative values use dashed lines and hatching. Curves connect sampled values from the response equations.</p>`;
- const charts=specs.map(s=>makeChart(analysis,...s)); const slider=$('diagram-slider');
+ const charts=specs.map(s=>makeChart(analysis,...s,deflectionLimit)); const slider=$('diagram-slider');
  slider.hidden = true; control.querySelector('label').hidden = true;
  const plotSliders = [...document.querySelectorAll('.chart-grid .diagram-plot-slider')];
  for (const input of plotSliders) input.addEventListener('input', () => update(Number(input.value)));
