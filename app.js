@@ -86,7 +86,7 @@ function labelLoadRows() {
  });
 }
 let loadSequence = 0;
-function addLoad({type = 'uniform', dead = 0, live = 0} = {}) {
+function addLoad({type = 'uniform', dead = 0, live = 0, location} = {}) {
  const row = $('load-template').content.firstElementChild.cloneNode(true);
  const id = ++loadSequence;
  row.dataset.loadType = type;
@@ -95,6 +95,7 @@ function addLoad({type = 'uniform', dead = 0, live = 0} = {}) {
  row.querySelector('.uniform-live').value = live;
  row.querySelector('.point-dead').value = dead;
  row.querySelector('.point-live').value = live;
+ if (location !== undefined) row.querySelector('.point-location').value = location;
  setLoadType(row);
  $('load-rows').append(row);
  labelLoadRows();
@@ -423,6 +424,35 @@ function addSelectedLoad() {
  invalidate(); drawSchematic(); row.querySelector(type === 'point' ? '.point-dead' : '.uniform-dead').focus();
 }
 $('add-load').addEventListener('click', addSelectedLoad);
+
+// Public bridge for the scaffold-to-beam modal. Imported legs become point loads
+// with dead and live kept separate and placed at their exact distance from the
+// left support. Re-importing replaces the previous scaffold rows rather than
+// stacking duplicates; manually entered loads are never touched.
+window.scafmetric = window.scafmetric || {};
+window.scafmetric.getBeamSpanFt = () => {
+ const span = Number($('span').value);
+ return Number.isFinite(span) && span > 0 ? span : null;
+};
+window.scafmetric.importScaffoldLoads = loads => {
+ if (!Array.isArray(loads)) throw new Error('importScaffoldLoads expects an array of {deadLb, liveLb, locationFt}.');
+ for (const row of [...document.querySelectorAll('.load-row[data-scaffold-import]')]) row.remove();
+ let added = 0;
+ for (const load of loads) {
+  const dead = Number(load.deadLb), live = Number(load.liveLb), location = Number(load.locationFt);
+  if (![dead, live].every(v => Number.isFinite(v) && v >= 0)) continue;
+  if (!Number.isFinite(location) || location < 0) continue;
+  const row = addLoad({type: 'point', dead, live, location});
+  row.dataset.scaffoldImport = '1';
+  if (load.legId != null) row.dataset.scaffoldLeg = String(load.legId);
+  added++;
+ }
+ labelLoadRows();
+ invalidate();
+ drawSchematic();
+ revealField($('load-rows'));
+ return added;
+};
 $('new-load-type').addEventListener('change', () => {
  $('load-rows').replaceChildren();
  addSelectedLoad();

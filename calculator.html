@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="capacity.css">
   <link rel="stylesheet" href="public/calculator.css">
   <link rel="stylesheet" href="report-print.css">
+  <link rel="stylesheet" href="scaffold.css">
 </head>
 <body>
 <div class="app-shell"><main id="top">
@@ -54,6 +55,7 @@
             <details class="form-section wizard-step loads-section" data-step="3" hidden>
               <summary class="section-title"><span class="step" aria-hidden="true">03</span><h3>Loads</h3><span>Downward</span><span class="wizard-step-state"></span></summary><div class="wizard-content">
               <div class="load-picker"><div><label for="new-load-type">Load type</label><div class="load-add-row"><select id="new-load-type"><option value="uniform">Uniform load</option><option value="point">Point load</option></select><button type="button" id="add-load" class="add-load">+ Add</button></div></div></div>
+              <button type="button" class="scaffold-import-trigger" data-open-scaffold>⛶ Import loads from scaffold</button>
               <input id="dead-load" type="hidden" value="0.2"><input id="live-load" type="hidden" value="0.8">
               <div id="load-rows"></div>
               <template id="load-template"><div class="load-row">
@@ -218,6 +220,8 @@
     </section>
   </div>
 </dialog>
+<div id="scaffold-modal" hidden></div>
 <script type="module" src="app.js"></script>
+<script type="module" src="src/scaffold/launch.js"></script>
 <script type="module" src="account.js"></script>
 </body></html>

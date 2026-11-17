@@ -1,0 +1,122 @@
+/* Scaffold-to-beam modal. A distinct "blueprint HUD" surface: darker void,
+   aqua graticule, orange load accents — related to the app palette but its own
+   look, so the 3D takeoff reads as a separate instrument from the beam workspace. */
+
+#scaffold-modal{
+  --sfm-void:#060b14;--sfm-panel:#0c1322;--sfm-panel-2:#0a1120;
+  --sfm-line:#22324e;--sfm-line-2:#2f425e;
+  --sfm-orange:#ffa41b;--sfm-aqua:#3dd9c9;--sfm-aqua-2:#9ff3e9;
+  --sfm-ink:#e8ecf4;--sfm-muted:#9fb0c7;--sfm-dim:#73839c;
+  --sfm-pixel:ScafPixel,ui-monospace,monospace;--sfm-term:ScafTerm,ui-monospace,monospace;
+  position:fixed;inset:0;z-index:1000;color:var(--sfm-ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+#scaffold-modal[hidden]{display:none}
+
+/* Launch trigger inside the loads step (lives on the app surface, not the modal). */
+.scaffold-import-trigger{
+  display:inline-flex;align-items:center;gap:8px;margin-top:12px;width:100%;justify-content:center;
+  min-height:40px;padding:10px 14px;cursor:pointer;
+  border:1px dashed #2f425e;background:rgba(61,217,201,.06);color:#9ff3e9;
+  font:600 12px/1 Inter,system-ui,sans-serif;letter-spacing:.02em;transition:all .15s;
+}
+.scaffold-import-trigger:hover{border-color:#3dd9c9;border-style:solid;background:rgba(61,217,201,.12);color:#e8ecf4}
+.scaffold-import-trigger[data-imported]:not([data-imported="0"])::after{content:" · "attr(data-imported)" imported";color:#ffa41b;font-weight:700}
+
+.sfm-backdrop{position:absolute;inset:0;background:rgba(3,6,12,.78);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+
+.sfm-dialog{
+  position:absolute;inset:clamp(10px,3vw,40px);display:flex;flex-direction:column;
+  background:
+    linear-gradient(var(--sfm-void),var(--sfm-void)),
+    radial-gradient(1200px 600px at 80% -10%,rgba(61,217,201,.08),transparent 60%);
+  border:1px solid var(--sfm-line-2);
+  box-shadow:0 40px 120px rgba(0,0,0,.6),inset 0 0 0 1px rgba(61,217,201,.05);
+  overflow:hidden;
+}
+/* HUD corner ticks on the dialog */
+.sfm-dialog::before,.sfm-dialog::after{content:'';position:absolute;width:18px;height:18px;pointer-events:none;z-index:4}
+.sfm-dialog::before{top:8px;left:8px;border-top:2px solid var(--sfm-aqua);border-left:2px solid var(--sfm-aqua)}
+.sfm-dialog::after{bottom:8px;right:8px;border-bottom:2px solid var(--sfm-aqua);border-right:2px solid var(--sfm-aqua)}
+
+.sfm-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 22px;border-bottom:1px solid var(--sfm-line);background:var(--sfm-panel-2)}
+.sfm-kicker{display:block;color:var(--sfm-aqua);font:16px/1 var(--sfm-term);letter-spacing:.18em}
+.sfm-head h2{margin:6px 0 0;font:400 13px/1.4 var(--sfm-pixel);letter-spacing:.01em}
+.sfm-x{width:36px;height:36px;border:1px solid var(--sfm-line-2);background:transparent;color:var(--sfm-muted);font-size:20px;line-height:1;cursor:pointer;transition:all .15s}
+.sfm-x:hover{color:var(--sfm-void);background:var(--sfm-orange);border-color:var(--sfm-orange)}
+
+.sfm-body{flex:1;min-height:0;display:grid;grid-template-columns:300px minmax(0,1fr) 300px;gap:0}
+.sfm-controls,.sfm-readout{overflow-y:auto;padding:18px;background:var(--sfm-panel);display:flex;flex-direction:column;gap:18px}
+.sfm-controls{border-right:1px solid var(--sfm-line)}
+.sfm-readout{border-left:1px solid var(--sfm-line)}
+
+.sfm-group{border:1px solid var(--sfm-line);background:var(--sfm-panel-2);padding:14px}
+.sfm-group h3,.sfm-readout h3{margin:0 0 12px;color:var(--sfm-aqua);font:15px/1 var(--sfm-term);letter-spacing:.1em;text-transform:uppercase}
+.sfm-readout h3 span{float:right;color:var(--sfm-orange)}
+
+.sfm-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sfm-group label,.sfm-row{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--sfm-muted);text-transform:uppercase;letter-spacing:.04em}
+.sfm-row{margin-top:10px}
+.sfm-group input,.sfm-group select{
+  width:100%;min-height:34px;padding:6px 9px;border:1px solid var(--sfm-line-2);background:var(--sfm-void);
+  color:var(--sfm-ink);font:600 13px/1 Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums;
+}
+.sfm-group input:focus,.sfm-group select:focus{outline:2px solid var(--sfm-aqua);outline-offset:1px;border-color:var(--sfm-aqua)}
+.sfm-unit{display:flex;align-items:center;gap:6px}
+.sfm-unit input{flex:1;min-width:0}
+.sfm-unit i{font-style:normal;color:var(--sfm-dim);font-size:11px}
+
+.sfm-assume{padding:0}
+.sfm-assume>summary{list-style:none;cursor:pointer;padding:12px 14px;color:var(--sfm-muted);font:14px/1 var(--sfm-term);letter-spacing:.06em;text-transform:uppercase}
+.sfm-assume>summary::-webkit-details-marker{display:none}
+.sfm-assume>summary span{color:var(--sfm-orange);font-size:11px;float:right}
+.sfm-assume[open]>summary{border-bottom:1px solid var(--sfm-line)}
+.sfm-assume .sfm-grid2{padding:14px}
+.sfm-note{margin:0;padding:10px 14px;font-size:11px;line-height:1.5;color:var(--sfm-dim)}
+.sfm-note strong{color:var(--sfm-aqua-2)}
+
+.sfm-actions-inline{display:flex;gap:8px;margin-top:12px}
+
+.sfm-btn{min-height:36px;padding:8px 14px;border:1px solid var(--sfm-line-2);background:var(--sfm-void);color:var(--sfm-ink);font:400 9px/1.6 var(--sfm-pixel);text-transform:uppercase;letter-spacing:.02em;cursor:pointer;transition:all .14s}
+.sfm-btn:hover{border-color:var(--sfm-aqua);color:var(--sfm-aqua-2)}
+.sfm-btn.ghost{color:var(--sfm-muted)}
+.sfm-btn.primary{background:var(--sfm-orange);border-color:var(--sfm-orange);color:var(--sfm-void)}
+.sfm-btn.primary:hover{background:#ffb341}
+.sfm-btn:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.4)}
+
+.sfm-stage{position:relative;background:
+  radial-gradient(1100px 700px at 50% 30%,rgba(16,26,46,.6),transparent 70%),
+  var(--sfm-void)}
+.sfm-stage::before{content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,rgba(255,255,255,.02) 0 1px,transparent 1px 3px);z-index:2}
+#sfm-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#sfm-canvas:active{cursor:grabbing}
+.sfm-hint{position:absolute;left:0;right:0;bottom:12px;text-align:center;z-index:3;pointer-events:none;color:var(--sfm-dim);font:15px/1 var(--sfm-term);letter-spacing:.05em}
+
+.sfm-table-wrap{border:1px solid var(--sfm-line);max-height:40vh;overflow:auto}
+.sfm-table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.sfm-table th{position:sticky;top:0;background:var(--sfm-panel-2);color:var(--sfm-dim);font:13px/1 var(--sfm-term);letter-spacing:.06em;text-transform:uppercase;padding:8px 10px;text-align:right;border-bottom:1px solid var(--sfm-line)}
+.sfm-table th:first-child{text-align:left}
+.sfm-table td{padding:7px 10px;text-align:right;border-bottom:1px solid rgba(34,50,78,.5)}
+.sfm-table td:first-child{text-align:left;color:var(--sfm-aqua-2);font-weight:600}
+.sfm-table tr.sfm-off td{color:var(--sfm-orange);opacity:.75}
+.sfm-empty{text-align:center!important;color:var(--sfm-dim)}
+
+.sfm-totals{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:14px 0 0;background:var(--sfm-line);border:1px solid var(--sfm-line)}
+.sfm-totals>div{background:var(--sfm-panel-2);padding:10px}
+.sfm-totals dt{color:var(--sfm-dim);font:13px/1 var(--sfm-term);letter-spacing:.04em;text-transform:uppercase}
+.sfm-totals dd{margin:6px 0 0;color:var(--sfm-ink);font:400 11px/1.2 var(--sfm-pixel);font-variant-numeric:tabular-nums}
+.sfm-totals>div:nth-child(2) dd{color:var(--sfm-aqua)}
+.sfm-totals>div:nth-child(3) dd{color:var(--sfm-orange)}
+
+.sfm-warn{margin:12px 0 0;padding:10px 12px;border-left:2px solid var(--sfm-orange);background:rgba(255,164,27,.08);color:var(--sfm-orange);font-size:12px;line-height:1.5}
+
+.sfm-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 22px;border-top:1px solid var(--sfm-line);background:var(--sfm-panel-2)}
+.sfm-disclaimer{margin:0;color:var(--sfm-dim);font-size:11px}
+.sfm-foot-actions{display:flex;gap:10px}
+
+@media (max-width:1040px){
+  .sfm-body{grid-template-columns:1fr;grid-template-rows:auto minmax(220px,1fr) auto;overflow-y:auto}
+  .sfm-controls{border-right:0;border-bottom:1px solid var(--sfm-line)}
+  .sfm-readout{border-left:0;border-top:1px solid var(--sfm-line)}
+}
