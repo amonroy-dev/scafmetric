@@ -21,6 +21,18 @@
   font:600 12px/1 Inter,system-ui,sans-serif;letter-spacing:.02em;transition:all .15s;
 }
 .scaffold-import-trigger:hover{border-color:#3dd9c9;border-style:solid;background:rgba(61,217,201,.12);color:#e8ecf4}
+
+/* Always-visible launch button in the beam workspace top bar. */
+.topbar-scaffold{
+  display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  padding:7px 13px;border:1px solid #3dd9c9;background:rgba(61,217,201,.1);
+  color:#9ff3e9;font:400 9px/1.6 ScafPixel,ui-monospace,monospace;text-transform:uppercase;letter-spacing:.02em;
+  transition:all .15s;
+}
+.topbar-scaffold:hover{background:#3dd9c9;color:#060b14}
+.topbar-scaffold:focus-visible{outline:2px solid #3dd9c9;outline-offset:2px}
+.topbar-scaffold[data-imported]:not([data-imported="0"])::after{content:"· "attr(data-imported);color:#ffa41b}
+@media (max-width:760px){.topbar-scaffold{font-size:0;padding:8px 10px;gap:0}.topbar-scaffold::before{content:"⛶";font-size:14px}}
 .scaffold-import-trigger[data-imported]:not([data-imported="0"])::after{content:" · "attr(data-imported)" imported";color:#ffa41b;font-weight:700}
 
 .sfm-backdrop{position:absolute;inset:0;background:rgba(3,6,12,.78);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
