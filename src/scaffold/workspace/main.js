@@ -4,11 +4,11 @@ import * as THREE from 'three';
 import { Engine } from './engine.js';
 import { ViewCube } from './viewcube.js';
 import { Tools, TOOLS } from './tools.js';
+import { DEFAULT_BAY_LIVE_LOAD_PSF } from './liveloads.js';
 import { ScaffoldState, stateBounds } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
-  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL,
-} from './parts.js';
+  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
@@ -26,6 +26,7 @@ const TOOL_META = {
   truss: { label: 'Truss', icon: '⬟', hint: 'Click two rosette nodes to span a truss between them.' },
   bracket: { label: 'Bracket', icon: '⊢', hint: 'Click a rosette node to hang a side bracket, drawn from generic tubing. The arm points away from the scaffold.' },
   plank: { label: 'Plank', icon: '▭', hint: 'Click two rosette nodes on opposite corners to deck a bay with best-fit 9 in / 6 in boards.' },
+  liveload: { label: 'Live load', icon: '▨', hint: 'Click a ledger to load the bay on that side at the psf below. SHIFT+click loads every bay along that run. Each patch keeps its own psf.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
@@ -62,6 +63,12 @@ const TEMPLATE = `
           <label>Live load<span class="sfw-u"><input type="number" id="sfw-live" min="0" step="any" value="${DEFAULT_LIVE_LOAD_PSF}"><i>psf</i></span></label>
           <label>Plank wt<span class="sfw-u"><input type="number" id="sfw-plank" min="0" step="any" value="${DEFAULT_COMPONENTS.plank.areaWeightLbPerFt2}"><i>psf</i></span></label>
         </div>
+        <div class="sfw-grid2 sfw-mt">
+          <label>Bay patch<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
+          <label>Mode<select id="sfw-live-mode"><option value="uniform">Uniform over decks</option><option value="bays">Placed bay patches</option></select></label>
+        </div>
+        <p class="sfw-note" id="sfw-live-note"></p>
+        <button type="button" class="sfw-btn ghost" id="sfw-live-clear">Clear bay loads</button>
       </div>
       <div class="sfw-group">
         <h3>Selection</h3>
@@ -206,6 +213,12 @@ class Workspace {
       getContentMeshes: () => this.contentGroup.children,
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); this._refreshProps(); },
       onToolChange: name => this._applyToolUi(name),
+      onLiveLoadPreview: (count, psf, batch) => {
+        if (!count) return;
+        this.$('sfw-hint').textContent = batch
+          ? `SHIFT: load ${count} bay${count === 1 ? '' : 's'} along this run at ${psf} psf — click to place.`
+          : `Click to load this bay at ${psf} psf. Hold SHIFT to fill the whole run.`;
+      },
       onBulkFill: (n, tool) => {
         if (tool === 'block') {
           this.$('sfw-hint').textContent = n
@@ -220,6 +233,7 @@ class Workspace {
     });
 
     this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
+    this.tools.liveLoadPsf = Math.max(0, Number(this.$('sfw-bay-psf').value) || DEFAULT_BAY_LIVE_LOAD_PSF);
     this._persist = debounce(() => {
       const snapshot = this.state.snapshot();
       saveWip(KEYS.scaffold, snapshot);
@@ -246,6 +260,7 @@ class Workspace {
       this._seedStarter();
       if (el) el.textContent = RETENTION_NOTICE;
     }
+    this._restoreViews();
     // If the account holds a newer copy, take it instead.
     loadServerWorkspace().then(server => {
       if (!server?.scaffold) return;
@@ -393,6 +408,46 @@ class Workspace {
     this.$('sfw-copy').addEventListener('click', () => this._beginTransform(true));
     this.$('sfw-dxf').addEventListener('click', () => this._downloadDxf());
     this.$('sfw-view-save').addEventListener('click', () => this._saveView());
+    this.$('sfw-bay-psf').addEventListener('input', e => {
+      this.tools.liveLoadPsf = Math.max(0, Number(e.target.value) || 0);
+      // Retag any selected patches so the field doubles as an editor.
+      let changed = 0;
+      for (const id of this.selection) {
+        if (this.state.setLiveLoadPsf(id, this.tools.liveLoadPsf)) changed++;
+      }
+      if (changed) this._refreshProps();
+      this._updateLiveLoadNote();
+    });
+    this.$('sfw-live-mode').addEventListener('change', e => {
+      this.state.setLiveLoadMode(e.target.value);
+      this._sync();
+    });
+    this.$('sfw-live-clear').addEventListener('click', () => {
+      this.state.clearLiveLoads();
+      this.$('sfw-hint').textContent = 'Bay live loads cleared; back to the uniform psf over every deck.';
+    });
+  }
+
+  /** Explain which live load model is in force, and what it adds up to. */
+  _updateLiveLoadNote() {
+    const el = this.$('sfw-live-note');
+    if (!el) return;
+    const sel = this.$('sfw-live-mode');
+    if (sel) sel.value = this.state.liveLoadMode;
+    const placed = this.state.liveLoads.size;
+    const patches = this.state.liveLoadPatches();
+    const orphans = placed - patches.length;
+    const totalLb = patches.reduce((a, x) => a + x.totalLb, 0);
+    if (!placed) {
+      el.textContent = `Uniform: ${this.state.liveLoadPsf} psf over every decked bay. Use the Live load tool to load bays individually instead.`;
+      return;
+    }
+    const bits = [`${patches.length} bay patch${patches.length === 1 ? '' : 'es'} · ${Math.round(totalLb)} lb total`];
+    if (orphans > 0) bits.push(`${orphans} no longer enclosed by two ledgers (ignored)`);
+    bits.push(this.state.usingBayLiveLoads()
+      ? 'Patches are driving live load; the uniform psf is not applied.'
+      : `Uniform ${this.state.liveLoadPsf} psf is in force; switch the mode to use the patches.`);
+    el.textContent = bits.join(' · ');
   }
 
   _frame() {
@@ -407,6 +462,7 @@ class Workspace {
     this._updateBeam();
     this._updateCounts();
     this._refreshBom();
+    this._updateLiveLoadNote();
     this._persist();
   }
 
@@ -418,7 +474,7 @@ class Workspace {
 
   _rebuildContent() {
     this.contentGroup.clear();
-    if (this.skeleton) { this._rebuildSkeleton(); this._rebuildLabels(); return; }
+    if (this.skeleton) { this._rebuildSkeleton(); this._rebuildLiveLoads(); this._rebuildLabels(); return; }
     const g = this.state.geometry();
     for (const s of g.standards) {
       const mat = this._matFor(s.id, MATERIALS.steel);
@@ -470,7 +526,17 @@ class Workspace {
         this.contentGroup.add(m);
       }
     }
+    this._rebuildLiveLoads();
     this._rebuildLabels();
+  }
+
+  // Live load patches sit above the deck, striped across the one-way span.
+  _rebuildLiveLoads() {
+    for (const patch of this.state.liveLoadPatches()) {
+      const m = liveLoadPatch(patch, this.selection.includes(patch.id) ? MATERIALS.selected : null);
+      m.userData = { id: patch.id, kind: 'liveload' };
+      this.contentGroup.add(m);
+    }
   }
 
   // Centerline (skeleton) view: one line per member plus joint markers. Picking
@@ -522,6 +588,12 @@ class Workspace {
       return;
     }
     const id = ids[0];
+    const ll = this.state.liveLoads.get(id);
+    if (ll) {
+      const field = this.$('sfw-bay-psf');
+      if (field) field.value = ll.psf;
+      this.tools.liveLoadPsf = ll.psf;
+    }
     const rows = this._describe(id);
     el.innerHTML = `<dl class="sfw-proplist">` +
       rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('') + '</dl>';
@@ -535,6 +607,7 @@ class Workspace {
     if (this.state.brackets.has(id)) return 'bracket';
     if (this.state.trusses.has(id)) return 'truss';
     if (this.state.guardrails.has(id)) return 'guardrail';
+    if (this.state.liveLoads.has(id)) return 'live load';
     return 'item';
   }
 
@@ -565,6 +638,17 @@ class Workspace {
     }
     const b = this.state.brackets.get(id);
     if (b) return [['Type', 'Side bracket'], ['Length', `${r(b.lengthFt)} ft`], ['Height', `${r(b.z)} ft`]];
+    const ll = this.state.liveLoads.get(id);
+    if (ll) {
+      const patch = this.state.liveLoadPatches().find(x => x.id === id);
+      if (!patch) return [['Type', 'Live load'], ['Status', 'bay no longer closed'], ['Magnitude', `${r(ll.psf)} psf`]];
+      return [['Type', 'Live load patch'],
+        ['Magnitude', `${r(patch.psf)} psf`],
+        ['Bay', `${r(patch.widthFt)} x ${r(patch.lengthFt)} ft`],
+        ['Area', `${r(patch.areaSqFt)} sq ft`],
+        ['Total', `${Math.round(patch.totalLb)} lb`],
+        ['Height', `${r(patch.center[2])} ft`]];
+    }
     return [['Type', 'Item']];
   }
 
@@ -611,7 +695,8 @@ class Workspace {
     const s = this.state;
     this.$('sfw-counts').innerHTML =
       `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span>` +
-      `<span>${s.planks.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>`;
+      `<span>${s.planks.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>` +
+      (s.liveLoads.size ? `<span>${s.liveLoads.size} load</span>` : '');
   }
 
   _beamSpan() { return window.scafmetric?.getBeamSpanFt?.() || 20; }
@@ -714,6 +799,15 @@ class Workspace {
       zoom: cam.zoom ?? 1,
     });
     this._renderViews();
+    this._persistViews();
+  }
+
+  _persistViews() { saveWip(KEYS.views, this._views || []); }
+
+  _restoreViews() {
+    const saved = loadWip(KEYS.views);
+    this._views = Array.isArray(saved?.data) ? saved.data.filter(v => v && v.position && v.target) : [];
+    this._renderViews();
   }
 
   _renderViews() {
@@ -727,7 +821,7 @@ class Workspace {
       b.addEventListener('click', () => this._applyView(views[Number(b.dataset.viewGo)]));
     }
     for (const b of el.querySelectorAll('[data-view-del]')) {
-      b.addEventListener('click', () => { this._views.splice(Number(b.dataset.viewDel), 1); this._renderViews(); });
+      b.addEventListener('click', () => { this._views.splice(Number(b.dataset.viewDel), 1); this._renderViews(); this._persistViews(); });
     }
   }
 

@@ -288,3 +288,10 @@
 .sfw-view-row button:first-child:hover{border-color:var(--sfw-aqua);background:rgba(61,217,201,.1)}
 .sfw-view-x{width:30px;border:1px solid var(--sfw-line-2);border-radius:8px;background:transparent;color:var(--sfw-dim);cursor:pointer;font-size:15px;line-height:1}
 .sfw-view-x:hover{background:var(--sfw-orange);color:var(--sfw-void);border-color:var(--sfw-orange)}
+
+/* Live load tool: cyan, to match the striped patches it places, so it reads as
+   a load tool rather than another member. */
+.sfw-tool[data-tool="liveload"]:hover{border-color:#22d3ee;color:#a5f3fc}
+.sfw-tool[data-tool="liveload"].is-active{background:#22d3ee;border-color:#22d3ee;color:var(--sfw-void);box-shadow:0 6px 18px rgba(34,211,238,.3)}
+#sfw-live-note{margin-top:9px;padding:8px 10px;border-left:2px solid #22d3ee;background:rgba(34,211,238,.06);color:var(--sfw-muted)}
+#sfw-live-clear{margin-top:9px}

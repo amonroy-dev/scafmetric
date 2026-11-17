@@ -409,3 +409,81 @@ export function trussWorldMembers(a, b) {
     odIn: (m.chord ? chordRadius : braceRadius) * 2 * 12,
   }));
 }
+
+// --- live load patches -------------------------------------------------------
+// A translucent slab over a bay, striped across the span so the one-way
+// direction of the distribution reads at a glance (as in the source app).
+
+const LIVE_LOAD_VISUAL_THICKNESS_FT = inchesToFeet(0.35);
+
+function oneWayStripeTexture(backgroundFill, stripeColor) {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = backgroundFill;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = stripeColor;
+  ctx.lineWidth = 5;
+  for (let x = 24; x < canvas.width; x += 36) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvas.height);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+let _liveLoadMaterial = null;
+export function liveLoadMaterial() {
+  if (_liveLoadMaterial) return _liveLoadMaterial;
+  _liveLoadMaterial = new THREE.MeshStandardMaterial({
+    map: oneWayStripeTexture('rgba(34, 211, 238, 0.24)', 'rgba(236, 254, 255, 0.92)'),
+    color: 0x22d3ee,
+    emissive: 0x22d3ee,
+    emissiveIntensity: 0.34,
+    transparent: true,
+    opacity: 0.42,
+    metalness: 0.08,
+    roughness: 0.48,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  return _liveLoadMaterial;
+}
+
+let _liveLoadGhostMaterial = null;
+export function liveLoadGhostMaterial() {
+  if (_liveLoadGhostMaterial) return _liveLoadGhostMaterial;
+  _liveLoadGhostMaterial = new THREE.MeshStandardMaterial({
+    color: 0xfbbf24,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.2,
+    transparent: true,
+    opacity: 0.34,
+    metalness: 0.05,
+    roughness: 0.38,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  return _liveLoadGhostMaterial;
+}
+
+/**
+ * Slab for one resolved live load patch. `widthFt` spans between the two
+ * supporting ledgers; `lengthFt` runs along them.
+ */
+export function liveLoadPatch(patch, material) {
+  const m = new THREE.Mesh(UNIT_BOX, material || liveLoadMaterial());
+  m.position.set(patch.center[0], patch.center[1], patch.center[2]);
+  m.rotation.z = patch.rotationZ;
+  m.scale.set(patch.widthFt, patch.lengthFt, LIVE_LOAD_VISUAL_THICKNESS_FT);
+  return m;
+}

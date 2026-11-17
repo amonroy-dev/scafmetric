@@ -10,6 +10,9 @@ const PREFIX = 'scafmetric:wip:';
 export const KEYS = {
   beam: `${PREFIX}beam`,
   scaffold: `${PREFIX}scaffold`,
+  // Saved camera views are UI state, kept beside the model under the same
+  // retention window so a reopened session finds them again.
+  views: `${PREFIX}views`,
 };
 
 export const RETENTION_NOTICE =

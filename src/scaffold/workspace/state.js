@@ -6,6 +6,10 @@ import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
 import { planGuardrails, deckRectsByHeight } from './guardrails.js';
 import { trussMemberLengthFt, bracketStrutDropFt } from './parts.js';
+import {
+  buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
+  distributeLedgerPointLoad, DEFAULT_BAY_LIVE_LOAD_PSF,
+} from './liveloads.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -32,6 +36,10 @@ export class ScaffoldState {
     this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
     this.trusses = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.guardrails = new Map();// id -> { id, a:[x,y,z], b:[x,y,z], kind }
+    this.liveLoads = new Map(); // id -> { id, ledgerId, sideSign, psf }
+    // 'uniform' spreads liveLoadPsf over every decked bay; 'bays' uses only the
+    // placed per-bay patches. Placing the first patch switches the mode.
+    this.liveLoadMode = opts.liveLoadMode ?? 'uniform';
     this._seq = 0;
     this._history = [];
     this._future = [];
@@ -46,6 +54,7 @@ export class ScaffoldState {
       standards: [...this.standards], ledgers: [...this.ledgers],
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       trusses: [...this.trusses], guardrails: [...this.guardrails],
+      liveLoads: [...this.liveLoads], liveLoadMode: this.liveLoadMode,
       seq: this._seq, base: { ...this.base },
     });
   }
@@ -58,6 +67,8 @@ export class ScaffoldState {
     this.brackets = new Map(d.brackets || []);
     this.trusses = new Map(d.trusses || []);
     this.guardrails = new Map(d.guardrails || []);
+    this.liveLoads = new Map(d.liveLoads || []);
+    this.liveLoadMode = d.liveLoadMode || 'uniform';
     this._seq = d.seq;
     Object.assign(this.base, d.base);
     this._emit();
@@ -146,6 +157,71 @@ export class ScaffoldState {
   }
   clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }
 
+  // --- per-bay live loads --------------------------------------------------
+  // A placement names a supporting ledger and the side the load sits on; the
+  // bay is resolved against the current ledgers each time it is read.
+
+  ledgerList() { return [...this.ledgers.values()]; }
+
+  /** Add a live load patch to one side of a ledger. Returns it, or null. */
+  addLiveLoad(ledgerId, sideSign, psf = DEFAULT_BAY_LIVE_LOAD_PSF) {
+    if (!this.ledgers.has(ledgerId)) return null;
+    const side = sideSign >= 0 ? 1 : -1;
+    for (const ll of this.liveLoads.values()) {
+      if (ll.ledgerId === ledgerId && ll.sideSign === side) return null; // already loaded
+    }
+    const magnitude = Math.max(0, Number(psf) || 0);
+    const probe = { id: 'probe', ledgerId, sideSign: side, psf: magnitude };
+    if (!resolveLiveLoadPlacement(probe, this.ledgerList())) return null; // no bay on that side
+    this._pushHistory();
+    const ll = { id: this._id('LL'), ledgerId, sideSign: side, psf: magnitude };
+    this.liveLoads.set(ll.id, ll);
+    this.liveLoadMode = 'bays';
+    this._emit();
+    return ll;
+  }
+
+  setLiveLoadPsf(id, psf) {
+    const ll = this.liveLoads.get(id);
+    if (!ll) return false;
+    this._pushHistory();
+    ll.psf = Math.max(0, Number(psf) || 0);
+    this._emit();
+    return true;
+  }
+
+  setLiveLoadMode(mode) {
+    const next = mode === 'bays' ? 'bays' : 'uniform';
+    if (next === this.liveLoadMode) return;
+    this._pushHistory();
+    this.liveLoadMode = next;
+    this._emit();
+  }
+
+  clearLiveLoads() {
+    if (!this.liveLoads.size) return;
+    this._pushHistory();
+    this.liveLoads.clear();
+    this.liveLoadMode = 'uniform';
+    this._emit();
+  }
+
+  /** Drop placements whose supporting ledger is gone. */
+  _pruneOrphanLiveLoads() {
+    let dropped = 0;
+    for (const [id, ll] of [...this.liveLoads]) {
+      if (!this.ledgers.has(ll.ledgerId)) { this.liveLoads.delete(id); dropped++; }
+    }
+    if (dropped && !this.liveLoads.size) this.liveLoadMode = 'uniform';
+    return dropped;
+  }
+
+  /** Drawable patches for the placements that still resolve to a bay. */
+  liveLoadPatches() { return buildLiveLoadInstances([...this.liveLoads.values()], this.ledgerList()); }
+
+  /** True when per-bay patches are driving the live load. */
+  usingBayLiveLoads() { return this.liveLoadMode === 'bays' && this.liveLoads.size > 0; }
+
   /** Move or copy whole standard stacks by a delta. Returns the new/moved ids. */
   transformStacks(ids, dx, dy, copy = false) {
     this._pushHistory();
@@ -183,22 +259,22 @@ export class ScaffoldState {
   }
 
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails]) {
-      if (m.delete(id)) { this._emit(); return true; }
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads]) {
+      if (m.delete(id)) { this._pruneOrphanLiveLoads(); this._emit(); return true; }
     }
     return false;
   }
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads]) {
         if (m.delete(id)) { n++; break; }
       }
     }
-    if (n) this._emit();
+    if (n) { this._pruneOrphanLiveLoads(); this._emit(); }
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.liveLoads.clear(); this._emit(); }
 
   // Connection nodes along each standard, at the real connection spacing.
   nodes() {
@@ -255,7 +331,8 @@ export class ScaffoldState {
     const brackets = [...this.brackets.values()].map(b => ({ ...b }));
     const trusses = [...this.trusses.values()].map(t => ({ ...t }));
     const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
-    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, nodes: this.nodes() };
+    const liveLoads = this.liveLoadPatches();
+    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, liveLoads, nodes: this.nodes() };
   }
 
   // --- load takeoff --------------------------------------------------------
@@ -277,6 +354,7 @@ export class ScaffoldState {
       return best;
     };
     const attribute = (x, y, w) => { const l = byCol.get(key(x, y)) || nearest(x, y); if (l) l.deadLb += w; };
+    const attributeLive = (x, y, w) => { const l = byCol.get(key(x, y)) || nearest(x, y); if (l) l.liveLb += w; };
 
     for (const l of this.ledgers.values()) {
       const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1], l.b[2] - l.a[2]);
@@ -302,19 +380,37 @@ export class ScaffoldState {
       const w = perFootLedger * len;
       attribute(g.a[0], g.a[1], w / 2); attribute(g.b[0], g.b[1], w / 2);
     }
+    // Deck self weight, and - in uniform mode - the blanket live load with it.
+    const bayLive = this.usingBayLiveLoads();
     for (const p of this.planks.values()) {
       const area = Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0);
       const dead = area * plankPsf;
-      const live = area * this.liveLoadPsf;
+      const live = bayLive ? 0 : area * this.liveLoadPsf;
       const inside = [...legs.values()].filter(l =>
         l.x >= p.x0 - 1e-6 && l.x <= p.x1 + 1e-6 && l.y >= p.y0 - 1e-6 && l.y <= p.y1 + 1e-6);
       const targets = inside.length ? inside : [nearest((p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2)].filter(Boolean);
       for (const l of targets) { l.deadLb += dead / targets.length; l.liveLb += live / targets.length; }
     }
 
+    // Per-bay live load: one-way distribution onto the two supporting ledgers,
+    // then each ledger point load split between the legs at its ends.
+    let placedLiveLb = 0;
+    if (bayLive) {
+      const ledgerList = this.ledgerList();
+      for (const placement of this.liveLoads.values()) {
+        const resolved = resolveLiveLoadPlacement(placement, ledgerList);
+        if (!resolved) continue;
+        placedLiveLb += resolved.areaSqFt * placement.psf;
+        forEachLiveLoadContribution(resolved, c => {
+          distributeLedgerPointLoad(c.sourceLedger, c.sourcePoint, c.sourceLoadLb, attributeLive);
+          distributeLedgerPointLoad(c.targetLedger, c.targetPoint, c.targetLoadLb, attributeLive);
+        });
+      }
+    }
+
     const list = [...legs.values()];
     const totals = list.reduce((a, l) => ({ deadLb: a.deadLb + l.deadLb, liveLb: a.liveLb + l.liveLb }), { deadLb: 0, liveLb: 0 });
-    return { legs: list, totals };
+    return { legs: list, totals, liveLoadMode: bayLive ? 'bays' : 'uniform', placedLiveLb };
   }
 }
 

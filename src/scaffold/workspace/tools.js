@@ -9,15 +9,19 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, buildTruss, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, buildTruss, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, computeAdjacencyScaleFt,
   computeLiftAxes, getAdjacentCandidates, maxProjFor, planBlock, BRACE_DELTA_LIFT,
 } from './planning.js';
+import {
+  getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
+  DEFAULT_BAY_LIVE_LOAD_PSF,
+} from './liveloads.js';
 
 const DRAG_PX = 4;
-export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'erase'];
+export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
@@ -41,6 +45,7 @@ export class Tools {
     this.categoryKey = 'standards';
     this.partId = null;
     this.pending = null;
+    this.liveLoadPsf = DEFAULT_BAY_LIVE_LOAD_PSF;
     this.selection = new Set();
     this._down = null;
     this._marquee = null;
@@ -194,6 +199,16 @@ export class Tools {
       this.hooks.onSelectionChange?.([...this.selection]);
       return;
     }
+    // Live load patches attach to a ledger, not a node: pick the ledger and the
+    // side of it the pointer landed on.
+    if (this.tool === 'liveload') {
+      const hit = this._pickLedger(e);
+      if (!hit) return;
+      const side = getLedgerSideSign(hit.ledger, hit.point);
+      if (e.shiftKey) { this._batchFillLiveLoads(hit.ledger, side); return; }
+      s.addLiveLoad(hit.ledger.id, side, this.liveLoadPsf);
+      return;
+    }
     // Connect tools. Ledgers and braces are ONE CLICK: the target is found
     // automatically (nearest unoccupied adjacent standard), as in the source app.
     const node = this._nearestNode(e);
@@ -304,6 +319,33 @@ export class Tools {
     this.hooks.onBulkFill?.(plan.length, 'ledger');
   }
 
+  /** Nearest ledger under the pointer, with the world point that was hit. */
+  _pickLedger(e) {
+    this.engine.setPointerFromEvent(e);
+    this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
+    const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
+    for (const h of hits) {
+      const d = h.object.userData || {};
+      if (d.kind !== 'ledger' && d.kind !== 'line') continue;
+      const ledger = this.state.ledgers.get(d.id);
+      if (ledger) return { ledger, point: { x: h.point.x, y: h.point.y, z: h.point.z } };
+    }
+    return null;
+  }
+
+  /** SHIFT: load every bay along the connected run of ledgers at this lift. */
+  _batchFillLiveLoads(ledger, sideSign) {
+    const existing = [...this.state.liveLoads.values()];
+    const previews = computeLiveLoadBatchPreview(
+      ledger, this.state.ledgerList(), sideSign, existing, this.liveLoadPsf);
+    let added = 0;
+    for (const p of previews) {
+      if (this.state.addLiveLoad(p.placement.ledgerId, p.placement.sideSign, p.placement.psf)) added++;
+    }
+    this.hooks.onBulkFill?.(added, 'live load');
+    return added;
+  }
+
   _batchFillBraces(level) {
     const nodes = this._nodesAtLevel(level);
     const plan = computeBatchPlan(nodes, null);
@@ -376,6 +418,20 @@ export class Tools {
   _updateGhost(e) {
     this._clearGhost();
     if (this.tool === 'select' || this.tool === 'erase' || this.tool === 'block') return;
+    if (this.tool === 'liveload') {
+      const hit = this._pickLedger(e);
+      if (!hit) return;
+      const side = getLedgerSideSign(hit.ledger, hit.point);
+      const existing = [...this.state.liveLoads.values()];
+      const ledgers = this.state.ledgerList();
+      const previews = e.shiftKey
+        ? computeLiveLoadBatchPreview(hit.ledger, ledgers, side, existing, this.liveLoadPsf)
+        : [buildLiveLoadPreviewForLedger(hit.ledger, ledgers, side, existing, this.liveLoadPsf)].filter(Boolean);
+      const ghostMat = liveLoadGhostMaterial();
+      for (const p of previews) this.ghostGroup.add(liveLoadPatch(p.liveLoad, ghostMat));
+      this.hooks.onLiveLoadPreview?.(previews.length, this.liveLoadPsf, e.shiftKey);
+      return;
+    }
     const mat = MATERIALS.ghost;
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
