@@ -17,5 +17,7 @@ for (const path of ['index.html', 'calculator.html', 'signin.html', 'terms.html'
 }
 await build({ entryPoints: ['src/auth/client.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/auth.js', minify: true });
 await build({ entryPoints: ['src/auth/account.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/account.js', minify: true });
+// Scaffold-to-beam 3D workspace (three.js). Bundled so the static site needs no CDN.
+await build({ entryPoints: ['src/scaffold/workspace/main.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/scaffold-app.js', minify: true });
 await writeFile('dist/auth-config.json', JSON.stringify(firebaseConfig));
 console.log('Static site built in dist/');
