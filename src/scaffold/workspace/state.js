@@ -27,6 +27,7 @@ export class ScaffoldState {
     this.ledgers = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.braces = new Map();    // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }
+    this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
     this._seq = 0;
     this._history = [];
     this._future = [];
@@ -39,7 +40,7 @@ export class ScaffoldState {
   snapshot() {
     return JSON.stringify({
       standards: [...this.standards], ledgers: [...this.ledgers],
-      braces: [...this.braces], planks: [...this.planks],
+      braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       seq: this._seq, base: { ...this.base },
     });
   }
@@ -49,6 +50,7 @@ export class ScaffoldState {
     this.ledgers = new Map(d.ledgers);
     this.braces = new Map(d.braces);
     this.planks = new Map(d.planks);
+    this.brackets = new Map(d.brackets || []);
     this._seq = d.seq;
     Object.assign(this.base, d.base);
     this._emit();
@@ -111,6 +113,11 @@ export class ScaffoldState {
 
   addLedger(a, b) { this._pushHistory(); const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
   addBrace(a, b) { this._pushHistory(); const v = { id: this._id('B'), a: [...a], b: [...b] }; this.braces.set(v.id, v); this._emit(); return v; }
+  addBracket(node, dir, lengthFt) {
+    this._pushHistory();
+    const b = { id: this._id('K'), x: node.x, y: node.y, z: node.z, dir: [dir[0], dir[1]], lengthFt };
+    this.brackets.set(b.id, b); this._emit(); return b;
+  }
   addPlank(a, b) { this._pushHistory();
     const p = {
       id: this._id('P'),
@@ -122,7 +129,7 @@ export class ScaffoldState {
   }
 
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks]) {
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets]) {
       if (m.delete(id)) { this._emit(); return true; }
     }
     return false;
@@ -130,14 +137,14 @@ export class ScaffoldState {
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets]) {
         if (m.delete(id)) { n++; break; }
       }
     }
     if (n) this._emit();
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this._emit(); }
 
   // Connection nodes along each standard, at the real connection spacing.
   nodes() {
@@ -191,7 +198,8 @@ export class ScaffoldState {
     const ledgers = [...this.ledgers.values()].map(l => ({ id: l.id, a: l.a, b: l.b }));
     const braces = [...this.braces.values()].map(b => ({ id: b.id, a: b.a, b: b.b }));
     const planks = [...this.planks.values()].map(p => ({ ...p, boards: this.plankBoards(p) }));
-    return { standards, bases, ledgers, braces, planks, nodes: this.nodes() };
+    const brackets = [...this.brackets.values()].map(b => ({ ...b }));
+    return { standards, bases, ledgers, braces, planks, brackets, nodes: this.nodes() };
   }
 
   // --- load takeoff --------------------------------------------------------
@@ -223,6 +231,10 @@ export class ScaffoldState {
       const len = Math.hypot(b.b[0] - b.a[0], b.b[1] - b.a[1], b.b[2] - b.a[2]);
       const w = perFootBrace * len;
       attribute(b.a[0], b.a[1], w / 2); attribute(b.b[0], b.b[1], w / 2);
+    }
+    for (const b of this.brackets.values()) {
+      const perFoot = tubeWeightPerFoot(this.components.ledger);
+      attribute(b.x, b.y, perFoot * (b.lengthFt + Math.hypot(b.lengthFt, b.lengthFt)));
     }
     for (const p of this.planks.values()) {
       const area = Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0);

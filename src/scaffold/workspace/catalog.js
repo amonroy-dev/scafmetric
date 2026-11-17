@@ -5,7 +5,7 @@
 
 const ft = (f, i = 0) => f + i / 12;
 
-export const CATEGORIES = ['standards', 'ledgers', 'braces', 'planks'];
+export const CATEGORIES = ['standards', 'ledgers', 'braces', 'brackets', 'planks'];
 
 export const CATALOG = {
   standards: {
@@ -51,6 +51,16 @@ export const CATALOG = {
       { id: 'brc-2', label: '2 ft bay', lengthFt: 2 },
     ],
   },
+  brackets: {
+    label: 'Side brackets',
+    code: 'BRK',
+    unit: 'length',
+    parts: [
+      { id: 'brk-3-6', label: '3 ft 6 in', lengthFt: 3.5 },
+      { id: 'brk-3', label: '3 ft', lengthFt: 3 },
+      { id: 'brk-2', label: '2 ft', lengthFt: 2 },
+    ],
+  },
   planks: {
     label: 'Planks',
     code: 'PLK',
@@ -72,6 +82,7 @@ export const DEFAULT_PART = {
   ledgers: 'led-7',
   braces: 'brc-7',
   planks: 'plk-7',
+  brackets: 'brk-2',
 };
 
 export function getPart(categoryKey, partId) {
@@ -86,4 +97,5 @@ export const CATEGORY_TOOL = {
   ledgers: 'ledger',
   braces: 'brace',
   planks: 'plank',
+  brackets: 'bracket',
 };

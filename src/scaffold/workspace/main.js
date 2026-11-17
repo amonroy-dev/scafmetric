@@ -12,6 +12,9 @@ import {
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
+import { deriveBom, bomToCsv } from './bom.js';
+import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt } from '../store.js';
+import { buildSideBracket } from './parts.js';
 
 const TOOL_META = {
   select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
@@ -19,6 +22,7 @@ const TOOL_META = {
   standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
   ledger: { label: 'Ledger', icon: '─', hint: 'ONE click on a rosette node runs a ledger to the nearest open standard. SHIFT+click fills every bay at that level.' },
   brace: { label: 'Brace', icon: '╱', hint: 'ONE click places a diagonal to the next standard, 4 rosette levels up. SHIFT+click braces every bay at that level.' },
+  bracket: { label: 'Bracket', icon: '⊢', hint: 'Click a rosette node to hang a side bracket, drawn from generic tubing. The arm points away from the scaffold.' },
   plank: { label: 'Plank', icon: '▭', hint: 'Click two rosette nodes on opposite corners to deck a bay with best-fit 9 in / 6 in boards.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
@@ -58,6 +62,11 @@ const TEMPLATE = `
         </div>
       </div>
       <div class="sfw-group">
+        <h3>Bill of materials <button type="button" class="sfw-mini" id="sfw-bom-csv">CSV</button></h3>
+        <div class="sfw-table-wrap sfw-bom-wrap"><table class="sfw-table sfw-bom"><thead><tr><th>Item</th><th>Qty</th><th>Wt (lb)</th></tr></thead><tbody id="sfw-bom-rows"></tbody></table></div>
+        <div class="sfw-totals" id="sfw-bom-total"></div>
+      </div>
+      <div class="sfw-group">
         <h3>Beam &amp; import</h3>
         <div class="sfw-grid2">
           <label>Runs along<select id="sfw-axis"><option value="x">X</option><option value="y">Y</option></select></label>
@@ -72,7 +81,7 @@ const TEMPLATE = `
     </aside>
   </div>
   <footer class="sfw-foot">
-    <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.</p>
+    <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br><span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
       <button type="button" class="sfw-btn primary" id="sfw-import" disabled>Import to beam</button>
@@ -111,7 +120,14 @@ class Workspace {
     for (const el of root.querySelectorAll('[data-sfw-close]')) el.addEventListener('click', () => this.close());
     document.addEventListener('keydown', e => {
       if (this.root.hidden) return;
-      if (e.key === 'Escape') { this.close(); return; }
+      if (e.key === 'Escape') {
+        // Escape cancels the in-progress action only. It must never close the
+        // builder, which previously dumped the user back to the beam form.
+        e.preventDefault();
+        if (this.tools) { this.tools.pending = null; this.tools._clearGhost(); this.tools._clearOverlay(); }
+        this.$('sfw-hint').textContent = 'Action cancelled. Close with the × button; your model is saved.';
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
@@ -180,11 +196,28 @@ class Workspace {
     });
 
     this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
+    this._persist = debounce(() => {
+      saveWip(KEYS.scaffold, this.state.snapshot());
+      const el = this.$('sfw-retain');
+      if (el) el.textContent = `${RETENTION_NOTICE} Saved just now.`;
+    }, 500);
+    this.$('sfw-bom-csv').addEventListener('click', () => this._downloadBom());
     this._buildToolbar();
     this._buildCatalogUi();
     this._bindInputs();
     this.tools.setCatalog('standards', DEFAULT_PART.standards);
-    this._seedStarter();
+    // Restore work in progress if it is still within the retention window.
+    purgeExpired();
+    const wip = loadWip(KEYS.scaffold);
+    if (wip && wip.data) {
+      try { this.state.restore(wip.data); } catch { this._seedStarter(); }
+      const el = this.$('sfw-retain');
+      if (el) el.textContent = `${RETENTION_NOTICE} Restored from ${formatSavedAt(wip.savedAt)}.`;
+    } else {
+      this._seedStarter();
+      const el = this.$('sfw-retain');
+      if (el) el.textContent = RETENTION_NOTICE;
+    }
     this.state.resetHistory();
     this._sync();
   }
@@ -314,6 +347,8 @@ class Workspace {
     this._rebuildNodes();
     this._updateBeam();
     this._updateCounts();
+    this._refreshBom();
+    this._persist();
   }
 
   _matFor(id, fallback) {
@@ -358,7 +393,26 @@ class Workspace {
         this.contentGroup.add(m);
       }
     }
+    for (const br of g.brackets || []) {
+      const mat = this._matFor(br.id, MATERIALS.ledger);
+      for (const m of buildSideBracket({ x: br.x, y: br.y, z: br.z }, br.dir, br.lengthFt, mat)) {
+        m.userData = { id: br.id, kind: 'bracket' };
+        this.contentGroup.add(m);
+      }
+    }
     this._rebuildLabels();
+  }
+
+  _refreshBom() {
+    const bom = deriveBom(this.state);
+    this._bom = bom;
+    this.$('sfw-bom-rows').innerHTML = bom.lineItems.length
+      ? bom.lineItems.map(r => `<tr><td>${r.description}</td><td>${r.quantity}</td><td>${r.totalWeightLb}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="sfw-empty">Nothing placed yet.</td></tr>';
+    this.$('sfw-bom-total').innerHTML =
+      `<div><dt>Lines</dt><dd>${bom.summary.lineItemCount}</dd></div>` +
+      `<div><dt>Pieces</dt><dd>${bom.summary.totalQuantity}</dd></div>` +
+      `<div><dt>Weight</dt><dd>${Math.round(bom.summary.totalWeightLb)} lb</dd></div>`;
   }
 
   _rebuildLabels() {
@@ -448,6 +502,17 @@ class Workspace {
     if (skipped.length) { warn.hidden = false; warn.textContent = `${skipped.length} selected leg(s) off the beam line or past the span — excluded.`; }
     else warn.hidden = true;
     this.$('sfw-import').disabled = imported.length === 0;
+  }
+
+  _downloadBom() {
+    if (!this._bom) return;
+    const blob = new Blob([bomToCsv(this._bom)], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scaffold-bom.csv';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   _import() {

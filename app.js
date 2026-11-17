@@ -1,5 +1,6 @@
 import { analyzeBeam } from './src/beam.js';
 import { normalizePointLoads, pointLoadsForAnalysis } from './src/point-loads.js';
+import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt } from './src/scaffold/store.js';
 import { beamSelfWeight } from './src/beam-self-weight.js';
 import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
 import { checkDeflection } from './src/deflection-check.js';
@@ -594,3 +595,61 @@ $('span').addEventListener('input', () => {
  }
  if (cleared) $('brace-cleared').textContent = 'Span changed, so the brace positions were cleared. Enter them again for the new span.';
 });
+
+
+// --- work-in-progress persistence -------------------------------------------
+// Beam inputs are kept in this browser for the retention window so a stray Esc,
+// refresh or tab close does not lose the setup. Nothing is uploaded here.
+purgeExpired();
+const WIP_FIELDS = ['project', 'preparer', 'section', 'span', 'elastic-modulus', 'inertia',
+ 'stiffness-factor', 'top-brace-locations', 'bottom-brace-locations', 'deflection-limit',
+ 'load-comparison', 'custom-safety-factor'];
+function collectBeamWip() {
+ const fields = {};
+ for (const id of WIP_FIELDS) { const el = $(id); if (el) fields[id] = el.value; }
+ const loads = [...document.querySelectorAll('.load-row')].map(row => ({
+  type: row.dataset.loadType,
+  dead: row.querySelector(row.dataset.loadType === 'point' ? '.point-dead' : '.uniform-dead').value,
+  live: row.querySelector(row.dataset.loadType === 'point' ? '.point-live' : '.uniform-live').value,
+  location: row.querySelector('.point-location').value,
+  scaffold: row.dataset.scaffoldImport === '1',
+  leg: row.dataset.scaffoldLeg || null
+ }));
+ return { fields, loads };
+}
+function restoreBeamWip(data) {
+ if (!data || typeof data !== 'object') return false;
+ for (const [id, value] of Object.entries(data.fields || {})) {
+  const el = $(id);
+  if (el && value !== undefined && value !== null) el.value = value;
+ }
+ if (Array.isArray(data.loads) && data.loads.length) {
+  $('load-rows').replaceChildren();
+  for (const load of data.loads) {
+   const row = addLoad({type: load.type === 'point' ? 'point' : 'uniform', dead: load.dead, live: load.live,
+    ...(load.location !== '' && load.location != null ? {location: load.location} : {})});
+   if (load.scaffold) row.dataset.scaffoldImport = '1';
+   if (load.leg) row.dataset.scaffoldLeg = load.leg;
+  }
+  labelLoadRows();
+ }
+ return true;
+}
+const persistBeam = debounce(() => {
+ try { saveWip(KEYS.beam, collectBeamWip()); } catch { /* ignore */ }
+ const note = document.getElementById('wip-notice');
+ if (note) note.textContent = `${RETENTION_NOTICE} Saved just now.`;
+}, 600);
+try {
+ const saved = loadWip(KEYS.beam);
+ if (saved?.data && restoreBeamWip(saved.data)) {
+  const note = document.getElementById('wip-notice');
+  if (note) note.textContent = `${RETENTION_NOTICE} Restored from ${formatSavedAt(saved.savedAt)}.`;
+  syncUniformLoads(); drawSchematic();
+ } else {
+  const note = document.getElementById('wip-notice');
+  if (note) note.textContent = RETENTION_NOTICE;
+ }
+} catch { /* ignore a bad cache */ }
+document.addEventListener('input', e => { if (e.target.closest('#beam-form')) persistBeam(); });
+window.addEventListener('scafmetric:loads-imported', () => persistBeam());

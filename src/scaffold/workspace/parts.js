@@ -262,3 +262,27 @@ export function buildBestFitPlankLayout(usableSpanIn) {
     return { widthIn, centerOffsetFt };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Side bracket — drawn from generic tubing (no GLB). An outward arm at the
+// rosette level plus a 45-degree strut back down to the standard.
+// ---------------------------------------------------------------------------
+export const BRACKET = { armOdIn: 1.9, strutOdIn: 1.69 };
+
+/**
+ * Build a side bracket at a node, projecting horizontally along `dir` ([dx,dy],
+ * need not be normalised). Returns an array of meshes.
+ */
+export function buildSideBracket(node, dir, lengthFt, material) {
+  const mat = material || MATERIALS.ledger;
+  const len = Math.hypot(dir[0], dir[1]) || 1;
+  const ux = dir[0] / len, uy = dir[1] / len;
+  const base = [node.x, node.y, node.z];
+  const tip = [node.x + ux * lengthFt, node.y + uy * lengthFt, node.z];
+  // Strut anchors one bracket-length down the standard (45 degrees).
+  const anchor = [node.x, node.y, node.z - lengthFt];
+  return [
+    tubeBetween(base, tip, BRACKET.armOdIn, mat),
+    tubeBetween(tip, anchor, BRACKET.strutOdIn, mat),
+  ];
+}

@@ -9,7 +9,7 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, computeAdjacencyScaleFt,
@@ -17,7 +17,7 @@ import {
 } from './planning.js';
 
 const DRAG_PX = 4;
-export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'plank', 'erase'];
+export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'bracket', 'plank', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
@@ -196,6 +196,11 @@ export class Tools {
       if (target) s.addLedger([node.x, node.y, node.z], [target.x, target.y, target.z]);
       return;
     }
+    if (this.tool === 'bracket') {
+      const part = this.currentPart();
+      if (part) s.addBracket(node, this._outwardDir(node), part.lengthFt);
+      return;
+    }
     if (this.tool === 'brace') {
       if (e.shiftKey) { this._batchFillBraces(node.level); return; }
       const target = this.braceTargetFor(node);
@@ -208,6 +213,19 @@ export class Tools {
     this.pending = null;
     if (a.x === node.x && a.y === node.y) return;
     s.addPlank([a.x, a.y, a.z], [node.x, node.y, node.z]);
+  }
+
+  // Direction pointing away from the scaffold footprint centre.
+  _outwardDir(node) {
+    const cols = [...this.state.standards.values()];
+    if (!cols.length) return [1, 0];
+    const cx = cols.reduce((a, c) => a + c.x, 0) / cols.length;
+    const cy = cols.reduce((a, c) => a + c.y, 0) / cols.length;
+    let dx = node.x - cx, dy = node.y - cy;
+    if (Math.hypot(dx, dy) < 1e-6) return [1, 0];
+    // Snap to the dominant axis so brackets sit square to the bay.
+    if (Math.abs(dx) >= Math.abs(dy)) return [Math.sign(dx), 0];
+    return [0, Math.sign(dy)];
   }
 
   _nodesAtLevel(level) { return this.state.nodes().filter(n => n.level === level); }
@@ -354,6 +372,11 @@ export class Tools {
     if (this.tool === 'ledger') {
       const t = this.ledgerTargetFor(node);
       if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.9, mat));
+      return;
+    }
+    if (this.tool === 'bracket') {
+      const part = this.currentPart();
+      if (part) for (const m of buildSideBracket(node, this._outwardDir(node), part.lengthFt, mat)) this.ghostGroup.add(m);
       return;
     }
     if (this.tool === 'brace') {
