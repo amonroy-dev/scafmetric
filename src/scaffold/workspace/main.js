@@ -13,7 +13,7 @@ import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './cat
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 import { deriveBom, bomToCsv } from './bom.js';
-import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt } from '../store.js';
+import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
 import { buildSideBracket } from './parts.js';
 
 const TOOL_META = {
@@ -197,10 +197,15 @@ class Workspace {
 
     this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
     this._persist = debounce(() => {
-      saveWip(KEYS.scaffold, this.state.snapshot());
+      const snapshot = this.state.snapshot();
+      saveWip(KEYS.scaffold, snapshot);
       const el = this.$('sfw-retain');
       if (el) el.textContent = `${RETENTION_NOTICE} Saved just now.`;
-    }, 500);
+      // Best-effort mirror to the signed-in account; never blocks the UI.
+      saveServerWorkspace({ scaffold: snapshot }).then(ok => {
+        if (ok && el) el.textContent = `${RETENTION_NOTICE} Saved to your account just now.`;
+      });
+    }, 800);
     this.$('sfw-bom-csv').addEventListener('click', () => this._downloadBom());
     this._buildToolbar();
     this._buildCatalogUi();
@@ -209,15 +214,26 @@ class Workspace {
     // Restore work in progress if it is still within the retention window.
     purgeExpired();
     const wip = loadWip(KEYS.scaffold);
+    const el = this.$('sfw-retain');
     if (wip && wip.data) {
       try { this.state.restore(wip.data); } catch { this._seedStarter(); }
-      const el = this.$('sfw-retain');
-      if (el) el.textContent = `${RETENTION_NOTICE} Restored from ${formatSavedAt(wip.savedAt)}.`;
+      if (el) el.textContent = `${RETENTION_NOTICE} Restored from this device, ${formatSavedAt(wip.savedAt)}.`;
     } else {
       this._seedStarter();
-      const el = this.$('sfw-retain');
       if (el) el.textContent = RETENTION_NOTICE;
     }
+    // If the account holds a newer copy, take it instead.
+    loadServerWorkspace().then(server => {
+      if (!server?.scaffold) return;
+      const winner = pickNewer(wip, server);
+      if (!winner || winner.source !== 'account') return;
+      try {
+        this.state.restore(server.scaffold);
+        this.state.resetHistory();
+        this._sync();
+        if (el) el.textContent = `${RETENTION_NOTICE} Restored from your account, ${formatSavedAt(winner.savedAt)}.`;
+      } catch { /* keep the local copy */ }
+    });
     this.state.resetHistory();
     this._sync();
   }

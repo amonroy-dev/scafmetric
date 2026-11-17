@@ -97,7 +97,7 @@ export class Tools {
   _onDown(e) {
     if (e.button !== 0 || this._navGesture(e)) return;
     this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
-    if ((this.tool === 'select' && !e.shiftKey) || this.tool === 'block') {
+    if (!e.shiftKey) {  // left-drag marquees in any tool; left-click still places
       const g = this.engine.projectClientToGround(e.clientX, e.clientY);
       if (g) this._marquee = { start: { x: g.x, y: g.y }, current: { x: g.x, y: g.y }, startClientX: e.clientX, currentClientX: e.clientX };
     }
@@ -131,7 +131,7 @@ export class Tools {
       this.placeBlock(normalizeRect(marquee.start, marquee.current));
       return;
     }
-    if (this.tool === 'select' && marquee && dragged) { this._finishMarquee(marquee, down.ctrl); return; }
+    if (marquee && dragged) { this._finishMarquee(marquee, down.ctrl || this.tool !== 'select'); return; }
     if (dragged) return; // camera/aborted drag
     this._act(e);
   }
@@ -143,11 +143,16 @@ export class Tools {
     const w = Math.max(r.xMax - r.xMin, 1e-4);
     const d = Math.max(r.yMax - r.yMin, 1e-4);
     const crossing = m.currentClientX < m.startClientX;
-    const color = this.tool === 'block' ? 0xffa41b : (crossing ? 0xffa41b : 0x3dd9c9);
-    const fill = new THREE.Mesh(PLANE_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
+    // Source palette: window = blue, crossing = green; block rect = orange.
+    const isBlock = this.tool === 'block';
+    const edgeColor = isBlock ? 0xffa41b : (crossing ? 0x34d399 : 0x60a5fa);
+    const fillColor = isBlock ? 0xffc266 : (crossing ? 0x6ee7b7 : 0x93c5fd);
+    const opacity = isBlock ? 0.14 : (crossing ? 0.12 : 0.08);
+    const color = edgeColor;
+    const fill = new THREE.Mesh(PLANE_GEO, new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
     fill.position.set((r.xMin + r.xMax) / 2, (r.yMin + r.yMax) / 2, 0.04);
     fill.scale.set(w, d, 1);
-    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(PLANE_GEO), new THREE.LineBasicMaterial({ color }));
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(PLANE_GEO), new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.95 }));
     edge.position.copy(fill.position);
     edge.scale.copy(fill.scale);
     this.overlayGroup.add(fill, edge);

@@ -99,3 +99,58 @@ export function formatSavedAt(savedAt) {
   if (hrs < 24) return `${hrs} hr ago`;
   return `${Math.round(hrs / 24)} d ago`;
 }
+
+// --- server sync ------------------------------------------------------------
+// When the visitor is signed in, work is also mirrored to their account so it
+// survives a cleared browser or a different device. Local storage stays the
+// fast path; the server is best-effort and never blocks the UI.
+
+let serverAvailable = true;
+
+export async function loadServerWorkspace() {
+  if (!serverAvailable) return null;
+  try {
+    const res = await fetch('/api/workspace', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+    if ([401, 403, 404, 501].includes(res.status)) { serverAvailable = false; return null; }
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.workspace ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveServerWorkspace(patch) {
+  if (!serverAvailable) return false;
+  try {
+    const res = await fetch('/api/workspace', {
+      method: 'PUT',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if ([401, 403, 404, 501].includes(res.status)) { serverAvailable = false; return false; }
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function clearServerWorkspace() {
+  if (!serverAvailable) return false;
+  try {
+    const res = await fetch('/api/workspace', { method: 'DELETE', cache: 'no-store', credentials: 'same-origin' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Whichever copy is newer: the local one or the server one. */
+export function pickNewer(local, server) {
+  const l = local?.savedAt ?? 0;
+  const s = server?.updatedAt ? Date.parse(server.updatedAt) : 0;
+  if (!l && !s) return null;
+  return s > l ? { source: 'account', savedAt: s, data: server } : { source: 'device', savedAt: l, data: local?.data };
+}

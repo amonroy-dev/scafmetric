@@ -1,6 +1,6 @@
 import { analyzeBeam } from './src/beam.js';
 import { normalizePointLoads, pointLoadsForAnalysis } from './src/point-loads.js';
-import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt } from './src/scaffold/store.js';
+import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from './src/scaffold/store.js';
 import { beamSelfWeight } from './src/beam-self-weight.js';
 import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
 import { checkDeflection } from './src/deflection-check.js';
@@ -636,10 +636,14 @@ function restoreBeamWip(data) {
  return true;
 }
 const persistBeam = debounce(() => {
- try { saveWip(KEYS.beam, collectBeamWip()); } catch { /* ignore */ }
+ let snapshot = null;
+ try { snapshot = collectBeamWip(); saveWip(KEYS.beam, snapshot); } catch { /* ignore */ }
  const note = document.getElementById('wip-notice');
  if (note) note.textContent = `${RETENTION_NOTICE} Saved just now.`;
-}, 600);
+ if (snapshot) saveServerWorkspace({ beam: snapshot }).then(ok => {
+  if (ok && note) note.textContent = `${RETENTION_NOTICE} Saved to your account just now.`;
+ });
+}, 800);
 try {
  const saved = loadWip(KEYS.beam);
  if (saved?.data && restoreBeamWip(saved.data)) {
@@ -650,6 +654,17 @@ try {
   const note = document.getElementById('wip-notice');
   if (note) note.textContent = RETENTION_NOTICE;
  }
+ // Take the account copy when it is newer than this device's.
+ loadServerWorkspace().then(server => {
+  if (!server?.beam) return;
+  const winner = pickNewer(saved, server);
+  if (!winner || winner.source !== 'account') return;
+  if (restoreBeamWip(server.beam)) {
+   syncUniformLoads(); invalidate(); drawSchematic();
+   const note = document.getElementById('wip-notice');
+   if (note) note.textContent = `${RETENTION_NOTICE} Restored from your account, ${formatSavedAt(winner.savedAt)}.`;
+  }
+ });
 } catch { /* ignore a bad cache */ }
 document.addEventListener('input', e => { if (e.target.closest('#beam-form')) persistBeam(); });
 window.addEventListener('scafmetric:loads-imported', () => persistBeam());
