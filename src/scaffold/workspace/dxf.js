@@ -3,12 +3,15 @@
 // member, on per-type layers. Analysis packages map POINT -> joints and
 // LINE -> members. Pure string building — unit-testable.
 
+import { trussWorldMembers, bracketStrutDropFt } from './parts.js';
+
 export const LAYERS = {
   standard: 'SCF_STANDARD',
   ledger: 'SCF_LEDGER',
   brace: 'SCF_BRACE',
   bracket: 'SCF_BRACKET',
   guardrail: 'SCF_GUARDRAIL',
+  truss: 'SCF_TRUSS',
   joint: 'SCF_JOINTS',
 };
 
@@ -30,9 +33,9 @@ export function buildCenterlineModel(state) {
   const segments = [];
   const joints = new Map();
   const addJoint = p => { const k = posKey(p); if (!joints.has(k)) joints.set(k, p); };
-  const addSegment = (a, b, layer) => {
+  const addSegment = (a, b, layer, id = null) => {
     if (Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) < 1e-9) return;
-    segments.push({ start: a, end: b, layer });
+    segments.push({ start: a, end: b, layer, id });
     addJoint(a); addJoint(b);
   };
 
@@ -41,18 +44,23 @@ export function buildCenterlineModel(state) {
     // One segment per stacked lift, so joints land at each splice.
     let z = base;
     for (const len of s.segments) {
-      addSegment([s.x, s.y, z], [s.x, s.y, z + len], LAYERS.standard);
+      addSegment([s.x, s.y, z], [s.x, s.y, z + len], LAYERS.standard, s.id);
       z += len;
     }
   }
-  for (const l of state.ledgers.values()) addSegment(l.a, l.b, LAYERS.ledger);
-  for (const b of state.braces.values()) addSegment(b.a, b.b, LAYERS.brace);
+  for (const l of state.ledgers.values()) addSegment(l.a, l.b, LAYERS.ledger, l.id);
+  for (const b of state.braces.values()) addSegment(b.a, b.b, LAYERS.brace, b.id);
   for (const k of state.brackets.values()) {
     const tip = [k.x + k.dir[0] * k.lengthFt, k.y + k.dir[1] * k.lengthFt, k.z];
-    addSegment([k.x, k.y, k.z], tip, LAYERS.bracket);
-    addSegment(tip, [k.x, k.y, k.z - k.lengthFt], LAYERS.bracket);
+    addSegment([k.x, k.y, k.z], tip, LAYERS.bracket, k.id);
+    addSegment(tip, [k.x, k.y, k.z - bracketStrutDropFt(k.lengthFt)], LAYERS.bracket, k.id);
   }
-  for (const g of state.guardrails?.values?.() ?? []) addSegment(g.a, g.b, LAYERS.guardrail);
+  for (const g of state.guardrails?.values?.() ?? []) addSegment(g.a, g.b, LAYERS.guardrail, g.id);
+  // Trusses contribute their full member set, so the skeleton and the DXF show
+  // the real triangular frame rather than a single line.
+  for (const t of state.trusses?.values?.() ?? []) {
+    for (const seg of trussWorldMembers(t.a, t.b)) addSegment(seg.a, seg.b, LAYERS.truss, t.id);
+  }
 
   return { segments, points: [...joints.values()] };
 }

@@ -5,6 +5,7 @@
 import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
 import { planGuardrails, deckRectsByHeight } from './guardrails.js';
+import { trussMemberLengthFt, bracketStrutDropFt } from './parts.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -289,11 +290,11 @@ export class ScaffoldState {
     }
     for (const b of this.brackets.values()) {
       const perFoot = tubeWeightPerFoot(this.components.ledger);
-      attribute(b.x, b.y, perFoot * (b.lengthFt + Math.hypot(b.lengthFt, b.lengthFt)));
+      attribute(b.x, b.y, perFoot * (b.lengthFt + Math.hypot(b.lengthFt, bracketStrutDropFt(b.lengthFt))));
     }
     for (const t of this.trusses.values()) {
       const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
-      const w = perFootLedger * len * 1.8; // chords + web
+      const w = perFootLedger * trussMemberLengthFt(len); // every chord, post, tie and diagonal
       attribute(t.a[0], t.a[1], w / 2); attribute(t.b[0], t.b[1], w / 2);
     }
     for (const g of this.guardrails.values()) {

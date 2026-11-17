@@ -56,10 +56,11 @@ export const CATALOG = {
     code: 'TRS',
     unit: 'length',
     parts: [
-      { id: 'trs-20', label: '20 ft', lengthFt: 20 },
-      { id: 'trs-16', label: '16 ft', lengthFt: 16 },
-      { id: 'trs-12', label: '12 ft', lengthFt: 12 },
       { id: 'trs-10', label: '10 ft', lengthFt: 10 },
+      { id: 'trs-8', label: '8 ft', lengthFt: 8 },
+      { id: 'trs-7', label: '7 ft', lengthFt: 7 },
+      { id: 'trs-6', label: '6 ft', lengthFt: 6 },
+      { id: 'trs-5', label: '5 ft', lengthFt: 5 },
     ],
   },
   brackets: {
@@ -94,7 +95,7 @@ export const DEFAULT_PART = {
   braces: 'brc-7',
   planks: 'plk-7',
   brackets: 'brk-2',
-  trusses: 'trs-12',
+  trusses: 'trs-7',
 };
 
 export function getPart(categoryKey, partId) {

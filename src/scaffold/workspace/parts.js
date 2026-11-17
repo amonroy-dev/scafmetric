@@ -273,14 +273,20 @@ export const BRACKET = { armOdIn: 1.9, strutOdIn: 1.69 };
  * Build a side bracket at a node, projecting horizontally along `dir` ([dx,dy],
  * need not be normalised). Returns an array of meshes.
  */
+export function bracketStrutDropFt(lengthFt) {
+  // The strut ties back to a rosette, so the drop is a whole number of rosette
+  // spacings: one for short arms, two for longer ones.
+  const spacing = inchesToFeet(19.6875);
+  return spacing * (lengthFt <= 2.5 ? 1 : 2);
+}
+
 export function buildSideBracket(node, dir, lengthFt, material) {
   const mat = material || MATERIALS.ledger;
   const len = Math.hypot(dir[0], dir[1]) || 1;
   const ux = dir[0] / len, uy = dir[1] / len;
   const base = [node.x, node.y, node.z];
   const tip = [node.x + ux * lengthFt, node.y + uy * lengthFt, node.z];
-  // Strut anchors one bracket-length down the standard (45 degrees).
-  const anchor = [node.x, node.y, node.z - lengthFt];
+  const anchor = [node.x, node.y, node.z - bracketStrutDropFt(lengthFt)];
   return [
     tubeBetween(base, tip, BRACKET.armOdIn, mat),
     tubeBetween(tip, anchor, BRACKET.strutOdIn, mat),
@@ -288,30 +294,118 @@ export function buildSideBracket(node, dir, lengthFt, material) {
 }
 
 // ---------------------------------------------------------------------------
-// Truss — two chords with a zig-zag web, drawn from generic tubing.
+// Truss — a 3-chord TRIANGULAR truss, matching how the source app builds it:
+// one top chord and two bottom chords, with A-frame posts, bottom cross ties
+// and alternating side diagonals over 5 panels. Everything is tube.
+// Local +Y runs along the connection direction.
 // ---------------------------------------------------------------------------
-export const TRUSS = { depthIn: 18, chordOdIn: 1.9, webOdIn: 1.5, panels: 6 };
+export const TRUSS = { panelCount: 5, webHeightIn: 8, baseWidthIn: 10 };
+
+function trussFrame() {
+  const chordRadius = inchesToFeet(STANDARD_TUBE_OD_IN) / 2;
+  const braceRadius = chordRadius * 0.75;
+  const webHeightFt = Math.max(inchesToFeet(TRUSS.webHeightIn), chordRadius * 8);
+  const baseWidthFt = Math.max(inchesToFeet(TRUSS.baseWidthIn), webHeightFt * 0.9);
+  return { chordRadius, braceRadius, webHeightFt, baseWidthFt };
+}
+
+// Every member of the truss as unit-space endpoints: x across, y along the span
+// in [-0.5, 0.5], z up. Shared by the renderer and the weight takeoff.
+export function trussMembers() {
+  const { webHeightFt, baseWidthFt } = trussFrame();
+  const topZ = webHeightFt / 2, bottomZ = -webHeightFt / 2;
+  const leftX = -baseWidthFt / 2, rightX = baseWidthFt / 2;
+  const n = TRUSS.panelCount, step = 1 / n;
+  const members = [];
+
+  // 3 chords, full span
+  members.push({ a: [0, -0.5, topZ], b: [0, 0.5, topZ], chord: true });
+  members.push({ a: [leftX, -0.5, bottomZ], b: [leftX, 0.5, bottomZ], chord: true });
+  members.push({ a: [rightX, -0.5, bottomZ], b: [rightX, 0.5, bottomZ], chord: true });
+
+  for (let i = 0; i <= n; i++) {
+    const y = -0.5 + i * step;
+    members.push({ a: [0, y, topZ], b: [leftX, y, bottomZ], chord: false });   // A-frame post
+    members.push({ a: [0, y, topZ], b: [rightX, y, bottomZ], chord: false });  // A-frame post
+    members.push({ a: [leftX, y, bottomZ], b: [rightX, y, bottomZ], chord: false }); // cross tie
+  }
+  for (let i = 0; i < n; i++) {
+    const y0 = -0.5 + i * step, y1 = y0 + step;
+    const fromTop = i % 2 === 0;
+    members.push(fromTop
+      ? { a: [0, y0, topZ], b: [leftX, y1, bottomZ], chord: false }
+      : { a: [leftX, y0, bottomZ], b: [0, y1, topZ], chord: false });
+    members.push(fromTop
+      ? { a: [0, y0, topZ], b: [rightX, y1, bottomZ], chord: false }
+      : { a: [rightX, y0, bottomZ], b: [0, y1, topZ], chord: false });
+  }
+  return members;
+}
+
+/** Total tubing length in a truss of the given span, for the weight takeoff. */
+export function trussMemberLengthFt(spanFt) {
+  let total = 0;
+  for (const m of trussMembers()) {
+    const dx = m.b[0] - m.a[0];
+    const dy = (m.b[1] - m.a[1]) * spanFt;
+    const dz = m.b[2] - m.a[2];
+    total += Math.hypot(dx, dy, dz);
+  }
+  return total;
+}
 
 export function buildTruss(a, b, material) {
   const mat = material || MATERIALS.ledger;
-  const depth = inchesToFeet(TRUSS.depthIn);
-  const top = [[a[0], a[1], a[2]], [b[0], b[1], b[2]]];
-  const bot = [[a[0], a[1], a[2] - depth], [b[0], b[1], b[2] - depth]];
-  const out = [
-    tubeBetween(top[0], top[1], TRUSS.chordOdIn, mat),
-    tubeBetween(bot[0], bot[1], TRUSS.chordOdIn, mat),
+  const { chordRadius, braceRadius } = trussFrame();
+  const av = new THREE.Vector3(a[0], a[1], a[2]);
+  const bv = new THREE.Vector3(b[0], b[1], b[2]);
+  const yAxis = new THREE.Vector3().subVectors(bv, av);
+  const span = yAxis.length() || 1e-6;
+  yAxis.divideScalar(span);
+  // Local Z is world up unless the member is vertical; X completes the frame.
+  let zAxis = new THREE.Vector3(0, 0, 1);
+  if (Math.abs(yAxis.dot(zAxis)) > 0.999) zAxis = new THREE.Vector3(0, 1, 0);
+  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+  zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  const mid = new THREE.Vector3().addVectors(av, bv).multiplyScalar(0.5);
+
+  const toWorld = p => [
+    mid.x + yAxis.x * p[1] * span + xAxis.x * p[0] + zAxis.x * p[2],
+    mid.y + yAxis.y * p[1] * span + xAxis.y * p[0] + zAxis.y * p[2],
+    mid.z + yAxis.z * p[1] * span + xAxis.z * p[0] + zAxis.z * p[2],
   ];
-  const lerp = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
-  for (let i = 0; i < TRUSS.panels; i++) {
-    const t0 = i / TRUSS.panels, t1 = (i + 1) / TRUSS.panels;
-    // alternate the web direction to form the zig-zag
-    const from = i % 2 === 0 ? lerp(top[0], top[1], t0) : lerp(bot[0], bot[1], t0);
-    const to = i % 2 === 0 ? lerp(bot[0], bot[1], t1) : lerp(top[0], top[1], t1);
-    out.push(tubeBetween(from, to, TRUSS.webOdIn, mat));
-    out.push(tubeBetween(lerp(top[0], top[1], t1), lerp(bot[0], bot[1], t1), TRUSS.webOdIn, mat));
+
+  const out = [];
+  for (const m of trussMembers()) {
+    const od = (m.chord ? chordRadius : braceRadius) * 2 * 12; // back to inches
+    out.push(tubeBetween(toWorld(m.a), toWorld(m.b), od, mat));
   }
   return out;
 }
 
 // Guardrail rail/post tubing.
 export const GUARDRAIL_OD_IN = 1.69;
+
+/** Truss members as world-space segments between two connection points. */
+export function trussWorldMembers(a, b) {
+  const { chordRadius, braceRadius } = trussFrame();
+  const av = new THREE.Vector3(a[0], a[1], a[2]);
+  const bv = new THREE.Vector3(b[0], b[1], b[2]);
+  const yAxis = new THREE.Vector3().subVectors(bv, av);
+  const span = yAxis.length() || 1e-6;
+  yAxis.divideScalar(span);
+  let zAxis = new THREE.Vector3(0, 0, 1);
+  if (Math.abs(yAxis.dot(zAxis)) > 0.999) zAxis = new THREE.Vector3(0, 1, 0);
+  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
+  zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  const mid = new THREE.Vector3().addVectors(av, bv).multiplyScalar(0.5);
+  const toWorld = p => [
+    mid.x + yAxis.x * p[1] * span + xAxis.x * p[0] + zAxis.x * p[2],
+    mid.y + yAxis.y * p[1] * span + xAxis.y * p[0] + zAxis.y * p[2],
+    mid.z + yAxis.z * p[1] * span + xAxis.z * p[0] + zAxis.z * p[2],
+  ];
+  return trussMembers().map(m => ({
+    a: toWorld(m.a), b: toWorld(m.b),
+    odIn: (m.chord ? chordRadius : braceRadius) * 2 * 12,
+  }));
+}

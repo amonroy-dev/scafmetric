@@ -15,7 +15,7 @@ import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.j
 import { deriveBom, bomToCsv } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
 import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
-import { exportScaffoldDxf } from './dxf.js';
+import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 
 const TOOL_META = {
   select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
@@ -200,6 +200,7 @@ class Workspace {
     this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4 });
     this.beamMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x0b4f49, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.5 });
 
+    this.engine.raycaster.params.Line = { threshold: 0.25 };
     this.tools = new Tools(this.engine, this.state, {
       getNodeMeshes: () => this.nodeGroup.children,
       getContentMeshes: () => this.contentGroup.children,
@@ -287,6 +288,7 @@ class Workspace {
            <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic view">ORTHO</button>
            <button type="button" class="sfw-toggle" data-toggle="panlock" title="Lock left-drag to pan">PAN</button>
            <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">LOADS</button>
+           <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Line (centerline) view">LINE</button>
          </div>
          <div class="sfw-toggles">
            <button type="button" class="sfw-toggle" data-act="undo" title="Undo (Ctrl+Z)">UNDO</button>
@@ -321,6 +323,13 @@ class Workspace {
       const on = !this.engine.panLock;
       this.engine.setPanLock(on);
       btn.classList.toggle('is-on', on);
+    } else if (name === 'skeleton') {
+      this.skeleton = !this.skeleton;
+      btn.classList.toggle('is-on', this.skeleton);
+      this._rebuildContent();
+      this.$('sfw-hint').textContent = this.skeleton
+        ? 'Line view: members drawn as centerlines with joints, the same model the DXF exports.'
+        : 'Solid view.';
     } else if (name === 'legloads') {
       this.showLegLoads = !this.showLegLoads;
       btn.classList.toggle('is-on', this.showLegLoads);
@@ -409,6 +418,7 @@ class Workspace {
 
   _rebuildContent() {
     this.contentGroup.clear();
+    if (this.skeleton) { this._rebuildSkeleton(); this._rebuildLabels(); return; }
     const g = this.state.geometry();
     for (const s of g.standards) {
       const mat = this._matFor(s.id, MATERIALS.steel);
@@ -461,6 +471,42 @@ class Workspace {
       }
     }
     this._rebuildLabels();
+  }
+
+  // Centerline (skeleton) view: one line per member plus joint markers. Picking
+  // still works because each line carries its member id.
+  _rebuildSkeleton() {
+    const model = buildCenterlineModel(this.state);
+    const colours = {
+      [LAYERS.standard]: 0x9fb2cc,
+      [LAYERS.ledger]: 0x3dd9c9,
+      [LAYERS.brace]: 0x8a7bd8,
+      [LAYERS.truss]: 0xffc266,
+      [LAYERS.bracket]: 0x6ee7b7,
+      [LAYERS.guardrail]: 0xffa41b,
+    };
+    this._lineMats = this._lineMats || {};
+    for (const seg of model.segments) {
+      const selected = seg.id && this.selection.includes(seg.id);
+      const colour = selected ? 0xa855f7 : (colours[seg.layer] ?? 0xaebbd1);
+      const key = `${colour}`;
+      if (!this._lineMats[key]) this._lineMats[key] = new THREE.LineBasicMaterial({ color: colour });
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(...seg.start), new THREE.Vector3(...seg.end),
+      ]);
+      const line = new THREE.Line(geo, this._lineMats[key]);
+      line.userData = { id: seg.id, kind: 'line' };
+      this.contentGroup.add(line);
+    }
+    // Joint markers so splices and connections read clearly.
+    this._jointGeo = this._jointGeo || new THREE.SphereGeometry(0.1, 8, 6);
+    this._jointMat = this._jointMat || new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (const p of model.points) {
+      const m = new THREE.Mesh(this._jointGeo, this._jointMat);
+      m.position.set(p[0], p[1], p[2]);
+      m.raycast = () => {};
+      this.contentGroup.add(m);
+    }
   }
 
   _refreshProps() {

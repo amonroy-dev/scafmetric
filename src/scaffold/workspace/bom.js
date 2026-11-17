@@ -7,10 +7,10 @@
 import { tubeWeightPerFoot, STEEL_DENSITY_LB_FT3 } from '../catalog.js';
 import {
   WOOD_SILL, JACK_PLATE, JACK_STEM, HANDLE_NUT, BASE_COLLAR,
-  STANDARD_TUBE_OD_IN, PLANK, inchesToFeet,
+  STANDARD_TUBE_OD_IN, PLANK, inchesToFeet, trussMemberLengthFt, bracketStrutDropFt,
 } from './parts.js';
 
-export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Diagonals', 'Brackets', 'Planks'];
+export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Trusses', 'Diagonals', 'Brackets', 'Guardrails', 'Planks'];
 
 // Softwood sill pad; everything else is steel.
 const WOOD_DENSITY_LB_FT3 = 35;
@@ -112,6 +112,21 @@ export function deriveBom(state) {
     add('Diagonals', `len${sizeKey(len)}`, `Diagonal brace · ${formatFeetInches(len)}`, 1, perFootBrace * len);
   }
 
+  if (state.trusses) {
+    for (const t of state.trusses.values()) {
+      const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
+      add('Trusses', `len${sizeKey(len)}`, `Triangular truss · ${formatFeetInches(len)}`,
+        1, trussWeightLb(len, state));
+    }
+  }
+  if (state.guardrails) {
+    for (const g of state.guardrails.values()) {
+      const len = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]);
+      const label = g.kind === 'post' ? 'Guardrail post' : 'Guardrail rail';
+      add('Guardrails', `${g.kind}${sizeKey(len)}`, `${label} · ${formatFeetInches(len)}`,
+        1, tubeWeightPerFoot(state.components.brace) * len);
+    }
+  }
   if (state.brackets) {
     for (const br of state.brackets.values()) {
       add('Brackets', `len${sizeKey(br.lengthFt)}`,
@@ -150,8 +165,12 @@ export function deriveBom(state) {
 // A side bracket is an arm tube plus a diagonal strut; weight follows the tubing.
 export function bracketWeightLb(lengthFt, state) {
   const perFoot = tubeWeightPerFoot(state.components.ledger);
-  const strut = Math.hypot(lengthFt, lengthFt); // 45-degree strut
+  const strut = Math.hypot(lengthFt, bracketStrutDropFt(lengthFt));
   return perFoot * (lengthFt + strut);
+}
+
+export function trussWeightLb(spanFt, state) {
+  return tubeWeightPerFoot(state.components.ledger) * trussMemberLengthFt(spanFt);
 }
 
 // Plain-text export (CSV) for the BOM table.
