@@ -28,10 +28,51 @@ export class ScaffoldState {
     this.braces = new Map();    // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }
     this._seq = 0;
+    this._history = [];
+    this._future = [];
     this.onChange = opts.onChange || (() => {});
   }
 
   _id(p) { return `${p}${++this._seq}`; }
+
+  // --- undo / redo ---------------------------------------------------------
+  snapshot() {
+    return JSON.stringify({
+      standards: [...this.standards], ledgers: [...this.ledgers],
+      braces: [...this.braces], planks: [...this.planks],
+      seq: this._seq, base: { ...this.base },
+    });
+  }
+  restore(json) {
+    const d = JSON.parse(json);
+    this.standards = new Map(d.standards);
+    this.ledgers = new Map(d.ledgers);
+    this.braces = new Map(d.braces);
+    this.planks = new Map(d.planks);
+    this._seq = d.seq;
+    Object.assign(this.base, d.base);
+    this._emit();
+  }
+  _pushHistory() {
+    this._history.push(this.snapshot());
+    if (this._history.length > 100) this._history.shift();
+    this._future.length = 0;
+  }
+  resetHistory() { this._history.length = 0; this._future.length = 0; }
+  canUndo() { return this._history.length > 0; }
+  canRedo() { return this._future.length > 0; }
+  undo() {
+    if (!this._history.length) return false;
+    this._future.push(this.snapshot());
+    this.restore(this._history.pop());
+    return true;
+  }
+  redo() {
+    if (!this._future.length) return false;
+    this._history.push(this.snapshot());
+    this.restore(this._future.pop());
+    return true;
+  }
   snap(v) { const s = this.snapStep; return s > 0 ? Math.round(v / s) * s : v; }
   _emit() { this.onChange(); }
 
@@ -39,13 +80,13 @@ export class ScaffoldState {
   baseOffsetFt() {
     return getStandardBaseOffsetFt(this.base.jackExtensionIn, this.base.showWoodSill, this.base.showBaseCollar);
   }
-  setBase(patch) { Object.assign(this.base, patch); this._emit(); }
+  setBase(patch) { this._pushHistory(); Object.assign(this.base, patch); this._emit(); }
 
   standardHeightFt(s) { return s.segments.reduce((a, b) => a + b, 0); }
   standardTopZ(s) { return this.baseOffsetFt() + this.standardHeightFt(s); }
 
   // --- placement -----------------------------------------------------------
-  addStandard(x, y, lengthFt) {
+  addStandard(x, y, lengthFt) { this._pushHistory();
     const sx = this.snap(x), sy = this.snap(y);
     const existing = this.standardAt(sx, sy);
     if (existing) { existing.segments.push(lengthFt); this._emit(); return existing; }
@@ -62,14 +103,15 @@ export class ScaffoldState {
   popSegment(id) {
     const s = this.standards.get(id);
     if (!s) return;
+    this._pushHistory();
     if (s.segments.length <= 1) this.standards.delete(id);
     else s.segments.pop();
     this._emit();
   }
 
-  addLedger(a, b) { const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
-  addBrace(a, b) { const v = { id: this._id('B'), a: [...a], b: [...b] }; this.braces.set(v.id, v); this._emit(); return v; }
-  addPlank(a, b) {
+  addLedger(a, b) { this._pushHistory(); const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
+  addBrace(a, b) { this._pushHistory(); const v = { id: this._id('B'), a: [...a], b: [...b] }; this.braces.set(v.id, v); this._emit(); return v; }
+  addPlank(a, b) { this._pushHistory();
     const p = {
       id: this._id('P'),
       x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]),
@@ -79,13 +121,13 @@ export class ScaffoldState {
     this.planks.set(p.id, p); this._emit(); return p;
   }
 
-  remove(id) {
+  remove(id) { this._pushHistory();
     for (const m of [this.standards, this.ledgers, this.braces, this.planks]) {
       if (m.delete(id)) { this._emit(); return true; }
     }
     return false;
   }
-  removeMany(ids) {
+  removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
       for (const m of [this.standards, this.ledgers, this.braces, this.planks]) {
@@ -95,7 +137,7 @@ export class ScaffoldState {
     if (n) this._emit();
     return n;
   }
-  clear() { this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this._emit(); }
 
   // Connection nodes along each standard, at the real connection spacing.
   nodes() {

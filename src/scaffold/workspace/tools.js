@@ -72,9 +72,11 @@ export class Tools {
   _clearGhost() { this.ghostGroup.clear(); }
   _clearOverlay() { this.overlayGroup.clear(); }
 
-  // True while the user is driving the camera (so we never fight navigation).
+  // Pure camera gestures we never intercept. Shift is NOT included: shift+drag
+  // pans (handled by the engine) while shift+click still reaches the tool, which
+  // is how the source app does bulk fills.
   _navGesture(e) {
-    return this.engine.panLock || e.shiftKey || e.altKey || this.engine._modifiers.space;
+    return this.engine.panLock || e.altKey || this.engine._modifiers.space;
   }
 
   _nearestNode(e) {
@@ -90,8 +92,8 @@ export class Tools {
 
   _onDown(e) {
     if (e.button !== 0 || this._navGesture(e)) return;
-    this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey };
-    if (this.tool === 'select') {
+    this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
+    if (this.tool === 'select' && !e.shiftKey) {
       const g = this.engine.projectClientToGround(e.clientX, e.clientY);
       if (g) this._marquee = { start: { x: g.x, y: g.y }, current: { x: g.x, y: g.y }, startClientX: e.clientX, currentClientX: e.clientX };
     }
@@ -121,7 +123,7 @@ export class Tools {
     this._clearOverlay();
     if (!down) return;
     const dragged = down.moved >= DRAG_PX;
-    if (this.tool === 'select' && marquee && dragged) { this._finishMarquee(marquee, down.shift); return; }
+    if (this.tool === 'select' && marquee && dragged) { this._finishMarquee(marquee, down.ctrl); return; }
     if (dragged) return; // camera/aborted drag
     this._act(e);
   }
@@ -178,6 +180,13 @@ export class Tools {
     // node -> node connect tools
     const node = this._nearestNode(e);
     if (!node) return;
+    // Shift+click fills every adjacent bay at this level in one go, like the
+    // source app's shift-fill on the diagonal/ledger tools.
+    if (e.shiftKey && (this.tool === 'ledger' || this.tool === 'brace')) {
+      this.pending = null;
+      this._bulkFill(node.level);
+      return;
+    }
     if (!this.pending) { this.pending = node; return; }
     const a = this.pending, b = node;
     this.pending = null;
@@ -186,6 +195,52 @@ export class Tools {
     if (this.tool === 'ledger') s.addLedger(av, bv);
     else if (this.tool === 'brace') s.addBrace(av, bv);
     else if (this.tool === 'plank') s.addPlank(av, bv);
+  }
+
+  // Columns that are neighbours along X or Y with nothing in between.
+  _adjacentPairs() {
+    const cols = [...this.state.standards.values()];
+    const pairs = [];
+    const byY = new Map(), byX = new Map();
+    for (const c of cols) {
+      if (!byY.has(c.y)) byY.set(c.y, []);
+      byY.get(c.y).push(c);
+      if (!byX.has(c.x)) byX.set(c.x, []);
+      byX.get(c.x).push(c);
+    }
+    for (const arr of byY.values()) {
+      arr.sort((a, b) => a.x - b.x);
+      for (let i = 0; i < arr.length - 1; i++) pairs.push([arr[i], arr[i + 1]]);
+    }
+    for (const arr of byX.values()) {
+      arr.sort((a, b) => a.y - b.y);
+      for (let i = 0; i < arr.length - 1; i++) pairs.push([arr[i], arr[i + 1]]);
+    }
+    return pairs;
+  }
+
+  // A diagonal spans 4 rosette levels in the source app.
+  static get BRACE_DELTA_LIFT() { return 4; }
+
+  _bulkFill(level) {
+    const nodes = this.state.nodes();
+    const byCol = new Map();
+    for (const n of nodes) {
+      if (!byCol.has(n.columnId)) byCol.set(n.columnId, new Map());
+      byCol.get(n.columnId).set(n.level, n);
+    }
+    const delta = this.tool === 'brace' ? Tools.BRACE_DELTA_LIFT : 0;
+    let added = 0;
+    for (const [a, b] of this._adjacentPairs()) {
+      const na = byCol.get(a.id)?.get(level);
+      const nb = byCol.get(b.id)?.get(level + delta);
+      if (!na || !nb) continue;
+      const av = [na.x, na.y, na.z], bv = [nb.x, nb.y, nb.z];
+      if (this.tool === 'ledger') this.state.addLedger(av, bv);
+      else this.state.addBrace(av, bv);
+      added++;
+    }
+    this.hooks.onBulkFill?.(added, this.tool);
   }
 
   _key(e) {

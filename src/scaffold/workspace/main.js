@@ -14,10 +14,10 @@ import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 
 const TOOL_META = {
-  select: { label: 'Select', icon: '⬚', hint: 'Click to select. Drag left-to-right = window, right-to-left = crossing. Shift adds. Delete removes.' },
+  select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
   standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
-  ledger: { label: 'Ledger', icon: '─', hint: 'Click two connection nodes to run a horizontal ledger.' },
-  brace: { label: 'Brace', icon: '╱', hint: 'Click two connection nodes to run a diagonal brace.' },
+  ledger: { label: 'Ledger', icon: '─', hint: 'Click two rosette nodes to run a ledger. SHIFT+click a node to fill every bay at that level.' },
+  brace: { label: 'Brace', icon: '╱', hint: 'Click two rosette nodes for a diagonal. SHIFT+click a node to brace every bay at that level.' },
   plank: { label: 'Plank', icon: '▭', hint: 'Click two nodes on opposite corners to deck a bay.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
@@ -91,7 +91,7 @@ function labelSprite(text) {
   g.fillText(text, 128, 34);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(2.6, 0.65, 1);
+  sp.scale.set(1.9, 0.48, 1);
   return sp;
 }
 
@@ -107,7 +107,22 @@ class Workspace {
     this.showLegLoads = true;
     this._importable = [];
     for (const el of root.querySelectorAll('[data-sfw-close]')) el.addEventListener('click', () => this.close());
-    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !root.hidden) this.close(); });
+    document.addEventListener('keydown', e => {
+      if (this.root.hidden) return;
+      if (e.key === 'Escape') { this.close(); return; }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) this.state?.redo(); else this.state?.undo();
+        this.selection = [];
+        this._sync();
+      } else if (mod && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        this.state?.redo();
+        this.selection = [];
+        this._sync();
+      }
+    });
   }
 
   open() {
@@ -121,7 +136,11 @@ class Workspace {
   _init() {
     const stage = this.$('sfw-stage');
     this.engine = new Engine(stage);
-    this.viewcube = new ViewCube(this.engine, 92, { onHome: () => this._frame() });
+    this.engine.onProjectionChange = mode => {
+      const btn = this.root.querySelector('[data-toggle="ortho"]');
+      if (btn) btn.classList.toggle('is-on', mode === 'orthographic');
+    };
+    this.viewcube = new ViewCube(this.engine, 92, { onHome: () => { this.engine.setView('home'); this._frame(); } });
     stage.appendChild(this.viewcube.el);
 
     this.state = new ScaffoldState({
@@ -145,6 +164,11 @@ class Workspace {
       getContentMeshes: () => this.contentGroup.children,
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); },
       onToolChange: name => this._applyToolUi(name),
+      onBulkFill: (n, tool) => {
+        this.$('sfw-hint').textContent = n
+          ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
+          : 'Nothing to fill at that level — place more standards first.';
+      },
     });
 
     this._buildToolbar();
@@ -152,6 +176,7 @@ class Workspace {
     this._bindInputs();
     this.tools.setCatalog('standards', DEFAULT_PART.standards);
     this._seedStarter();
+    this.state.resetHistory();
     this._sync();
   }
 
@@ -179,6 +204,10 @@ class Workspace {
            <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic view">ORTHO</button>
            <button type="button" class="sfw-toggle" data-toggle="panlock" title="Lock left-drag to pan">PAN</button>
            <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">LOADS</button>
+         </div>
+         <div class="sfw-toggles">
+           <button type="button" class="sfw-toggle" data-act="undo" title="Undo (Ctrl+Z)">UNDO</button>
+           <button type="button" class="sfw-toggle" data-act="redo" title="Redo (Ctrl+Shift+Z)">REDO</button>
          </div>`;
     for (const btn of bar.querySelectorAll('[data-tool]')) {
       btn.addEventListener('click', () => {
@@ -190,6 +219,13 @@ class Workspace {
     }
     for (const btn of bar.querySelectorAll('[data-toggle]')) {
       btn.addEventListener('click', () => this._toggle(btn.dataset.toggle, btn));
+    }
+    for (const btn of bar.querySelectorAll('[data-act]')) {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.act === 'undo') this.state.undo(); else this.state.redo();
+        this.selection = [];
+        this._sync();
+      });
     }
   }
 

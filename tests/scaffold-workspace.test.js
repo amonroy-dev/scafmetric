@@ -134,3 +134,43 @@ test('clear removes everything', () => {
   assert.equal(s.ledgers.size, 0);
   assert.equal(stateBounds(s), null);
 });
+
+test('undo and redo restore placements', () => {
+  const s = new ScaffoldState({ snapStep: 1 });
+  s.addStandard(0, 0, SEG);
+  s.resetHistory();
+  assert.equal(s.canUndo(), false);
+
+  s.addStandard(7, 0, SEG);
+  assert.equal(s.standards.size, 2);
+  assert.equal(s.canUndo(), true);
+
+  s.undo();
+  assert.equal(s.standards.size, 1, 'undo removed the second standard');
+  assert.equal(s.canRedo(), true);
+
+  s.redo();
+  assert.equal(s.standards.size, 2, 'redo put it back');
+});
+
+test('undo restores a cleared model', () => {
+  const s = new ScaffoldState({ snapStep: 1 });
+  s.addStandard(0, 0, SEG);
+  s.addLedger([0, 0, 1], [7, 0, 1]);
+  s.resetHistory();
+  s.clear();
+  assert.equal(s.standards.size, 0);
+  s.undo();
+  assert.equal(s.standards.size, 1);
+  assert.equal(s.ledgers.size, 1);
+});
+
+test('undo of a stacked segment drops only that segment', () => {
+  const s = new ScaffoldState({ snapStep: 1 });
+  const st = s.addStandard(0, 0, SEG);
+  s.resetHistory();
+  s.addStandard(0, 0, SEG);
+  assert.equal(s.standards.get(st.id).segments.length, 2);
+  s.undo();
+  assert.equal(s.standards.get(st.id).segments.length, 1);
+});

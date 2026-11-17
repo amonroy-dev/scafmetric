@@ -135,6 +135,7 @@ export class Engine {
     this.controls.target.copy(target);
     this.resize();
     this.controls.update();
+    this.onProjectionChange?.(this.projection);
   }
 
   _addLights() {
@@ -209,6 +210,10 @@ export class Engine {
   }
 
   setView(name) {
+    // Named face views are orthographic (matching the source app); home/iso is
+    // perspective. Without this, a "top" view still splays verticals outward.
+    const isFace = ['top', 'bottom', 'front', 'back', 'right', 'left'].includes(name);
+    this.setProjection(isFace ? 'orthographic' : 'perspective');
     const target = this.controls.target.clone();
     const dist = Math.max(this.camera.position.distanceTo(target), 1);
     const dirs = {
