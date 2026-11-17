@@ -10,10 +10,14 @@
 
 import * as THREE from 'three';
 import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, STANDARD_TUBE_OD_IN } from './parts.js';
-import { getPart, CATEGORY_TOOL } from './catalog.js';
+import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
+import {
+  findClosestUnoccupiedTarget, computeBatchPlan, computeAdjacencyScaleFt,
+  computeLiftAxes, getAdjacentCandidates, maxProjFor, planBlock, BRACE_DELTA_LIFT,
+} from './planning.js';
 
 const DRAG_PX = 4;
-export const TOOLS = ['select', 'standard', 'ledger', 'brace', 'plank', 'erase'];
+export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'plank', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
@@ -93,7 +97,7 @@ export class Tools {
   _onDown(e) {
     if (e.button !== 0 || this._navGesture(e)) return;
     this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
-    if (this.tool === 'select' && !e.shiftKey) {
+    if ((this.tool === 'select' && !e.shiftKey) || this.tool === 'block') {
       const g = this.engine.projectClientToGround(e.clientX, e.clientY);
       if (g) this._marquee = { start: { x: g.x, y: g.y }, current: { x: g.x, y: g.y }, startClientX: e.clientX, currentClientX: e.clientX };
     }
@@ -123,6 +127,10 @@ export class Tools {
     this._clearOverlay();
     if (!down) return;
     const dragged = down.moved >= DRAG_PX;
+    if (this.tool === 'block' && marquee && dragged) {
+      this.placeBlock(normalizeRect(marquee.start, marquee.current));
+      return;
+    }
     if (this.tool === 'select' && marquee && dragged) { this._finishMarquee(marquee, down.ctrl); return; }
     if (dragged) return; // camera/aborted drag
     this._act(e);
@@ -135,7 +143,7 @@ export class Tools {
     const w = Math.max(r.xMax - r.xMin, 1e-4);
     const d = Math.max(r.yMax - r.yMin, 1e-4);
     const crossing = m.currentClientX < m.startClientX;
-    const color = crossing ? 0xffa41b : 0x3dd9c9;
+    const color = this.tool === 'block' ? 0xffa41b : (crossing ? 0xffa41b : 0x3dd9c9);
     const fill = new THREE.Mesh(PLANE_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide }));
     fill.position.set((r.xMin + r.xMax) / 2, (r.yMin + r.yMax) / 2, 0.04);
     fill.scale.set(w, d, 1);
@@ -177,70 +185,131 @@ export class Tools {
       this.hooks.onSelectionChange?.([...this.selection]);
       return;
     }
-    // node -> node connect tools
+    // Connect tools. Ledgers and braces are ONE CLICK: the target is found
+    // automatically (nearest unoccupied adjacent standard), as in the source app.
     const node = this._nearestNode(e);
     if (!node) return;
-    // Shift+click fills every adjacent bay at this level in one go, like the
-    // source app's shift-fill on the diagonal/ledger tools.
-    if (e.shiftKey && (this.tool === 'ledger' || this.tool === 'brace')) {
-      this.pending = null;
-      this._bulkFill(node.level);
+
+    if (this.tool === 'ledger') {
+      if (e.shiftKey) { this._batchFillLedgers(node.level); return; }
+      const target = this.ledgerTargetFor(node);
+      if (target) s.addLedger([node.x, node.y, node.z], [target.x, target.y, target.z]);
       return;
     }
+    if (this.tool === 'brace') {
+      if (e.shiftKey) { this._batchFillBraces(node.level); return; }
+      const target = this.braceTargetFor(node);
+      if (target) s.addBrace([node.x, node.y, node.z], [target.x, target.y, target.z]);
+      return;
+    }
+    // Planks still take two corner nodes.
     if (!this.pending) { this.pending = node; return; }
-    const a = this.pending, b = node;
+    const a = this.pending;
     this.pending = null;
-    if (a.x === b.x && a.y === b.y && Math.abs(a.z - b.z) < 1e-6) return;
-    const av = [a.x, a.y, a.z], bv = [b.x, b.y, b.z];
-    if (this.tool === 'ledger') s.addLedger(av, bv);
-    else if (this.tool === 'brace') s.addBrace(av, bv);
-    else if (this.tool === 'plank') s.addPlank(av, bv);
+    if (a.x === node.x && a.y === node.y) return;
+    s.addPlank([a.x, a.y, a.z], [node.x, node.y, node.z]);
   }
 
-  // Columns that are neighbours along X or Y with nothing in between.
-  _adjacentPairs() {
-    const cols = [...this.state.standards.values()];
-    const pairs = [];
-    const byY = new Map(), byX = new Map();
-    for (const c of cols) {
-      if (!byY.has(c.y)) byY.set(c.y, []);
-      byY.get(c.y).push(c);
-      if (!byX.has(c.x)) byX.set(c.x, []);
-      byX.get(c.x).push(c);
+  _nodesAtLevel(level) { return this.state.nodes().filter(n => n.level === level); }
+
+  _ledgerExists(a, b) {
+    for (const l of this.state.ledgers.values()) {
+      const m1 = Math.hypot(l.a[0] - a.x, l.a[1] - a.y) < 1e-6 && Math.abs(l.a[2] - a.z) < 1e-6
+        && Math.hypot(l.b[0] - b.x, l.b[1] - b.y) < 1e-6 && Math.abs(l.b[2] - b.z) < 1e-6;
+      const m2 = Math.hypot(l.a[0] - b.x, l.a[1] - b.y) < 1e-6 && Math.abs(l.a[2] - b.z) < 1e-6
+        && Math.hypot(l.b[0] - a.x, l.b[1] - a.y) < 1e-6 && Math.abs(l.b[2] - a.z) < 1e-6;
+      if (m1 || m2) return true;
     }
-    for (const arr of byY.values()) {
-      arr.sort((a, b) => a.x - b.x);
-      for (let i = 0; i < arr.length - 1; i++) pairs.push([arr[i], arr[i + 1]]);
-    }
-    for (const arr of byX.values()) {
-      arr.sort((a, b) => a.y - b.y);
-      for (let i = 0; i < arr.length - 1; i++) pairs.push([arr[i], arr[i + 1]]);
-    }
-    return pairs;
+    return false;
   }
 
-  // A diagonal spans 4 rosette levels in the source app.
-  static get BRACE_DELTA_LIFT() { return 4; }
+  /** Nearest unoccupied adjacent node at the same lift. */
+  ledgerTargetFor(node) {
+    const nodes = this._nodesAtLevel(node.level);
+    return findClosestUnoccupiedTarget(node, nodes, c => !this._ledgerExists(node, c));
+  }
 
-  _bulkFill(level) {
-    const nodes = this.state.nodes();
-    const byCol = new Map();
-    for (const n of nodes) {
-      if (!byCol.has(n.columnId)) byCol.set(n.columnId, new Map());
-      byCol.get(n.columnId).set(n.level, n);
+  /** Diagonal target: nearest adjacent standard, 4 rosette levels up. */
+  braceTargetFor(node) {
+    const nodes = this._nodesAtLevel(node.level);
+    const scale = computeAdjacencyScaleFt(nodes);
+    const axes = computeLiftAxes(nodes, scale);
+    if (!axes) return null;
+    const adj = getAdjacentCandidates(node, nodes, axes, maxProjFor(scale), null);
+    let best = null, bestD = Infinity;
+    for (const c of adj) {
+      const d = Math.hypot(c.x - node.x, c.y - node.y);
+      if (d < bestD) { bestD = d; best = c; }
     }
-    const delta = this.tool === 'brace' ? Tools.BRACE_DELTA_LIFT : 0;
+    if (!best) return null;
+    const up = this.state.nodes().find(n =>
+      n.columnId === best.columnId && n.level === node.level + BRACE_DELTA_LIFT);
+    return up || null;
+  }
+
+  _batchFillLedgers(level) {
+    const nodes = this._nodesAtLevel(level);
+    const plan = computeBatchPlan(nodes, (a, b) => !this._ledgerExists(a, b));
+    for (const { a, b } of plan) this.state.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    this.hooks.onBulkFill?.(plan.length, 'ledger');
+  }
+
+  _batchFillBraces(level) {
+    const nodes = this._nodesAtLevel(level);
+    const plan = computeBatchPlan(nodes, null);
     let added = 0;
-    for (const [a, b] of this._adjacentPairs()) {
-      const na = byCol.get(a.id)?.get(level);
-      const nb = byCol.get(b.id)?.get(level + delta);
-      if (!na || !nb) continue;
-      const av = [na.x, na.y, na.z], bv = [nb.x, nb.y, nb.z];
-      if (this.tool === 'ledger') this.state.addLedger(av, bv);
-      else this.state.addBrace(av, bv);
+    const all = this.state.nodes();
+    for (const { a, b } of plan) {
+      const up = all.find(n => n.columnId === b.columnId && n.level === level + BRACE_DELTA_LIFT);
+      if (!up) continue;
+      this.state.addBrace([a.x, a.y, a.z], [up.x, up.y, up.z]);
       added++;
     }
-    this.hooks.onBulkFill?.(added, this.tool);
+    this.hooks.onBulkFill?.(added, 'brace');
+  }
+
+  /** Block tool: lay out a full scaffold block over the dragged ground rect. */
+  placeBlock(rect) {
+    const s = this.state;
+    const plan = planBlock({
+      x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
+      heightFt: this.blockHeightFt ?? 19.6875,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
+      ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
+      maxLevel: 0,
+    });
+    if (!plan) return 0;
+
+    for (const st of plan.standards) {
+      for (const len of st.segments) s.addStandard(st.x, st.y, len);
+    }
+    // Levels available now that the standards exist.
+    const all = s.nodes();
+    const maxLevel = all.reduce((m, n) => Math.max(m, n.level), 0);
+    const replan = planBlock({
+      x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
+      heightFt: this.blockHeightFt ?? 19.6875,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
+      ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
+      maxLevel,
+    });
+    const nodeAt = (x, y, level) => all.find(n =>
+      Math.hypot(n.x - x, n.y - y) < 1e-6 && n.level === level);
+
+    for (const l of replan.ledgers) {
+      const a = nodeAt(l.a.x, l.a.y, l.level), b = nodeAt(l.b.x, l.b.y, l.level);
+      if (a && b) s.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    }
+    for (const br of replan.braces) {
+      const a = nodeAt(br.a.x, br.a.y, br.level), b = nodeAt(br.b.x, br.b.y, br.toLevel);
+      if (a && b) s.addBrace([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    }
+    for (const d of replan.decks) {
+      const a = nodeAt(d.x0, d.y0, d.level), b = nodeAt(d.x1, d.y1, d.level);
+      if (a && b) s.addPlank([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    }
+    this.hooks.onBulkFill?.(plan.standards.length, 'block');
+    return plan.standards.length;
   }
 
   _key(e) {
@@ -256,7 +325,7 @@ export class Tools {
 
   _updateGhost(e) {
     this._clearGhost();
-    if (this.tool === 'select' || this.tool === 'erase') return;
+    if (this.tool === 'select' || this.tool === 'erase' || this.tool === 'block') return;
     const mat = MATERIALS.ghost;
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
@@ -280,12 +349,21 @@ export class Tools {
       marker.position.set(node.x, node.y, node.z);
       this.ghostGroup.add(marker);
     }
-    if (this.pending && node) {
+    if (!node) return;
+    // Ledger/brace preview the auto-chosen target, so one click is predictable.
+    if (this.tool === 'ledger') {
+      const t = this.ledgerTargetFor(node);
+      if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.9, mat));
+      return;
+    }
+    if (this.tool === 'brace') {
+      const t = this.braceTargetFor(node);
+      if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.69, mat));
+      return;
+    }
+    if (this.pending) {
       const a = this.pending;
-      const av = [a.x, a.y, a.z], bv = [node.x, node.y, node.z];
-      if (this.tool === 'ledger') this.ghostGroup.add(tubeBetween(av, bv, 1.9, mat));
-      else if (this.tool === 'brace') this.ghostGroup.add(tubeBetween(av, bv, 1.69, mat));
-      else this.ghostGroup.add(plankDeck(a.x, a.y, node.x, node.y, Math.min(a.z, node.z), mat));
+      this.ghostGroup.add(plankDeck(a.x, a.y, node.x, node.y, Math.min(a.z, node.z), mat));
     }
   }
 

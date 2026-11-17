@@ -15,10 +15,11 @@ import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.j
 
 const TOOL_META = {
   select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
+  block: { label: 'Block', icon: '▦', hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck.' },
   standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
-  ledger: { label: 'Ledger', icon: '─', hint: 'Click two rosette nodes to run a ledger. SHIFT+click a node to fill every bay at that level.' },
-  brace: { label: 'Brace', icon: '╱', hint: 'Click two rosette nodes for a diagonal. SHIFT+click a node to brace every bay at that level.' },
-  plank: { label: 'Plank', icon: '▭', hint: 'Click two nodes on opposite corners to deck a bay.' },
+  ledger: { label: 'Ledger', icon: '─', hint: 'ONE click on a rosette node runs a ledger to the nearest open standard. SHIFT+click fills every bay at that level.' },
+  brace: { label: 'Brace', icon: '╱', hint: 'ONE click places a diagonal to the next standard, 4 rosette levels up. SHIFT+click braces every bay at that level.' },
+  plank: { label: 'Plank', icon: '▭', hint: 'Click two rosette nodes on opposite corners to deck a bay with best-fit 9 in / 6 in boards.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
@@ -42,7 +43,8 @@ const TEMPLATE = `
       </div>
       <div class="sfw-group">
         <h3>Base</h3>
-        <label>Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
+        <label>Block height<span class="sfw-u"><input type="number" id="sfw-blockh" min="2" step="any" value="19.7"><i>ft</i></span></label>
+        <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
         <div class="sfw-counts" id="sfw-counts"></div>
@@ -165,12 +167,19 @@ class Workspace {
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); },
       onToolChange: name => this._applyToolUi(name),
       onBulkFill: (n, tool) => {
-        this.$('sfw-hint').textContent = n
-          ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
-          : 'Nothing to fill at that level — place more standards first.';
+        if (tool === 'block') {
+          this.$('sfw-hint').textContent = n
+            ? `Block placed: ${n} standards with ledgers, bracing and a deck.`
+            : 'Drag a larger rectangle to lay out a block.';
+        } else {
+          this.$('sfw-hint').textContent = n
+            ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
+            : 'Nothing to add at that level — place more standards first.';
+        }
       },
     });
 
+    this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
     this._buildToolbar();
     this._buildCatalogUi();
     this._bindInputs();
@@ -281,6 +290,7 @@ class Workspace {
   }
 
   _bindInputs() {
+    this.$('sfw-blockh').addEventListener('input', e => { this.tools.blockHeightFt = Math.max(2, Number(e.target.value) || 19.7); });
     this.$('sfw-jack').addEventListener('input', e => this.state.setBase({ jackExtensionIn: Math.max(0, Number(e.target.value) || 0) }));
     this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
     this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
