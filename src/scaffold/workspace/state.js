@@ -4,6 +4,7 @@
 
 import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
+import { planGuardrails, deckRectsByHeight } from './guardrails.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -28,6 +29,8 @@ export class ScaffoldState {
     this.braces = new Map();    // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }
     this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
+    this.trusses = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
+    this.guardrails = new Map();// id -> { id, a:[x,y,z], b:[x,y,z], kind }
     this._seq = 0;
     this._history = [];
     this._future = [];
@@ -41,6 +44,7 @@ export class ScaffoldState {
     return JSON.stringify({
       standards: [...this.standards], ledgers: [...this.ledgers],
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
+      trusses: [...this.trusses], guardrails: [...this.guardrails],
       seq: this._seq, base: { ...this.base },
     });
   }
@@ -51,6 +55,8 @@ export class ScaffoldState {
     this.braces = new Map(d.braces);
     this.planks = new Map(d.planks);
     this.brackets = new Map(d.brackets || []);
+    this.trusses = new Map(d.trusses || []);
+    this.guardrails = new Map(d.guardrails || []);
     this._seq = d.seq;
     Object.assign(this.base, d.base);
     this._emit();
@@ -113,6 +119,53 @@ export class ScaffoldState {
 
   addLedger(a, b) { this._pushHistory(); const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
   addBrace(a, b) { this._pushHistory(); const v = { id: this._id('B'), a: [...a], b: [...b] }; this.braces.set(v.id, v); this._emit(); return v; }
+  addTruss(a, b) {
+    this._pushHistory();
+    const t = { id: this._id('T'), a: [...a], b: [...b] };
+    this.trusses.set(t.id, t); this._emit(); return t;
+  }
+
+  /** Generate rails and posts around every decked area. Replaces existing ones. */
+  generateGuardrails(opts = {}) {
+    this._pushHistory();
+    this.guardrails.clear();
+    for (const [z, rects] of deckRectsByHeight(this)) {
+      const { rails, posts } = planGuardrails(rects, z, opts);
+      for (const r of rails) {
+        const g = { id: this._id('G'), a: r.a, b: r.b, kind: 'rail' };
+        this.guardrails.set(g.id, g);
+      }
+      for (const p of posts) {
+        const g = { id: this._id('G'), a: [p.x, p.y, p.z0], b: [p.x, p.y, p.z1], kind: 'post' };
+        this.guardrails.set(g.id, g);
+      }
+    }
+    this._emit();
+    return this.guardrails.size;
+  }
+  clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }
+
+  /** Move or copy whole standard stacks by a delta. Returns the new/moved ids. */
+  transformStacks(ids, dx, dy, copy = false) {
+    this._pushHistory();
+    const out = [];
+    for (const id of ids) {
+      const st = this.standards.get(id);
+      if (!st) continue;
+      if (copy) {
+        const n = { id: this._id('S'), x: this.snap(st.x + dx), y: this.snap(st.y + dy), segments: st.segments.slice() };
+        this.standards.set(n.id, n);
+        out.push(n.id);
+      } else {
+        st.x = this.snap(st.x + dx);
+        st.y = this.snap(st.y + dy);
+        out.push(st.id);
+      }
+    }
+    this._emit();
+    return out;
+  }
+
   addBracket(node, dir, lengthFt) {
     this._pushHistory();
     const b = { id: this._id('K'), x: node.x, y: node.y, z: node.z, dir: [dir[0], dir[1]], lengthFt };
@@ -129,7 +182,7 @@ export class ScaffoldState {
   }
 
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets]) {
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails]) {
       if (m.delete(id)) { this._emit(); return true; }
     }
     return false;
@@ -137,14 +190,14 @@ export class ScaffoldState {
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails]) {
         if (m.delete(id)) { n++; break; }
       }
     }
     if (n) this._emit();
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this._emit(); }
 
   // Connection nodes along each standard, at the real connection spacing.
   nodes() {
@@ -199,7 +252,9 @@ export class ScaffoldState {
     const braces = [...this.braces.values()].map(b => ({ id: b.id, a: b.a, b: b.b }));
     const planks = [...this.planks.values()].map(p => ({ ...p, boards: this.plankBoards(p) }));
     const brackets = [...this.brackets.values()].map(b => ({ ...b }));
-    return { standards, bases, ledgers, braces, planks, brackets, nodes: this.nodes() };
+    const trusses = [...this.trusses.values()].map(t => ({ ...t }));
+    const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
+    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, nodes: this.nodes() };
   }
 
   // --- load takeoff --------------------------------------------------------
@@ -235,6 +290,16 @@ export class ScaffoldState {
     for (const b of this.brackets.values()) {
       const perFoot = tubeWeightPerFoot(this.components.ledger);
       attribute(b.x, b.y, perFoot * (b.lengthFt + Math.hypot(b.lengthFt, b.lengthFt)));
+    }
+    for (const t of this.trusses.values()) {
+      const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
+      const w = perFootLedger * len * 1.8; // chords + web
+      attribute(t.a[0], t.a[1], w / 2); attribute(t.b[0], t.b[1], w / 2);
+    }
+    for (const g of this.guardrails.values()) {
+      const len = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]);
+      const w = perFootLedger * len;
+      attribute(g.a[0], g.a[1], w / 2); attribute(g.b[0], g.b[1], w / 2);
     }
     for (const p of this.planks.values()) {
       const area = Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0);

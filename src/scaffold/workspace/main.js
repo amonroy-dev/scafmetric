@@ -14,7 +14,8 @@ import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 import { deriveBom, bomToCsv } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
-import { buildSideBracket } from './parts.js';
+import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
+import { exportScaffoldDxf } from './dxf.js';
 
 const TOOL_META = {
   select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
@@ -22,6 +23,7 @@ const TOOL_META = {
   standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
   ledger: { label: 'Ledger', icon: '─', hint: 'ONE click on a rosette node runs a ledger to the nearest open standard. SHIFT+click fills every bay at that level.' },
   brace: { label: 'Brace', icon: '╱', hint: 'ONE click places a diagonal to the next standard, 4 rosette levels up. SHIFT+click braces every bay at that level.' },
+  truss: { label: 'Truss', icon: '⬟', hint: 'Click two rosette nodes to span a truss between them.' },
   bracket: { label: 'Bracket', icon: '⊢', hint: 'Click a rosette node to hang a side bracket, drawn from generic tubing. The arm points away from the scaffold.' },
   plank: { label: 'Plank', icon: '▭', hint: 'Click two rosette nodes on opposite corners to deck a bay with best-fit 9 in / 6 in boards.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
@@ -62,9 +64,29 @@ const TEMPLATE = `
         </div>
       </div>
       <div class="sfw-group">
+        <h3>Selection</h3>
+        <div id="sfw-props" class="sfw-props"></div>
+        <div class="sfw-actions-row">
+          <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
+          <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
+        </div>
+      </div>
+      <div class="sfw-group">
+        <h3>Guardrails</h3>
+        <div class="sfw-actions-row">
+          <button type="button" class="sfw-btn" id="sfw-rails">Add to decks</button>
+          <button type="button" class="sfw-btn ghost" id="sfw-rails-clear">Clear</button>
+        </div>
+      </div>
+      <div class="sfw-group">
+        <h3>Views <button type="button" class="sfw-mini" id="sfw-view-save">SAVE</button></h3>
+        <div id="sfw-views" class="sfw-views-list"></div>
+      </div>
+      <div class="sfw-group">
         <h3>Bill of materials <button type="button" class="sfw-mini" id="sfw-bom-csv">CSV</button></h3>
         <div class="sfw-table-wrap sfw-bom-wrap"><table class="sfw-table sfw-bom"><thead><tr><th>Item</th><th>Qty</th><th>Wt (lb)</th></tr></thead><tbody id="sfw-bom-rows"></tbody></table></div>
         <div class="sfw-totals" id="sfw-bom-total"></div>
+        <button type="button" class="sfw-btn ghost sfw-mt" id="sfw-dxf">Export DXF centerlines</button>
       </div>
       <div class="sfw-group">
         <h3>Beam &amp; import</h3>
@@ -124,7 +146,8 @@ class Workspace {
         // Escape cancels the in-progress action only. It must never close the
         // builder, which previously dumped the user back to the beam form.
         e.preventDefault();
-        if (this.tools) { this.tools.pending = null; this.tools._clearGhost(); this.tools._clearOverlay(); }
+        if (this.tools) { this.tools.pending = null; this.tools._clearGhost(); this.tools._clearOverlay(); this.tools.transformHook = null; }
+        this._transform = null;
         this.$('sfw-hint').textContent = 'Action cancelled. Close with the × button; your model is saved.';
         return;
       }
@@ -180,7 +203,7 @@ class Workspace {
     this.tools = new Tools(this.engine, this.state, {
       getNodeMeshes: () => this.nodeGroup.children,
       getContentMeshes: () => this.contentGroup.children,
-      onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); },
+      onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); this._refreshProps(); },
       onToolChange: name => this._applyToolUi(name),
       onBulkFill: (n, tool) => {
         if (tool === 'block') {
@@ -235,6 +258,8 @@ class Workspace {
       } catch { /* keep the local copy */ }
     });
     this.state.resetHistory();
+    this._renderViews();
+    this._refreshProps();
     this._sync();
   }
 
@@ -350,6 +375,15 @@ class Workspace {
     this.$('sfw-pos').addEventListener('input', () => this._updateBeam());
     this.$('sfw-pick').addEventListener('click', () => this._selectLegsOnBeam());
     this.$('sfw-import').addEventListener('click', () => this._import());
+    this.$('sfw-rails').addEventListener('click', () => {
+      const n = this.state.generateGuardrails();
+      this.$('sfw-hint').textContent = n ? `Guardrails added around every decked area (${n} members).` : 'Deck a bay first, then add guardrails.';
+    });
+    this.$('sfw-rails-clear').addEventListener('click', () => this.state.clearGuardrails());
+    this.$('sfw-move').addEventListener('click', () => this._beginTransform(false));
+    this.$('sfw-copy').addEventListener('click', () => this._beginTransform(true));
+    this.$('sfw-dxf').addEventListener('click', () => this._downloadDxf());
+    this.$('sfw-view-save').addEventListener('click', () => this._saveView());
   }
 
   _frame() {
@@ -409,6 +443,16 @@ class Workspace {
         this.contentGroup.add(m);
       }
     }
+    for (const t of g.trusses || []) {
+      const mat = this._matFor(t.id, MATERIALS.ledger);
+      for (const m of buildTruss(t.a, t.b, mat)) { m.userData = { id: t.id, kind: 'truss' }; this.contentGroup.add(m); }
+    }
+    for (const gr of g.guardrails || []) {
+      const mat = this._matFor(gr.id, MATERIALS.brace);
+      const m = tubeBetween(gr.a, gr.b, GUARDRAIL_OD_IN, mat);
+      m.userData = { id: gr.id, kind: 'guardrail' };
+      this.contentGroup.add(m);
+    }
     for (const br of g.brackets || []) {
       const mat = this._matFor(br.id, MATERIALS.ledger);
       for (const m of buildSideBracket({ x: br.x, y: br.y, z: br.z }, br.dir, br.lengthFt, mat)) {
@@ -417,6 +461,65 @@ class Workspace {
       }
     }
     this._rebuildLabels();
+  }
+
+  _refreshProps() {
+    const el = this.$('sfw-props');
+    if (!el) return;
+    const ids = this.selection;
+    if (!ids.length) { el.innerHTML = '<p class="sfw-note">Nothing selected. Click a member, or drag a marquee.</p>'; return; }
+    if (ids.length > 1) {
+      const kinds = {};
+      for (const id of ids) { const k = this._kindOf(id); kinds[k] = (kinds[k] || 0) + 1; }
+      el.innerHTML = `<dl class="sfw-proplist"><div><dt>Selected</dt><dd>${ids.length}</dd></div>` +
+        Object.entries(kinds).map(([k, n]) => `<div><dt>${k}</dt><dd>${n}</dd></div>`).join('') + '</dl>';
+      return;
+    }
+    const id = ids[0];
+    const rows = this._describe(id);
+    el.innerHTML = `<dl class="sfw-proplist">` +
+      rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('') + '</dl>';
+  }
+
+  _kindOf(id) {
+    if (this.state.standards.has(id)) return 'standard';
+    if (this.state.ledgers.has(id)) return 'ledger';
+    if (this.state.braces.has(id)) return 'brace';
+    if (this.state.planks.has(id)) return 'plank';
+    if (this.state.brackets.has(id)) return 'bracket';
+    if (this.state.trusses.has(id)) return 'truss';
+    if (this.state.guardrails.has(id)) return 'guardrail';
+    return 'item';
+  }
+
+  _describe(id) {
+    const r = v => Math.round(v * 100) / 100;
+    const st = this.state.standards.get(id);
+    if (st) {
+      const { legs } = this.state.takeoff();
+      const leg = legs.find(l => l.id === id);
+      return [['Type', 'Standard'], ['Position', `${r(st.x)}, ${r(st.y)} ft`],
+        ['Segments', st.segments.map(x => `${r(x)} ft`).join(' + ')],
+        ['Height', `${r(this.state.standardHeightFt(st))} ft`],
+        ['Dead', `${Math.round(leg?.deadLb ?? 0)} lb`], ['Live', `${Math.round(leg?.liveLb ?? 0)} lb`]];
+    }
+    for (const [map, label] of [[this.state.ledgers, 'Ledger'], [this.state.braces, 'Brace'], [this.state.trusses, 'Truss'], [this.state.guardrails, 'Guardrail']]) {
+      const m = map.get(id);
+      if (m) {
+        const len = Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]);
+        return [['Type', m.kind ? `${label} (${m.kind})` : label], ['Length', `${r(len)} ft`],
+          ['From', `${r(m.a[0])}, ${r(m.a[1])}, ${r(m.a[2])}`], ['To', `${r(m.b[0])}, ${r(m.b[1])}, ${r(m.b[2])}`]];
+      }
+    }
+    const p = this.state.planks.get(id);
+    if (p) {
+      const boards = this.state.plankBoards(p);
+      return [['Type', 'Plank bay'], ['Size', `${r(p.x1 - p.x0)} x ${r(p.y1 - p.y0)} ft`],
+        ['Boards', boards.length], ['Height', `${r(p.z)} ft`]];
+    }
+    const b = this.state.brackets.get(id);
+    if (b) return [['Type', 'Side bracket'], ['Length', `${r(b.lengthFt)} ft`], ['Height', `${r(b.z)} ft`]];
+    return [['Type', 'Item']];
   }
 
   _refreshBom() {
@@ -461,7 +564,8 @@ class Workspace {
   _updateCounts() {
     const s = this.state;
     this.$('sfw-counts').innerHTML =
-      `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span><span>${s.planks.size} plk</span>`;
+      `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span>` +
+      `<span>${s.planks.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>`;
   }
 
   _beamSpan() { return window.scafmetric?.getBeamSpanFt?.() || 20; }
@@ -518,6 +622,90 @@ class Workspace {
     if (skipped.length) { warn.hidden = false; warn.textContent = `${skipped.length} selected leg(s) off the beam line or past the span — excluded.`; }
     else warn.hidden = true;
     this.$('sfw-import').disabled = imported.length === 0;
+  }
+
+  /** Move/copy: pick an anchor, then a destination, and shift the selected stacks. */
+  _beginTransform(copy) {
+    const ids = this.selection.filter(id => this.state.standards.has(id));
+    if (!ids.length) {
+      this.$('sfw-hint').textContent = 'Select one or more standards first (drag a marquee).';
+      return;
+    }
+    this._transform = { ids, copy, anchor: null };
+    this.$('sfw-hint').textContent = `${copy ? 'Copy' : 'Move'}: click the anchor point, then the destination. Esc cancels.`;
+    this.tools.setTool('select');
+    this.tools.transformHook = pt => this._transformClick(pt);
+  }
+
+  _transformClick(pt) {
+    const t = this._transform;
+    if (!t) return false;
+    if (!t.anchor) {
+      t.anchor = pt;
+      this.$('sfw-hint').textContent = 'Now click the destination.';
+      return true;
+    }
+    const dx = pt.x - t.anchor.x, dy = pt.y - t.anchor.y;
+    const ids = this.state.transformStacks(t.ids, dx, dy, t.copy);
+    this.selection = ids;
+    this._transform = null;
+    this.tools.transformHook = null;
+    this._rebuildContent();
+    this._refreshProps();
+    this.$('sfw-hint').textContent = `${ids.length} stack(s) ${t.copy ? 'copied' : 'moved'}.`;
+    return true;
+  }
+
+  _saveView() {
+    const cam = this.engine.camera;
+    const tgt = this.engine.controls.target;
+    this._views = this._views || [];
+    this._views.push({
+      name: `View ${this._views.length + 1}`,
+      position: [cam.position.x, cam.position.y, cam.position.z],
+      target: [tgt.x, tgt.y, tgt.z],
+      projection: this.engine.projection,
+      zoom: cam.zoom ?? 1,
+    });
+    this._renderViews();
+  }
+
+  _renderViews() {
+    const el = this.$('sfw-views');
+    if (!el) return;
+    const views = this._views || [];
+    el.innerHTML = views.length
+      ? views.map((v, i) => `<div class="sfw-view-row"><button type="button" data-view-go="${i}">${v.name}</button><button type="button" class="sfw-view-x" data-view-del="${i}" aria-label="Delete ${v.name}">×</button></div>`).join('')
+      : '<p class="sfw-note">No saved views yet.</p>';
+    for (const b of el.querySelectorAll('[data-view-go]')) {
+      b.addEventListener('click', () => this._applyView(views[Number(b.dataset.viewGo)]));
+    }
+    for (const b of el.querySelectorAll('[data-view-del]')) {
+      b.addEventListener('click', () => { this._views.splice(Number(b.dataset.viewDel), 1); this._renderViews(); });
+    }
+  }
+
+  _applyView(v) {
+    if (!v) return;
+    this.engine.setProjection(v.projection);
+    this.engine.controls.target.set(v.target[0], v.target[1], v.target[2]);
+    this.engine.camera.position.set(v.position[0], v.position[1], v.position[2]);
+    if (this.engine.camera.isOrthographicCamera) {
+      this.engine.camera.zoom = v.zoom || 1;
+      this.engine.camera.updateProjectionMatrix();
+    }
+    this.engine.controls.update();
+  }
+
+  _downloadDxf() {
+    const dxf = exportScaffoldDxf(this.state);
+    const blob = new Blob([dxf], { type: 'application/dxf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scaffold-centerlines.dxf';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   _downloadBom() {

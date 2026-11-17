@@ -9,7 +9,7 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, buildTruss, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, computeAdjacencyScaleFt,
@@ -17,7 +17,7 @@ import {
 } from './planning.js';
 
 const DRAG_PX = 4;
-export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'bracket', 'plank', 'erase'];
+export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
@@ -173,6 +173,11 @@ export class Tools {
 
   _act(e) {
     const s = this.state;
+    // Move/copy capture: ground clicks drive the anchor/destination steps.
+    if (this.transformHook) {
+      const g = this._groundSnap(e);
+      if (g && this.transformHook(g)) return;
+    }
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
       const part = this.currentPart();
@@ -181,8 +186,7 @@ export class Tools {
     }
     if (this.tool === 'select' || this.tool === 'erase') {
       this.engine.setPointerFromEvent(e);
-      const hit = this.engine.pick(this.hooks.getContentMeshes?.() || []);
-      const id = hit?.object.userData.id ?? null;
+      const id = this._cyclePick(e);
       if (this.tool === 'erase') { if (id) { s.remove(id); this.selection.delete(id); this.hooks.onSelectionChange?.([...this.selection]); } return; }
       if (!id) { if (!e.shiftKey) { this.selection.clear(); this.hooks.onSelectionChange?.([]); } return; }
       if (e.shiftKey) { this.selection.has(id) ? this.selection.delete(id) : this.selection.add(id); }
@@ -212,12 +216,13 @@ export class Tools {
       if (target) s.addBrace([node.x, node.y, node.z], [target.x, target.y, target.z]);
       return;
     }
-    // Planks still take two corner nodes.
+    // Planks and trusses take two nodes.
     if (!this.pending) { this.pending = node; return; }
     const a = this.pending;
     this.pending = null;
     if (a.x === node.x && a.y === node.y) return;
-    s.addPlank([a.x, a.y, a.z], [node.x, node.y, node.z]);
+    if (this.tool === 'truss') s.addTruss([a.x, a.y, a.z], [node.x, node.y, node.z]);
+    else s.addPlank([a.x, a.y, a.z], [node.x, node.y, node.z]);
   }
 
   // Direction pointing away from the scaffold footprint centre.
@@ -231,6 +236,28 @@ export class Tools {
     // Snap to the dominant axis so brackets sit square to the bay.
     if (Math.abs(dx) >= Math.abs(dy)) return [Math.sign(dx), 0];
     return [0, Math.sign(dy)];
+  }
+
+  /**
+   * Pick with cycling: clicking the same spot again steps to the next object
+   * behind the current one, so overlapping members stay reachable.
+   */
+  _cyclePick(e) {
+    this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
+    const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
+    const ids = [];
+    for (const h of hits) {
+      const id = h.object.userData?.id;
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    if (!ids.length) { this._cycle = null; return null; }
+    const near = this._cycle && Math.hypot(e.clientX - this._cycle.x, e.clientY - this._cycle.y) < 6;
+    if (near && this._cycle.ids.join('|') === ids.join('|')) {
+      this._cycle.index = (this._cycle.index + 1) % ids.length;
+    } else {
+      this._cycle = { x: e.clientX, y: e.clientY, ids, index: 0 };
+    }
+    return ids[this._cycle.index];
   }
 
   _nodesAtLevel(level) { return this.state.nodes().filter(n => n.level === level); }
@@ -391,7 +418,11 @@ export class Tools {
     }
     if (this.pending) {
       const a = this.pending;
-      this.ghostGroup.add(plankDeck(a.x, a.y, node.x, node.y, Math.min(a.z, node.z), mat));
+      if (this.tool === 'truss') {
+        for (const m of buildTruss([a.x, a.y, a.z], [node.x, node.y, node.z], mat)) this.ghostGroup.add(m);
+      } else {
+        this.ghostGroup.add(plankDeck(a.x, a.y, node.x, node.y, Math.min(a.z, node.z), mat));
+      }
     }
   }
 

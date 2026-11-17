@@ -5,7 +5,7 @@
 
 const ft = (f, i = 0) => f + i / 12;
 
-export const CATEGORIES = ['standards', 'ledgers', 'braces', 'brackets', 'planks'];
+export const CATEGORIES = ['standards', 'ledgers', 'braces', 'trusses', 'brackets', 'planks'];
 
 export const CATALOG = {
   standards: {
@@ -51,6 +51,17 @@ export const CATALOG = {
       { id: 'brc-2', label: '2 ft bay', lengthFt: 2 },
     ],
   },
+  trusses: {
+    label: 'Trusses',
+    code: 'TRS',
+    unit: 'length',
+    parts: [
+      { id: 'trs-20', label: '20 ft', lengthFt: 20 },
+      { id: 'trs-16', label: '16 ft', lengthFt: 16 },
+      { id: 'trs-12', label: '12 ft', lengthFt: 12 },
+      { id: 'trs-10', label: '10 ft', lengthFt: 10 },
+    ],
+  },
   brackets: {
     label: 'Side brackets',
     code: 'BRK',
@@ -83,6 +94,7 @@ export const DEFAULT_PART = {
   braces: 'brc-7',
   planks: 'plk-7',
   brackets: 'brk-2',
+  trusses: 'trs-12',
 };
 
 export function getPart(categoryKey, partId) {
@@ -98,4 +110,5 @@ export const CATEGORY_TOOL = {
   braces: 'brace',
   planks: 'plank',
   brackets: 'bracket',
+  trusses: 'truss',
 };

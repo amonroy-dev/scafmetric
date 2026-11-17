@@ -286,3 +286,32 @@ export function buildSideBracket(node, dir, lengthFt, material) {
     tubeBetween(tip, anchor, BRACKET.strutOdIn, mat),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Truss — two chords with a zig-zag web, drawn from generic tubing.
+// ---------------------------------------------------------------------------
+export const TRUSS = { depthIn: 18, chordOdIn: 1.9, webOdIn: 1.5, panels: 6 };
+
+export function buildTruss(a, b, material) {
+  const mat = material || MATERIALS.ledger;
+  const depth = inchesToFeet(TRUSS.depthIn);
+  const top = [[a[0], a[1], a[2]], [b[0], b[1], b[2]]];
+  const bot = [[a[0], a[1], a[2] - depth], [b[0], b[1], b[2] - depth]];
+  const out = [
+    tubeBetween(top[0], top[1], TRUSS.chordOdIn, mat),
+    tubeBetween(bot[0], bot[1], TRUSS.chordOdIn, mat),
+  ];
+  const lerp = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+  for (let i = 0; i < TRUSS.panels; i++) {
+    const t0 = i / TRUSS.panels, t1 = (i + 1) / TRUSS.panels;
+    // alternate the web direction to form the zig-zag
+    const from = i % 2 === 0 ? lerp(top[0], top[1], t0) : lerp(bot[0], bot[1], t0);
+    const to = i % 2 === 0 ? lerp(bot[0], bot[1], t1) : lerp(top[0], top[1], t1);
+    out.push(tubeBetween(from, to, TRUSS.webOdIn, mat));
+    out.push(tubeBetween(lerp(top[0], top[1], t1), lerp(bot[0], bot[1], t1), TRUSS.webOdIn, mat));
+  }
+  return out;
+}
+
+// Guardrail rail/post tubing.
+export const GUARDRAIL_OD_IN = 1.69;
