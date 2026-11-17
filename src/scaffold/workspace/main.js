@@ -1,25 +1,26 @@
-// Scaffold workspace entry (bundled to dist/scaffold-app.js). Builds the modal,
-// mounts the three.js engine, wires the placement toolbar/ViewCube, derives the
-// leg-load takeoff, and imports selected legs into the beam analysis.
+// Scaffold workspace entry (bundled to dist/scaffold-app.js).
 
 import * as THREE from 'three';
 import { Engine } from './engine.js';
 import { ViewCube } from './viewcube.js';
 import { Tools, TOOLS } from './tools.js';
 import { ScaffoldState, stateBounds } from './state.js';
-import { tubeMesh, plankMesh, nodeMesh, makeMaterial, COLORS, RADII } from './builders.js';
+import {
+  MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
+  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL,
+} from './parts.js';
+import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 
 const TOOL_META = {
-  standard: { label: 'Standard', hint: 'Click the ground to place a vertical standard. Click an existing one to stack a lift.' },
-  ledger: { label: 'Ledger', hint: 'Click two standard nodes at the same level to place a horizontal ledger.' },
-  brace: { label: 'Brace', hint: 'Click two standard nodes to place a diagonal brace up one lift.' },
-  plank: { label: 'Plank', hint: 'Click two standard nodes (opposite corners) to deck a bay.' },
-  select: { label: 'Select', hint: 'Click a component to select it. Delete removes it.' },
-  erase: { label: 'Erase', hint: 'Click a component to remove it.' },
+  select: { label: 'Select', icon: '⬚', hint: 'Click to select. Drag left-to-right = window, right-to-left = crossing. Shift adds. Delete removes.' },
+  standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
+  ledger: { label: 'Ledger', icon: '─', hint: 'Click two connection nodes to run a horizontal ledger.' },
+  brace: { label: 'Brace', icon: '╱', hint: 'Click two connection nodes to run a diagonal brace.' },
+  plank: { label: 'Plank', icon: '▭', hint: 'Click two nodes on opposite corners to deck a bay.' },
+  erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
-const TOOL_ICON = { standard: '│', ledger: '─', brace: '╱', plank: '▭', select: '➤', erase: '⌫' };
 const OFF_TOLERANCE_FT = 0.5;
 
 const TEMPLATE = `
@@ -31,20 +32,28 @@ const TEMPLATE = `
   </header>
   <div class="sfw-body">
     <div class="sfw-toolbar" id="sfw-toolbar"></div>
-    <div class="sfw-stage" id="sfw-stage">
-      <div class="sfw-hint" id="sfw-hint"></div>
-    </div>
+    <div class="sfw-stage" id="sfw-stage"><div class="sfw-hint" id="sfw-hint"></div></div>
     <aside class="sfw-side">
       <div class="sfw-group">
-        <h3>Build</h3>
+        <h3>Catalog</h3>
+        <label>Category<select id="sfw-cat"></select></label>
+        <label class="sfw-mt">Size<select id="sfw-part"></select></label>
+        <p class="sfw-note" id="sfw-partnote"></p>
+      </div>
+      <div class="sfw-group">
+        <h3>Base</h3>
+        <label>Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
+        <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
+        <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
+        <div class="sfw-counts" id="sfw-counts"></div>
+        <button type="button" class="sfw-btn ghost" id="sfw-clear">Clear all</button>
+      </div>
+      <div class="sfw-group">
+        <h3>Loads</h3>
         <div class="sfw-grid2">
-          <label>Lift height<span class="sfw-u"><input type="number" id="sfw-lh" min="1" step="any" value="6.5"><i>ft</i></span></label>
-          <label>Snap<span class="sfw-u"><input type="number" id="sfw-snap" min="0" step="any" value="1"><i>ft</i></span></label>
           <label>Live load<span class="sfw-u"><input type="number" id="sfw-live" min="0" step="any" value="${DEFAULT_LIVE_LOAD_PSF}"><i>psf</i></span></label>
           <label>Plank wt<span class="sfw-u"><input type="number" id="sfw-plank" min="0" step="any" value="${DEFAULT_COMPONENTS.plank.areaWeightLbPerFt2}"><i>psf</i></span></label>
         </div>
-        <div class="sfw-counts" id="sfw-counts"></div>
-        <button type="button" class="sfw-btn ghost" id="sfw-clear">Clear all</button>
       </div>
       <div class="sfw-group">
         <h3>Beam &amp; import</h3>
@@ -69,6 +78,23 @@ const TEMPLATE = `
   </footer>
 </div>`;
 
+function labelSprite(text) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(6,11,20,0.82)';
+  g.fillRect(0, 0, 256, 64);
+  g.strokeStyle = '#ffa41b'; g.lineWidth = 3; g.strokeRect(1.5, 1.5, 253, 61);
+  g.fillStyle = '#ffd79a';
+  g.font = 'bold 30px monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(2.6, 0.65, 1);
+  return sp;
+}
+
 class Workspace {
   constructor(root) {
     this.root = root;
@@ -77,6 +103,8 @@ class Workspace {
     this.$ = id => root.querySelector(`#${id}`);
     this.engine = null;
     this.beamLegs = new Set();
+    this.selection = [];
+    this.showLegLoads = true;
     this._importable = [];
     for (const el of root.querySelectorAll('[data-sfw-close]')) el.addEventListener('click', () => this.close());
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !root.hidden) this.close(); });
@@ -93,78 +121,136 @@ class Workspace {
   _init() {
     const stage = this.$('sfw-stage');
     this.engine = new Engine(stage);
-    this.viewcube = new ViewCube(this.engine);
+    this.viewcube = new ViewCube(this.engine, 92, { onHome: () => this._frame() });
     stage.appendChild(this.viewcube.el);
 
     this.state = new ScaffoldState({
-      liftHeightFt: Number(this.$('sfw-lh').value) || 6.5,
-      snapStep: Number(this.$('sfw-snap').value) || 1,
+      snapStep: 1,
       liveLoadPsf: Number(this.$('sfw-live').value) || DEFAULT_LIVE_LOAD_PSF,
       components: { plank: { areaWeightLbPerFt2: Number(this.$('sfw-plank').value) || 3 } },
+      jackExtensionIn: Number(this.$('sfw-jack').value) || 0,
       onChange: () => this._sync(),
     });
 
     this.contentGroup = new THREE.Group();
     this.nodeGroup = new THREE.Group();
     this.beamGroup = new THREE.Group();
-    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.beamGroup);
-
-    this.mats = {
-      standard: makeMaterial(COLORS.standard),
-      ledger: makeMaterial(COLORS.ledger),
-      brace: makeMaterial(COLORS.brace),
-      plank: new THREE.MeshStandardMaterial({ color: COLORS.plank, roughness: 0.6, metalness: 0.3, transparent: true, opacity: 0.85 }),
-      node: new THREE.MeshBasicMaterial({ color: COLORS.node }),
-      selected: makeMaterial(COLORS.selected, { emissive: 0x7a4a00, emissiveIntensity: 0.6 }),
-      beamLeg: makeMaterial(COLORS.selected, { emissive: 0x7a4a00, emissiveIntensity: 0.9 }),
-    };
+    this.labelGroup = new THREE.Group();
+    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.beamGroup, this.labelGroup);
+    this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4 });
+    this.beamMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x0b4f49, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.5 });
 
     this.tools = new Tools(this.engine, this.state, {
       getNodeMeshes: () => this.nodeGroup.children,
       getContentMeshes: () => this.contentGroup.children,
-      onSelect: id => { this.selectedId = id; this._sync(); },
+      onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); },
       onToolChange: name => this._applyToolUi(name),
     });
 
     this._buildToolbar();
+    this._buildCatalogUi();
     this._bindInputs();
-    this.tools.setTool('standard');
+    this.tools.setCatalog('standards', DEFAULT_PART.standards);
     this._seedStarter();
     this._sync();
   }
 
-  // A small starter bay so the user immediately sees something to work with.
   _seedStarter() {
+    const part = getPart('standards', DEFAULT_PART.standards);
     const b = 7;
-    for (const [x, y] of [[0, 0], [b, 0], [0, b], [b, b]]) this.state.addStandard(x, y);
-    // ledgers around the top of lift 1
-    this.state.addLedger(0, 0, b, 0, 1); this.state.addLedger(0, b, b, b, 1);
-    this.state.addLedger(0, 0, 0, b, 1); this.state.addLedger(b, 0, b, b, 1);
-    this.state.addPlank(0, 0, b, b, 1);
+    for (const [x, y] of [[0, 0], [b, 0], [0, b], [b, b]]) this.state.addStandard(x, y, part.lengthFt);
+    // Ledgers at the first connection level around the bay.
+    const nodes = this.state.nodes().filter(n => n.level === 1);
+    const at = (x, y) => nodes.find(n => n.x === x && n.y === y);
+    const pairs = [[[0, 0], [b, 0]], [[0, b], [b, b]], [[0, 0], [0, b]], [[b, 0], [b, b]]];
+    for (const [p, q] of pairs) {
+      const a = at(p[0], p[1]), c = at(q[0], q[1]);
+      if (a && c) this.state.addLedger([a.x, a.y, a.z], [c.x, c.y, c.z]);
+    }
+    const c0 = at(0, 0), c1 = at(b, b);
+    if (c0 && c1) this.state.addPlank([c0.x, c0.y, c0.z], [c1.x, c1.y, c1.z]);
   }
 
   _buildToolbar() {
     const bar = this.$('sfw-toolbar');
-    bar.innerHTML = TOOLS.map(t =>
-      `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_ICON[t]}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('')
-      + `<div class="sfw-views"><button type="button" data-view="iso">ISO</button><button type="button" data-view="top">TOP</button><button type="button" data-view="front">FRT</button><button type="button" data-view="right">RT</button></div>`;
-    for (const btn of bar.querySelectorAll('[data-tool]')) btn.addEventListener('click', () => this.tools.setTool(btn.dataset.tool));
-    for (const btn of bar.querySelectorAll('[data-view]')) btn.addEventListener('click', () => this.engine.setView(btn.dataset.view));
+    bar.innerHTML =
+      TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('')
+      + `<div class="sfw-toggles">
+           <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic view">ORTHO</button>
+           <button type="button" class="sfw-toggle" data-toggle="panlock" title="Lock left-drag to pan">PAN</button>
+           <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">LOADS</button>
+         </div>`;
+    for (const btn of bar.querySelectorAll('[data-tool]')) {
+      btn.addEventListener('click', () => {
+        this.tools.setTool(btn.dataset.tool);
+        // Keep the catalog dropdown in step with the chosen tool.
+        const cat = CATEGORIES.find(c => CATEGORY_TOOL[c] === btn.dataset.tool);
+        if (cat && this.$('sfw-cat').value !== cat) { this.$('sfw-cat').value = cat; this._onCategoryChange(false); }
+      });
+    }
+    for (const btn of bar.querySelectorAll('[data-toggle]')) {
+      btn.addEventListener('click', () => this._toggle(btn.dataset.toggle, btn));
+    }
+  }
+
+  _toggle(name, btn) {
+    if (name === 'ortho') {
+      const on = this.engine.projection !== 'orthographic';
+      this.engine.setProjection(on ? 'orthographic' : 'perspective');
+      btn.classList.toggle('is-on', on);
+    } else if (name === 'panlock') {
+      const on = !this.engine.panLock;
+      this.engine.setPanLock(on);
+      btn.classList.toggle('is-on', on);
+    } else if (name === 'legloads') {
+      this.showLegLoads = !this.showLegLoads;
+      btn.classList.toggle('is-on', this.showLegLoads);
+      this._rebuildLabels();
+    }
+  }
+
+  _buildCatalogUi() {
+    const cat = this.$('sfw-cat');
+    cat.innerHTML = CATEGORIES.map(k => `<option value="${k}">${CATALOG[k].label}</option>`).join('');
+    cat.value = 'standards';
+    this._onCategoryChange(false);
+    cat.addEventListener('change', () => this._onCategoryChange(true));
+    this.$('sfw-part').addEventListener('change', () => this._onPartChange());
+  }
+
+  _onCategoryChange(switchTool) {
+    const key = this.$('sfw-cat').value;
+    const sel = this.$('sfw-part');
+    sel.innerHTML = CATALOG[key].parts.map(p => `<option value="${p.id}">${p.label}</option>`).join('');
+    sel.value = DEFAULT_PART[key];
+    if (switchTool) this.tools.setCatalog(key, sel.value);
+    else { this.tools.categoryKey = key; this.tools.partId = sel.value; }
+    this._updatePartNote();
+  }
+  _onPartChange() {
+    const key = this.$('sfw-cat').value;
+    this.tools.setCatalog(key, this.$('sfw-part').value);
+    this._updatePartNote();
+  }
+  _updatePartNote() {
+    const key = this.$('sfw-cat').value;
+    const part = getPart(key, this.$('sfw-part').value);
+    this.$('sfw-partnote').textContent = part ? `${CATALOG[key].code} · ${part.label} · generic tube, no part number` : '';
   }
 
   _applyToolUi(name) {
-    for (const btn of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) btn.classList.toggle('is-active', btn.dataset.tool === name);
-    this.$('sfw-hint').textContent = TOOL_META[name].hint;
-    // Nodes only matter for connect tools.
-    this.nodeGroup.visible = name === 'ledger' || name === 'brace' || name === 'plank';
+    for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
+    this.$('sfw-hint').textContent = TOOL_META[name]?.hint || '';
+    this._rebuildNodes();
   }
 
   _bindInputs() {
-    this.$('sfw-lh').addEventListener('input', e => { this.state.liftHeightFt = Number(e.target.value) || 6.5; this._sync(); });
-    this.$('sfw-snap').addEventListener('input', e => { this.state.snapStep = Number(e.target.value) || 0; });
-    this.$('sfw-live').addEventListener('input', e => { this.state.liveLoadPsf = Number(e.target.value) || 0; this._sync(); });
-    this.$('sfw-plank').addEventListener('input', e => { this.state.components.plank.areaWeightLbPerFt2 = Number(e.target.value) || 0; this._sync(); });
-    this.$('sfw-clear').addEventListener('click', () => { this.beamLegs.clear(); this.state.clear(); });
+    this.$('sfw-jack').addEventListener('input', e => this.state.setBase({ jackExtensionIn: Math.max(0, Number(e.target.value) || 0) }));
+    this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
+    this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
+    this.$('sfw-live').addEventListener('input', e => { this.state.liveLoadPsf = Math.max(0, Number(e.target.value) || 0); this._sync(); });
+    this.$('sfw-plank').addEventListener('input', e => { this.state.components.plank.areaWeightLbPerFt2 = Math.max(0, Number(e.target.value) || 0); this._sync(); });
+    this.$('sfw-clear').addEventListener('click', () => { this.beamLegs.clear(); this.selection = []; this.state.clear(); });
     this.$('sfw-axis').addEventListener('change', () => this._updateBeam());
     this.$('sfw-pos').addEventListener('input', () => this._updateBeam());
     this.$('sfw-pick').addEventListener('click', () => this._selectLegsOnBeam());
@@ -184,36 +270,75 @@ class Workspace {
     this._updateCounts();
   }
 
-  _disposeGroup(group) {
-    // Geometries and materials are shared singletons — only detach the meshes.
-    group.clear();
+  _matFor(id, fallback) {
+    if (this.selection.includes(id)) return MATERIALS.selected;
+    if (this.beamLegs.has(id)) return MATERIALS.selected;
+    return fallback;
   }
 
   _rebuildContent() {
-    this._disposeGroup(this.contentGroup);
-    const geo = this.state.geometry();
-    for (const t of geo.tubes) {
-      let mat = this.mats[t.kind];
-      if (t.id === this.selectedId) mat = this.mats.selected;
-      else if (t.kind === 'standard' && this.beamLegs.has(t.id)) mat = this.mats.beamLeg;
-      const mesh = tubeMesh(t.a, t.b, RADII[t.kind] ?? 0.09, mat);
-      mesh.userData = { id: t.id, kind: t.kind };
-      this.contentGroup.add(mesh);
+    this.contentGroup.clear();
+    const g = this.state.geometry();
+    for (const s of g.standards) {
+      const mat = this._matFor(s.id, MATERIALS.steel);
+      const sel = mat === MATERIALS.selected;
+      const { meshes } = buildBaseAssembly({
+        x: s.x, y: s.y, groundZ: 0,
+        jackExtensionIn: this.state.base.jackExtensionIn,
+        showWoodSill: this.state.base.showWoodSill,
+        showBaseCollar: this.state.base.showBaseCollar,
+        material: sel ? MATERIALS.selected : null,
+      });
+      for (const m of meshes) { m.userData.id = s.id; m.userData.kind = 'base'; this.contentGroup.add(m); }
+      const tube = verticalTube(s.x, s.y, s.baseZ, s.topZ, STANDARD_TUBE_OD_IN, mat);
+      tube.userData = { id: s.id, kind: 'standard' };
+      this.contentGroup.add(tube);
     }
-    for (const p of geo.planks) {
-      const mat = p.id === this.selectedId ? this.mats.selected : this.mats.plank;
-      const mesh = plankMesh(p.x0, p.y0, p.x1, p.y1, p.z, mat);
-      mesh.userData = { id: p.id, kind: 'plank' };
-      this.contentGroup.add(mesh);
+    for (const l of g.ledgers) {
+      const m = tubeBetween(l.a, l.b, 1.9, this._matFor(l.id, MATERIALS.ledger));
+      m.userData = { id: l.id, kind: 'ledger' };
+      this.contentGroup.add(m);
+    }
+    for (const b of g.braces) {
+      const m = tubeBetween(b.a, b.b, 1.69, this._matFor(b.id, MATERIALS.brace));
+      m.userData = { id: b.id, kind: 'brace' };
+      this.contentGroup.add(m);
+    }
+    for (const p of g.planks) {
+      const mat = this._matFor(p.id, PLANK_MATERIAL);
+      for (const b of p.boards) {
+        const m = plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat);
+        m.userData = { id: p.id, kind: 'plank' };
+        this.contentGroup.add(m);
+      }
+    }
+    this._rebuildLabels();
+  }
+
+  _rebuildLabels() {
+    if (!this.labelGroup) return;
+    this.labelGroup.clear();
+    this.labelGroup.visible = this.showLegLoads;
+    if (!this.showLegLoads) return;
+    const { legs } = this.state.takeoff();
+    for (const leg of legs) {
+      const s = this.state.standards.get(leg.id);
+      if (!s) continue;
+      const sp = labelSprite(`${Math.round(leg.deadLb + leg.liveLb)} lb`);
+      sp.position.set(s.x, s.y, this.state.standardTopZ(s) + 1.1);
+      this.labelGroup.add(sp);
     }
   }
 
+  // Rosette connection nodes: drawn procedurally on every standard so ledgers,
+  // horizontals and braces always have real points to connect to.
   _rebuildNodes() {
-    this._disposeGroup(this.nodeGroup);
+    this.nodeGroup.clear();
+    const connectTool = ['ledger', 'brace', 'plank'].includes(this.tools?.tool);
     for (const n of this.state.nodes()) {
-      const mesh = nodeMesh([n.x, n.y, n.z], this.mats.node);
-      mesh.userData = { node: n };
-      this.nodeGroup.add(mesh);
+      const m = rosetteDisk(n.x, n.y, n.z, connectTool ? this.nodeActiveMat : MATERIALS.hardware);
+      m.userData = { node: n };
+      this.nodeGroup.add(m);
     }
   }
 
@@ -223,10 +348,7 @@ class Workspace {
       `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span><span>${s.planks.size} plk</span>`;
   }
 
-  _beamSpan() {
-    const w = window.scafmetric?.getBeamSpanFt?.();
-    return w || 20;
-  }
+  _beamSpan() { return window.scafmetric?.getBeamSpanFt?.() || 20; }
 
   _currentBeam() {
     const axis = this.$('sfw-axis').value;
@@ -244,16 +366,16 @@ class Workspace {
 
   _updateBeam() {
     if (!this.engine) return;
-    this._disposeGroup(this.beamGroup);
+    this.beamGroup.clear();
     const { draw, span } = this._currentBeam();
-    this.beamGroup.add(tubeMesh(draw.a, draw.b, 0.16, new THREE.MeshStandardMaterial({ color: COLORS.beam, emissive: 0x0b4f49, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.5 })));
+    this.beamGroup.add(tubeBetween(draw.a, draw.b, 4, this.beamMat));
     this.$('sfw-span').textContent = `${round(span, 3)} ft`;
     this._refreshTakeoff();
   }
 
   _legsForImport() {
-    const takeoff = this.state.takeoff();
-    const byId = new Map(takeoff.legs.map(l => [l.id, l]));
+    const { legs } = this.state.takeoff();
+    const byId = new Map(legs.map(l => [l.id, l]));
     const { beam } = this._currentBeam();
     const chosen = [...this.beamLegs].map(id => byId.get(id)).filter(Boolean);
     return mapLegsToBeam(chosen, beam);
@@ -271,7 +393,7 @@ class Workspace {
     const located = this._legsForImport().sort((a, b) => a.locationFt - b.locationFt);
     this.$('sfw-rows').innerHTML = located.length
       ? located.map(r => `<tr class="${r.onSpan && r.onBeam ? '' : 'sfw-off'}"><td>${r.leg.id}</td><td>${round(r.locationFt, 2)}</td><td>${round(r.leg.deadLb, 0)}</td><td>${round(r.leg.liveLb, 0)}</td></tr>`).join('')
-      : '<tr><td colspan="4" class="sfw-empty">No legs selected — use “Select legs on beam”.</td></tr>';
+      : '<tr><td colspan="4" class="sfw-empty">No legs selected — use Select legs on beam.</td></tr>';
     const { imported, skipped } = toBeamPointLoads(located);
     this._importable = imported;
     const dead = imported.reduce((s, e) => s + e.deadLb, 0), live = imported.reduce((s, e) => s + e.liveLb, 0);
@@ -283,7 +405,11 @@ class Workspace {
   }
 
   _import() {
-    if (!window.scafmetric?.importScaffoldLoads) { this.$('sfw-warn').hidden = false; this.$('sfw-warn').textContent = 'Beam workspace not ready.'; return; }
+    if (!window.scafmetric?.importScaffoldLoads) {
+      this.$('sfw-warn').hidden = false;
+      this.$('sfw-warn').textContent = 'Beam workspace not ready.';
+      return;
+    }
     const n = window.scafmetric.importScaffoldLoads(this._importable.map(e => ({ legId: e.legId, deadLb: e.deadLb, liveLb: e.liveLb, locationFt: e.locationFt })));
     this.close();
     window.dispatchEvent(new CustomEvent('scafmetric:loads-imported', { detail: { count: n } }));
@@ -292,13 +418,12 @@ class Workspace {
 
 function round(v, d) { const f = 10 ** d; return Math.round(v * f) / f; }
 
-// --- boot -------------------------------------------------------------------
 const root = document.getElementById('scaffold-modal');
 if (root) {
   const ws = new Workspace(root);
   for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.addEventListener('click', () => ws.open());
   window.addEventListener('scafmetric:loads-imported', e => {
     const n = e.detail?.count ?? 0;
-    for (const btn of document.querySelectorAll('[data-open-scaffold]')) { btn.dataset.imported = String(n); }
+    for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.dataset.imported = String(n);
   });
 }

@@ -33,17 +33,33 @@ function labelTexture(text) {
 }
 
 export class ViewCube {
-  constructor(engine, size = 92) {
+  constructor(engine, size = 92, opts = {}) {
     this.engine = engine;
+    this.onHome = opts.onHome || null;
     const el = document.createElement('div');
     el.className = 'sfw-viewcube';
-    el.style.width = el.style.height = `${size}px`;
+    el.style.width = `${size}px`;
     this.el = el;
+
+    // Home button, like the source app's ViewCube home control.
+    const home = document.createElement('button');
+    home.type = 'button';
+    home.className = 'sfw-viewcube-home';
+    home.title = 'Home view (fit model)';
+    home.setAttribute('aria-label', 'Home view');
+    home.textContent = 'HOME';
+    home.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (this.onHome) this.onHome();
+      else engine.setView('home');
+    });
+    this.homeButton = home;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(size, size);
     el.appendChild(this.renderer.domElement);
+    el.appendChild(home);
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
