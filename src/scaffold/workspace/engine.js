@@ -36,6 +36,10 @@ const VIEW_DIRS = {
 };
 const FACE_VIEWS = new Set(['top', 'bottom', 'front', 'back', 'right', 'left']);
 const PIVOT_MARKER_PX = 5;
+export const MAX_PIXEL_RATIO = 1.5;
+// Relative change in a camera value that counts as movement: a billionth of a
+// foot at working distances, far below a pixel and far above float noise.
+const POSE_EPSILON = 1e-9;
 
 export class Engine {
   constructor(container) {
@@ -44,9 +48,17 @@ export class Engine {
     this.scene.background = new THREE.Color('#eceef0');
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Capped at 1.5, as in ScaffoldPro: a frame at 2 costs about 2.6x one at 1,
+    // and 1.5 about 1.6x, for edges few can pick out on a tube a few px wide.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // The sun is fixed in the world, so the shadow map depends on the model
+    // alone. Re-rendering it every frame made each orbit and pan pay for a
+    // second pass over every caster; it is now baked when the model changes
+    // (invalidate({ shadows: true })).
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     const el = this.renderer.domElement;
     el.style.display = 'block';
     el.style.width = '100%';
@@ -83,6 +95,8 @@ export class Engine {
     this._pivotMarker = this._makePivotMarker();
 
     this.raycaster = new THREE.Raycaster();
+    // Picks see every layer, including the invisible hit targets the camera skips.
+    this.raycaster.layers.enableAll();
     this.groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     this.pointer = new THREE.Vector2();
 
@@ -96,6 +110,13 @@ export class Engine {
     this._bindNavigation();
 
     this._updaters = new Set();
+    // Drawn on demand, as ScaffoldPro does (frameloop="demand"): an editor sits
+    // still most of the time, and a loop that redraws sixty times a second
+    // anyway spends the main thread the page needs for everything else. A frame
+    // is drawn when the camera moved or something called invalidate().
+    this._dirty = true;
+    this._pose = [];
+    this.framesRendered = 0;
     this._running = true;
     this._lastTick = 0;
     this._tick = this._tick.bind(this);
@@ -162,6 +183,7 @@ export class Engine {
     this.controls.target.copy(target);
     // Plans and elevations read as drawings: no ground shadow outside 3D.
     if (this.ground) this.ground.visible = mode !== 'orthographic';
+    this.invalidate();
     this.resize();
     this.controls.update();
     this.onProjectionChange?.(this.projection);
@@ -209,6 +231,41 @@ export class Engine {
   }
 
   addUpdater(fn) { this._updaters.add(fn); return () => this._updaters.delete(fn); }
+
+  /**
+   * Ask for a frame. Anything that changes what the scene holds calls this;
+   * camera moves are noticed on their own. shadows: the model itself changed,
+   * so the baked shadow map must be redrawn too.
+   */
+  invalidate({ shadows = false } = {}) {
+    this._dirty = true;
+    if (shadows) this.renderer.shadowMap.needsUpdate = true;
+  }
+
+  /**
+   * True when the camera moved, zoomed or was swapped since the last frame.
+   *
+   * Not an exact comparison: OrbitControls.update() runs every tick (touch and
+   * damping need it) and round-trips the camera through spherical coordinates,
+   * which moves it by ~1e-14 ft each time. Compared exactly, a still camera
+   * "moved" every frame and the canvas never stopped drawing.
+   */
+  _poseChanged() {
+    const c = this.camera;
+    const e = c.projectionMatrix.elements;
+    const now = [c.id, c.position.x, c.position.y, c.position.z,
+      c.quaternion.x, c.quaternion.y, c.quaternion.z, c.quaternion.w,
+      c.zoom, e[0], e[5], e[8], e[9], e[10], e[14]];
+    const last = this._pose;
+    for (let i = 0; i < now.length; i++) {
+      // Written so a missing (first-frame) value also counts as a change.
+      if (!(Math.abs(last[i] - now[i]) <= POSE_EPSILON * Math.max(1, Math.abs(now[i])))) {
+        this._pose = now;
+        return true;
+      }
+    }
+    return false;
+  }
 
   setPointerFromEvent(event) {
     const r = this.renderer.domElement.getBoundingClientRect();
@@ -338,7 +395,10 @@ export class Engine {
 
   _endNav() {
     this._nav = null;
-    this._pivotMarker.visible = false;
+    if (this._pivotMarker.visible) {
+      this._pivotMarker.visible = false;
+      this.invalidate();
+    }
   }
 
   /** Is a navigation drag in progress? Tools can use this to stay quiet. */
@@ -436,6 +496,7 @@ export class Engine {
     this._orbitPivot = choice ? choice.point : this.controls.target.clone();
     this._pivotMarker.position.copy(this._orbitPivot);
     this._pivotMarker.visible = true;
+    this.invalidate();
   }
 
   _queueOrbit(dx, dy) {
@@ -589,6 +650,8 @@ export class Engine {
     const r = this.container.getBoundingClientRect();
     const w = Math.max(1, r.width), h = Math.max(1, r.height);
     this.renderer.setSize(w, h, false);
+    // Resizing clears the drawing buffer, so the next tick must draw.
+    this.invalidate();
     const aspect = w / h;
     this.persp.aspect = aspect;
     this.persp.updateProjectionMatrix();
@@ -615,9 +678,13 @@ export class Engine {
     this._stepTransition(performance.now());
     this._stepOrbit(dt);
     this.controls.update();
-    this._updatePivotMarker();
-    for (const fn of this._updaters) fn();
-    this.renderer.render(this.scene, this.camera);
+    if (this._poseChanged() || this._dirty) {
+      this._dirty = false;
+      this._updatePivotMarker();
+      for (const fn of this._updaters) fn();
+      this.renderer.render(this.scene, this.camera);
+      this.framesRendered++;
+    }
     this._raf = requestAnimationFrame(this._tick);
   }
 

@@ -173,14 +173,27 @@ window.__sv = (() => {
 
   function hint() { return ws().$('sfw-hint').textContent; }
 
-  /** Fraction of canvas pixels that differ from the scene background. */
-  function coverage() {
+  /**
+   * The canvas, drawn now. The builder draws on demand, and a WebGL drawing
+   * buffer is cleared once presented, so reading pixels in a frame that drew
+   * nothing would read a blank canvas. Draw, then read in the same task.
+   */
+  function snapshotCanvas() {
+    const e = ws().engine;
+    e.renderer.render(e.scene, e.camera);
     const c = canvas();
     const off = document.createElement('canvas');
-    const w = off.width = Math.min(480, c.width);
-    const h = off.height = Math.round(w * (c.height / c.width));
+    off.width = Math.min(480, c.width);
+    off.height = Math.round(off.width * (c.height / c.width));
+    off.getContext('2d').drawImage(c, 0, 0, off.width, off.height);
+    return off;
+  }
+
+  /** Fraction of canvas pixels that differ from the scene background. */
+  function coverage() {
+    const off = snapshotCanvas();
+    const w = off.width, h = off.height;
     const ctx = off.getContext('2d');
-    ctx.drawImage(c, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
     // Compare against the live scene background, whatever colour the theme sets.
     const bg = ws().engine.scene.background.getHex();
@@ -194,12 +207,9 @@ window.__sv = (() => {
 
   /** Fraction of canvas pixels that read as the cyan of a live load patch. */
   function cyanFraction() {
-    const c = canvas();
-    const off = document.createElement('canvas');
-    const w = off.width = Math.min(480, c.width);
-    const h = off.height = Math.round(w * (c.height / c.width));
+    const off = snapshotCanvas();
+    const w = off.width, h = off.height;
     const ctx = off.getContext('2d');
-    ctx.drawImage(c, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
     let hit = 0;
     for (let i = 0; i < data.length; i += 4) {
@@ -283,10 +293,13 @@ window.__sv = (() => {
       if (!(ws() && ws().engine)) throw new Error('engine never started');
       await raf(30);
       // Measure teal with the grid hidden: its thin centre axes are teal too.
+      // The canvas draws on demand: a change made from outside asks for a frame.
       ws().engine.grid.visible = false;
+      ws().engine.invalidate();
       await raf(3);
       const tealOnEmpty = coverage();
       ws().engine.grid.visible = true;
+      ws().engine.invalidate();
       await raf(3);
       const initial = {
         projection: ws().engine.projection, camDir: camDir(), tool: ws().tools.tool,
@@ -392,12 +405,25 @@ window.__sv = (() => {
     },
 
     // SHIFT fills every perimeter face at that height.
+    // The whole run is one edit: one undo step, so one Ctrl+Z takes it all back.
     async braceShiftFill() {
       const before = counts().braces;
+      const steps0 = ws().state._history.length;
       await click(frontFace(3), { shift: true });
       ws()._frame();
       await raf(6);
-      return { added: counts().braces - before, counts: counts(), hint: hint() };
+      const added = counts().braces - before;
+      const undoSteps = ws().state._history.length - steps0;
+      // The builder listens for its shortcuts on the document.
+      const ctrl = k => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+        key: k, code: 'Key' + k.toUpperCase(), ctrlKey: true, bubbles: true, cancelable: true,
+      }));
+      ctrl('z');
+      await raf(2);
+      const afterUndo = counts().braces;
+      ctrl('y');
+      await raf(2);
+      return { added, undoSteps, afterUndo, before, afterRedo: counts().braces - before, counts: counts(), hint: hint() };
     },
 
     // R flips the diagonal direction while hovering.
@@ -425,7 +451,11 @@ window.__sv = (() => {
       const probe = {
         tool: ws().tools.tool,
         contentMeshes: ws().contentGroup.children.length,
-        hits: raw.slice(0, 6).map(h => (h.object.userData || {}).kind + ((h.object.userData || {}).proxy ? '*' : '')),
+        // Members are instanced: a hit's data lives at its instanceId.
+        hits: raw.slice(0, 6).map(h => {
+          const d = (h.object.userData?.items || [])[h.instanceId] || h.object.userData || {};
+          return d.kind + (d.proxy ? '*' : '');
+        }),
         picked: !!ws().tools._pickLedger({ clientX: at.x, clientY: at.y }),
       };
       await click(besideLedger(l));
@@ -500,6 +530,43 @@ window.__sv = (() => {
         addedBraces: after.braces - before.braces,
         counts: after, hint: hint(),
       };
+    },
+
+    // The canvas draws when something changes and otherwise sits still, and the
+    // model is drawn instanced, so a frame stays cheap as the job grows.
+    async renderOnDemand() {
+      const e = ws().engine;
+      tool('select');
+      await raf(4);
+      let f0 = e.framesRendered;
+      await raf(20);
+      const idleFrames = e.framesRendered - f0;
+      // A hover that shows a ghost asks for a frame.
+      tool('standard');
+      setField('sfw-stdh', 0);
+      f0 = e.framesRendered;
+      await hover([BAY * 6, BAY * 3, 0]);
+      const hoverFrames = e.framesRendered - f0;
+      const ghosts = ws().tools.ghostGroup.children.length;
+      // Moving the camera draws without being asked.
+      f0 = e.framesRendered;
+      const c = canvasCenter();
+      await middleDrag(c, { x: c.x + 60, y: c.y + 20 });
+      const panFrames = e.framesRendered - f0;
+      // Leaving the canvas clears the ghost, then it goes quiet again.
+      tool('select');
+      await raf(4);
+      f0 = e.framesRendered;
+      await raf(20);
+      const idleAgain = e.framesRendered - f0;
+      e.invalidate();
+      await raf(2);
+      const calls = e.renderer.info.render.calls;
+      let meshes = 0;
+      ws().contentGroup.traverse(o => { if (o.isMesh) meshes++; });
+      let members = 0;
+      for (const o of ws().contentGroup.children) members += o.isInstancedMesh ? o.count : 1;
+      return { idleFrames, hoverFrames, ghosts, panFrames, idleAgain, drawCalls: calls, contentObjects: meshes, members, counts: counts() };
     },
 
     // A face whose standards are too short must SAY so, not fail silently.

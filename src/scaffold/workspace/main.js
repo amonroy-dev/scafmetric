@@ -18,6 +18,7 @@ import { deriveBom, bomToCsv } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
 import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
+import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 
 // Line icons, 20px grid, drawn in currentColor.
 const svg = d => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -215,6 +216,7 @@ function labelSprite(text) {
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   sp.scale.set(1.9, 0.48, 1);
+  sp.userData.ownsMaterial = true; // its texture is freed when the labels are rebuilt
   return sp;
 }
 
@@ -541,10 +543,13 @@ class Workspace {
     this.$('sfw-bay-psf').addEventListener('input', e => {
       this.tools.liveLoadPsf = Math.max(0, Number(e.target.value) || 0);
       // Retag any selected patches so the field doubles as an editor.
-      let changed = 0;
-      for (const id of this.selection) {
-        if (this.state.setLiveLoadPsf(id, this.tools.liveLoadPsf)) changed++;
-      }
+      const changed = this.state.batch(() => {
+        let n = 0;
+        for (const id of this.selection) {
+          if (this.state.setLiveLoadPsf(id, this.tools.liveLoadPsf)) n++;
+        }
+        return n;
+      });
       if (changed) this._refreshProps();
       this._updateLiveLoadNote();
     });
@@ -687,9 +692,22 @@ class Workspace {
     return fallback;
   }
 
+  // The model is built as ordinary meshes, one per part, then drawn as one
+  // InstancedMesh per geometry and material (see instancing.js). Picks read the
+  // member back with hitData().
   _rebuildContent() {
-    this.contentGroup.clear();
-    if (this.skeleton) { this._rebuildSkeleton(); this._rebuildLiveLoads(); this._rebuildLabels(); return; }
+    clearGroup(this.contentGroup);
+    const meshes = [];
+    if (this.skeleton) this._buildSkeleton();
+    else this._buildSolids(meshes);
+    this._buildLiveLoads(meshes);
+    for (const m of instanceMeshes(meshes)) this.contentGroup.add(m);
+    this._rebuildLabels();
+    this.engine?.invalidate({ shadows: true });
+  }
+
+  _buildSolids(out) {
+    const add = (m, data) => { m.userData = data; out.push(m); };
     const g = this.state.geometry();
     for (const s of g.standards) {
       const mat = this._matFor(s.id, MATERIALS.steel);
@@ -701,68 +719,54 @@ class Workspace {
         showBaseCollar: this.state.base.showBaseCollar,
         material: sel ? MATERIALS.selected : null,
       });
-      for (const m of meshes) { m.userData.id = s.id; m.userData.kind = 'base'; this.contentGroup.add(m); }
-      const tube = verticalTube(s.x, s.y, s.baseZ, s.topZ, STANDARD_TUBE_OD_IN, mat);
-      tube.userData = { id: s.id, kind: 'standard' };
-      this.contentGroup.add(tube);
+      for (const m of meshes) add(m, { ...m.userData, id: s.id, kind: 'base' });
+      add(verticalTube(s.x, s.y, s.baseZ, s.topZ, STANDARD_TUBE_OD_IN, mat), { id: s.id, kind: 'standard' });
     }
     for (const l of g.ledgers) {
-      const m = tubeBetween(l.a, l.b, 1.9, this._matFor(l.id, MATERIALS.ledger));
-      m.userData = { id: l.id, kind: 'ledger' };
-      this.contentGroup.add(m);
+      add(tubeBetween(l.a, l.b, 1.9, this._matFor(l.id, MATERIALS.ledger)), { id: l.id, kind: 'ledger' });
       // Fat invisible hit target so the deck and live load tools can be hovered
       // without landing on the 1.9 in tube exactly. Marked as a proxy so click
       // cycling in select/erase ignores it.
-      const pick = tubePickProxy(l.a, l.b);
-      pick.userData = { id: l.id, kind: 'ledger', proxy: true };
-      this.contentGroup.add(pick);
+      add(tubePickProxy(l.a, l.b), { id: l.id, kind: 'ledger', proxy: true });
     }
     for (const b of g.braces) {
-      const m = tubeBetween(b.a, b.b, 1.69, this._matFor(b.id, MATERIALS.brace));
-      m.userData = { id: b.id, kind: 'brace' };
-      this.contentGroup.add(m);
+      add(tubeBetween(b.a, b.b, 1.69, this._matFor(b.id, MATERIALS.brace)), { id: b.id, kind: 'brace' });
     }
     for (const p of g.planks) {
       const mat = this._matFor(p.id, PLANK_MATERIAL);
       for (const b of p.boards) {
-        const m = plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat);
-        m.userData = { id: p.id, kind: 'plank' };
-        this.contentGroup.add(m);
+        add(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat), { id: p.id, kind: 'plank' });
       }
     }
     for (const t of g.trusses || []) {
       const mat = this._matFor(t.id, MATERIALS.ledger);
-      for (const m of buildTruss(t.a, t.b, mat)) { m.userData = { id: t.id, kind: 'truss' }; this.contentGroup.add(m); }
+      for (const m of buildTruss(t.a, t.b, mat)) add(m, { id: t.id, kind: 'truss' });
     }
     for (const gr of g.guardrails || []) {
       const mat = this._matFor(gr.id, MATERIALS.brace);
-      const m = tubeBetween(gr.a, gr.b, GUARDRAIL_OD_IN, mat);
-      m.userData = { id: gr.id, kind: 'guardrail' };
-      this.contentGroup.add(m);
+      add(tubeBetween(gr.a, gr.b, GUARDRAIL_OD_IN, mat), { id: gr.id, kind: 'guardrail' });
     }
     for (const br of g.brackets || []) {
       const mat = this._matFor(br.id, MATERIALS.ledger);
       for (const m of buildSideBracket({ x: br.x, y: br.y, z: br.z }, br.dir, br.lengthFt, mat)) {
-        m.userData = { id: br.id, kind: 'bracket' };
-        this.contentGroup.add(m);
+        add(m, { id: br.id, kind: 'bracket' });
       }
     }
-    this._rebuildLiveLoads();
-    this._rebuildLabels();
   }
 
   // Live load patches sit above the deck, striped across the one-way span.
-  _rebuildLiveLoads() {
+  _buildLiveLoads(out) {
     for (const patch of this.state.liveLoadPatches()) {
       const m = liveLoadPatch(patch, this.selection.includes(patch.id) ? MATERIALS.selected : null);
       m.userData = { id: patch.id, kind: 'liveload' };
-      this.contentGroup.add(m);
+      out.push(m);
     }
   }
 
-  // Centerline (skeleton) view: one line per member plus joint markers. Picking
-  // still works because each line carries its member id.
-  _rebuildSkeleton() {
+  // Centerline (skeleton) view: one line per member plus joint markers, merged
+  // into one LineSegments per colour. Picking still works: each segment keeps
+  // its member id (hitData).
+  _buildSkeleton() {
     const model = buildCenterlineModel(this.state);
     const colours = {
       [LAYERS.standard]: 0x3f3f46,
@@ -773,24 +777,23 @@ class Workspace {
       [LAYERS.guardrail]: 0xea580c,
     };
     this._lineMats = this._lineMats || {};
-    for (const seg of model.segments) {
+    const segments = model.segments.map(seg => {
       const selected = seg.id && this.selection.includes(seg.id);
       const colour = selected ? 0x2563eb : (colours[seg.layer] ?? 0x71717a);
       const key = `${colour}`;
       if (!this._lineMats[key]) this._lineMats[key] = new THREE.LineBasicMaterial({ color: colour });
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(...seg.start), new THREE.Vector3(...seg.end),
-      ]);
-      const line = new THREE.Line(geo, this._lineMats[key]);
-      line.userData = { id: seg.id, kind: 'line' };
-      this.contentGroup.add(line);
-    }
-    // Joint markers so splices and connections read clearly.
+      return { start: seg.start, end: seg.end, material: this._lineMats[key], data: { id: seg.id, kind: 'line' } };
+    });
+    for (const lines of mergeLineSegments(segments)) this.contentGroup.add(lines);
+    // Joint markers so splices and connections read clearly. Never picked.
     this._jointGeo = this._jointGeo || new THREE.SphereGeometry(0.1, 8, 6);
     this._jointMat = this._jointMat || new THREE.MeshBasicMaterial({ color: 0x18181b });
-    for (const p of model.points) {
+    const joints = model.points.map(p => {
       const m = new THREE.Mesh(this._jointGeo, this._jointMat);
       m.position.set(p[0], p[1], p[2]);
+      return m;
+    });
+    for (const m of instanceMeshes(joints)) {
       m.raycast = () => {};
       this.contentGroup.add(m);
     }
@@ -887,8 +890,9 @@ class Workspace {
 
   _rebuildLabels() {
     if (!this.labelGroup) return;
-    this.labelGroup.clear();
+    clearGroup(this.labelGroup);
     this.labelGroup.visible = this.showLegLoads;
+    this.engine?.invalidate();
     if (!this.showLegLoads) return;
     const { legs } = this.state.takeoff();
     for (const leg of legs) {
@@ -903,23 +907,26 @@ class Workspace {
   // Rosette connection nodes: drawn procedurally on every standard so ledgers,
   // horizontals and braces always have real points to connect to.
   _rebuildNodes() {
-    this.nodeGroup.clear();
+    clearGroup(this.nodeGroup);
     const tool = this.tools?.tool;
     // Only the tools that start from a node light them up. Decks, braces and
     // load patches work off ledgers and faces, so they leave nodes neutral.
     const nodeTool = tool === 'ledger' || tool === 'truss' || tool === 'bracket';
     const validFor = this._nodeValidator(tool);
+    const meshes = [];
     for (const n of this.state.nodes()) {
       const ok = nodeTool ? validFor(n) : false;
       const mat = nodeTool ? (ok ? NODE_MATERIALS.valid : NODE_MATERIALS.invalid) : MATERIALS.hardware;
       const disc = rosetteDisk(n.x, n.y, n.z, mat);
       disc.userData = { node: n };
-      this.nodeGroup.add(disc);
+      meshes.push(disc);
       // Forgiving hit target: a thin disc seen edge on is nearly unclickable.
       const proxy = nodePickProxy(n.x, n.y, n.z);
       proxy.userData = { node: n };
-      this.nodeGroup.add(proxy);
+      meshes.push(proxy);
     }
+    for (const m of instanceMeshes(meshes)) this.nodeGroup.add(m);
+    this.engine?.invalidate({ shadows: true });
   }
 
   /** Can the active tool start a placement from this node? */

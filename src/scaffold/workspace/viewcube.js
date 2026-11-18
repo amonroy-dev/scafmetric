@@ -94,8 +94,14 @@ export class ViewCube {
     const offset = new THREE.Vector3().subVectors(this.engine.camera.position, this.engine.controls.target);
     if (offset.lengthSq() < 1e-6) offset.set(1, -1, 1);
     offset.normalize().multiplyScalar(this._R);
+    const up = this.engine.camera.up;
+    // A pan, zoom or hover redraws the main view without turning it; the cube
+    // only needs drawing when the view direction or up vector changed.
+    const key = [offset.x, offset.y, offset.z, up.x, up.y, up.z].map(v => v.toFixed(5)).join(',');
+    if (key === this._lastKey) return;
+    this._lastKey = key;
     this.camera.position.copy(offset);
-    this.camera.up.copy(this.engine.camera.up);
+    this.camera.up.copy(up);
     this.camera.lookAt(0, 0, 0);
     this.renderer.render(this.scene, this.camera);
   }

@@ -165,7 +165,20 @@ const CHECKS = {
     r.added !== 1 && `clicking a face should place exactly 1 brace, placed ${r.added}`,
     !(r.lengthFt > 1) && `brace length looks wrong: ${r.lengthFt}`,
   ],
-  braceShiftFill: r => [r.added < 2 && `SHIFT+click braced only ${r.added} further faces`],
+  braceShiftFill: r => [
+    r.added < 2 && `SHIFT+click braced only ${r.added} further faces`,
+    r.undoSteps !== 1 && `a SHIFT fill must be one undo step, it was ${r.undoSteps}`,
+    r.afterUndo !== r.before && `one Ctrl+Z should take back the whole run: ${r.before} braces before, ${r.afterUndo} after undo`,
+    r.afterRedo !== r.added && `Ctrl+Y should restore all ${r.added} braces, restored ${r.afterRedo}`,
+  ],
+  renderOnDemand: r => [
+    r.idleFrames !== 0 && `the canvas drew ${r.idleFrames} frames in 20 with nothing changing`,
+    r.idleAgain !== 0 && `the canvas kept drawing after the pan ended (${r.idleAgain} frames in 20)`,
+    !(r.ghosts > 0 && r.hoverFrames > 0) && `a hover that shows a ghost must draw (ghosts ${r.ghosts}, frames ${r.hoverFrames})`,
+    !(r.panFrames > 0) && 'panning the camera drew no frames',
+    !(r.members > r.contentObjects * 5) && `the model should be instanced: ${r.members} members in ${r.contentObjects} draw objects`,
+    !(r.drawCalls < 120) && `a frame should take few draw calls, took ${r.drawCalls}`,
+  ],
   braceRotate: r => [r.after === r.before && `R did not flip the brace direction (${r.before})`],
   deckOne: r => [
     r.ghosts < 1 && 'no deck ghost was drawn on hover',

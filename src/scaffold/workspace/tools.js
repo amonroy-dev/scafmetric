@@ -12,8 +12,9 @@ import * as THREE from 'three';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
-  findClosestUnoccupiedTarget, computeBatchPlan, planBlock, planStandardSegmentsForHeight,
+  findClosestUnoccupiedTarget, computeBatchPlan, planBlock, planStandardSegmentsForHeight, liftFrame,
 } from './planning.js';
+import { hitData } from './instancing.js';
 import {
   getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
   DEFAULT_BAY_LIVE_LOAD_PSF,
@@ -41,6 +42,14 @@ function windowContains(sel, r) {
 }
 function crossingIntersects(sel, r) {
   return !(r.xMax < sel.xMin || r.xMin > sel.xMax || r.yMax < sel.yMin || r.yMin > sel.yMax);
+}
+
+// Order-free key for a ledger between two points. Ledger ends are copied from
+// node coordinates, so equal points give equal keys.
+const pointKey = p => `${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)},${Math.round(p[2] * 1000)}`;
+function segmentKey(a, b) {
+  const ka = pointKey(a), kb = pointKey(b);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 }
 
 export class Tools {
@@ -99,8 +108,46 @@ export class Tools {
   }
   currentPart() { return getPart(this.categoryKey, this.partId); }
 
-  _clearGhost() { this.ghostGroup.clear(); }
-  _clearOverlay() { this.overlayGroup.clear(); }
+  // The canvas draws on demand, so every change to what the tools show asks for
+  // a frame. Clearing an empty group changes nothing and asks for nothing,
+  // which keeps a plain hover in Select from redrawing the scene.
+  _clearGhost() {
+    if (!this.ghostGroup.children.length) return;
+    this.ghostGroup.clear();
+    this.engine.invalidate?.();
+  }
+  _clearOverlay() {
+    if (!this.overlayGroup.children.length) return;
+    // The marquee is redrawn on every move with its own materials and edge
+    // geometry; free them rather than leak a set per pointer event.
+    for (const c of this.overlayGroup.children) {
+      c.material.dispose();
+      if (c.geometry !== PLANE_GEO) c.geometry.dispose();
+    }
+    this.overlayGroup.clear();
+    this.engine.invalidate?.();
+  }
+
+  /**
+   * Nodes grouped by lift, each lift's grid frame, and the ledgers already
+   * placed, cached until the model changes. Colouring the nodes for the Ledger
+   * tool asks for every node's target; recomputing these per node made a
+   * rebuild with that tool active cost 220 ms on a 40-standard job.
+   */
+  _lifts() {
+    const version = this.state.version;
+    if (this._liftCache && this._liftCache.version === version) return this._liftCache;
+    const byLevel = new Map();
+    for (const n of this.state.nodes()) {
+      let list = byLevel.get(n.level);
+      if (!list) byLevel.set(n.level, list = []);
+      list.push(n);
+    }
+    const ledgerKeys = new Set();
+    for (const l of this.state.ledgers.values()) ledgerKeys.add(segmentKey(l.a, l.b));
+    this._liftCache = { version, byLevel, ledgerKeys, frames: new Map() };
+    return this._liftCache;
+  }
 
   // Pure camera gestures we never intercept. Shift is NOT included: shift+drag
   // pans (handled by the engine) while shift+click still reaches the tool, which
@@ -112,7 +159,7 @@ export class Tools {
   _nearestNode(e) {
     this.engine.setPointerFromEvent(e);
     const hit = this.engine.pick(this.hooks.getNodeMeshes?.() || []);
-    return hit ? hit.object.userData.node : null;
+    return hit ? hitData(hit).node || null : null;
   }
   _groundSnap(e) {
     this.engine.setPointerFromEvent(e);
@@ -160,6 +207,10 @@ export class Tools {
     if (marquee && dragged) { this._finishMarquee(marquee, down.ctrl || this.tool !== 'select'); return; }
     if (dragged) return; // camera/aborted drag
     this._act(e);
+    // The ghost previewed what this click just placed. Show what the next click
+    // would do instead, without waiting for the pointer to move: a stale ghost
+    // left over a placed part (an amber load ghost over the new cyan patch).
+    this._updateGhost(e);
   }
 
   _drawMarquee() {
@@ -184,6 +235,7 @@ export class Tools {
     edge.position.copy(fill.position);
     edge.scale.copy(fill.scale);
     this.overlayGroup.add(fill, edge);
+    this.engine.invalidate?.();
   }
 
   _finishMarquee(m, additive) {
@@ -211,7 +263,7 @@ export class Tools {
       if (!g) return;
       const plan = this.standardStackPlan();
       if (!plan.length) return;
-      for (const len of plan) s.addStandard(g.x, g.y, len);
+      s.batch(() => { for (const len of plan) s.addStandard(g.x, g.y, len); });
       if (plan.length > 1) this.hooks.onBulkFill?.(plan.length, 'standard segment');
       return;
     }
@@ -303,8 +355,9 @@ export class Tools {
     const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
     const ids = [];
     for (const h of hits) {
-      if (h.object.userData?.proxy) continue; // invisible hit targets never select
-      const id = h.object.userData?.id;
+      const d = hitData(h);
+      if (d.proxy) continue; // invisible hit targets never select
+      const id = d.id;
       if (id && !ids.includes(id)) ids.push(id);
     }
     if (!ids.length) { this._cycle = null; return null; }
@@ -317,23 +370,19 @@ export class Tools {
     return ids[this._cycle.index];
   }
 
-  _nodesAtLevel(level) { return this.state.nodes().filter(n => n.level === level); }
+  _nodesAtLevel(level) { return this._lifts().byLevel.get(level) || []; }
 
   _ledgerExists(a, b) {
-    for (const l of this.state.ledgers.values()) {
-      const m1 = Math.hypot(l.a[0] - a.x, l.a[1] - a.y) < 1e-6 && Math.abs(l.a[2] - a.z) < 1e-6
-        && Math.hypot(l.b[0] - b.x, l.b[1] - b.y) < 1e-6 && Math.abs(l.b[2] - b.z) < 1e-6;
-      const m2 = Math.hypot(l.a[0] - b.x, l.a[1] - b.y) < 1e-6 && Math.abs(l.a[2] - b.z) < 1e-6
-        && Math.hypot(l.b[0] - a.x, l.b[1] - a.y) < 1e-6 && Math.abs(l.b[2] - a.z) < 1e-6;
-      if (m1 || m2) return true;
-    }
-    return false;
+    return this._lifts().ledgerKeys.has(segmentKey([a.x, a.y, a.z], [b.x, b.y, b.z]));
   }
 
   /** Nearest unoccupied adjacent node at the same lift. */
   ledgerTargetFor(node) {
-    const nodes = this._nodesAtLevel(node.level);
-    return findClosestUnoccupiedTarget(node, nodes, c => !this._ledgerExists(node, c));
+    const lifts = this._lifts();
+    const nodes = lifts.byLevel.get(node.level) || [];
+    let frame = lifts.frames.get(node.level);
+    if (frame === undefined) lifts.frames.set(node.level, frame = liftFrame(nodes));
+    return findClosestUnoccupiedTarget(node, nodes, c => !this._ledgerExists(node, c), frame);
   }
 
   // --- standards -----------------------------------------------------------
@@ -430,14 +479,24 @@ export class Tools {
   }
 
   /** SHIFT: brace every selected perimeter face at this height. */
+  // Every SHIFT fill commits as one edit: one rebuild and one undo step for the
+  // whole run (see ScaffoldState.batch).
+
+  /** Place a planned set of braces, skipping any already there. */
+  _addBraces(plan) {
+    return this.state.batch(() => {
+      let added = 0;
+      for (const t of plan) {
+        if (this._braceExistsBetween(t.a, t.b)) continue;
+        this.state.addBrace(t.a, t.b);
+        added++;
+      }
+      return added;
+    });
+  }
+
   _batchFillBraces(target) {
-    const plan = this._perimeterBracePlan(target.midZ);
-    let added = 0;
-    for (const t of plan) {
-      if (this._braceExistsBetween(t.a, t.b)) continue;
-      this.state.addBrace(t.a, t.b);
-      added++;
-    }
+    const added = this._addBraces(this._perimeterBracePlan(target.midZ));
     this.hooks.onBulkFill?.(added, 'brace');
     return added;
   }
@@ -446,10 +505,13 @@ export class Tools {
   _batchFillPlanks(ledger, sideSign) {
     const existing = [...this.state.plankPlacements.values()];
     const previews = computePlankBatchPreview(ledger, this.state.ledgerList(), sideSign, existing);
-    let added = 0;
-    for (const p of previews) {
-      if (this.state.addPlankOnLedger(p.placement.ledgerId, p.placement.sideSign)) added++;
-    }
+    const added = this.state.batch(() => {
+      let n = 0;
+      for (const p of previews) {
+        if (this.state.addPlankOnLedger(p.placement.ledgerId, p.placement.sideSign)) n++;
+      }
+      return n;
+    });
     this.hooks.onBulkFill?.(added, 'deck');
     return added;
   }
@@ -457,7 +519,9 @@ export class Tools {
   _batchFillLedgers(level) {
     const nodes = this._nodesAtLevel(level);
     const plan = computeBatchPlan(nodes, (a, b) => !this._ledgerExists(a, b));
-    for (const { a, b } of plan) this.state.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    this.state.batch(() => {
+      for (const { a, b } of plan) this.state.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    });
     this.hooks.onBulkFill?.(plan.length, 'ledger');
   }
 
@@ -468,7 +532,7 @@ export class Tools {
     const ray = this.engine.raycaster.ray;
     const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
     for (const h of hits) {
-      const d = h.object.userData || {};
+      const d = hitData(h);
       if (d.kind !== 'ledger' && d.kind !== 'line') continue;
       const ledger = this.state.ledgers.get(d.id);
       if (ledger) return { ledger, point: this._sidePoint(ledger, ray, h.point) };
@@ -503,10 +567,13 @@ export class Tools {
     const existing = [...this.state.liveLoads.values()];
     const previews = computeLiveLoadBatchPreview(
       ledger, this.state.ledgerList(), sideSign, existing, this.liveLoadPsf);
-    let added = 0;
-    for (const p of previews) {
-      if (this.state.addLiveLoad(p.placement.ledgerId, p.placement.sideSign, p.placement.psf)) added++;
-    }
+    const added = this.state.batch(() => {
+      let n = 0;
+      for (const p of previews) {
+        if (this.state.addLiveLoad(p.placement.ledgerId, p.placement.sideSign, p.placement.psf)) n++;
+      }
+      return n;
+    });
     this.hooks.onBulkFill?.(added, 'live load');
     return added;
   }
@@ -537,7 +604,14 @@ export class Tools {
       maxLevel: 0,
     });
     if (!plan) return 0;
+    // One edit for the whole block: one rebuild, one undo step.
+    s.batch(() => this._layBlock(rect, plan));
+    this.hooks.onBulkFill?.(plan.standards.length, 'block');
+    return plan.standards.length;
+  }
 
+  _layBlock(rect, plan) {
+    const s = this.state;
     for (const st of plan.standards) {
       for (const len of st.segments) s.addStandard(st.x, st.y, len);
     }
@@ -566,8 +640,6 @@ export class Tools {
       const a = nodeAt(d.x0, d.y0, d.level), b = nodeAt(d.x1, d.y1, d.level);
       if (a && b) s.addPlank([a.x, a.y, a.z], [b.x, b.y, b.z]);
     }
-    this.hooks.onBulkFill?.(plan.standards.length, 'block');
-    return plan.standards.length;
   }
 
   _key(e) {
@@ -642,6 +714,15 @@ export class Tools {
   }
 
   _updateGhost(e) {
+    this._buildGhost(e);
+    if (!this.ghostGroup.children.length) return;
+    // The shadow map is baked only when the model changes, so a ghost that
+    // cast would leave its shadow behind where the cursor last was.
+    for (const m of this.ghostGroup.children) m.castShadow = false;
+    this.engine.invalidate?.();
+  }
+
+  _buildGhost(e) {
     this._clearGhost();
     this._pendingBatch = null;
     if (this.tool === 'select' || this.tool === 'erase' || this.tool === 'block') return;
@@ -688,7 +769,7 @@ export class Tools {
       const plan = this.bracePreview(e, e.shiftKey);
       for (const t of plan) this.ghostGroup.add(tubeBetween(t.a, t.b, 1.69, MATERIALS.ghost));
       this._pendingBatch = e.shiftKey && plan.length
-        ? { count: plan.length, label: 'brace', apply: () => { for (const t of plan) if (!this._braceExistsBetween(t.a, t.b)) this.state.addBrace(t.a, t.b); return plan.length; } }
+        ? { count: plan.length, label: 'brace', apply: () => this._addBraces(plan) }
         : null;
       this.hooks.onPreview?.('brace', plan.length, {
         batch: e.shiftKey, direction: this.braceDirection,

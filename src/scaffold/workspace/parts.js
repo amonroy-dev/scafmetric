@@ -9,6 +9,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { PICK_LAYER } from './instancing.js';
 
 export const inchesToFeet = i => i / 12;
 
@@ -503,6 +504,9 @@ const NODE_PICK_MAT = new THREE.MeshBasicMaterial({
 export function nodePickProxy(x, y, z) {
   const m = new THREE.Mesh(NODE_PICK_GEO, NODE_PICK_MAT);
   m.position.set(x, y, z);
+  // Raycast only: on its own layer the camera never draws it, and the shadow
+  // pass (which follows the camera's layers) never casts it.
+  m.layers.set(PICK_LAYER);
   return m;
 }
 
@@ -514,7 +518,13 @@ export const LEDGER_PICK_DIAMETER_IN = 6;
 
 /** Invisible, generously sized hit target along a tube. */
 export function tubePickProxy(a, b, diameterIn = LEDGER_PICK_DIAMETER_IN) {
-  return tubeBetween(a, b, diameterIn, NODE_PICK_MAT);
+  const m = tubeBetween(a, b, diameterIn, NODE_PICK_MAT);
+  // Drawn, it cost a draw call per ledger and cast a 6 in shadow under a
+  // 1.9 in tube.
+  m.castShadow = false;
+  m.receiveShadow = false;
+  m.layers.set(PICK_LAYER);
+  return m;
 }
 
 export const NODE_MATERIALS = {

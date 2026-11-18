@@ -47,7 +47,36 @@ export class ScaffoldState {
     this._seq = 0;
     this._history = [];
     this._future = [];
+    // Bumped on every change, inside a batch too, so derived data can be cached
+    // against it and never go stale mid-run.
+    this.version = 0;
+    this._batchDepth = 0;
+    this._batchPushed = false;
+    this._batchDirty = false;
     this.onChange = opts.onChange || (() => {});
+  }
+
+  /**
+   * Run several edits as one: one undo step and one change notification.
+   *
+   * A Shift-fill used to add its members one at a time, and every add pushed a
+   * full snapshot onto the history and rebuilt the whole scene. Filling a 66-bay
+   * level was 66 rebuilds (most of a second, several with the Ledger tool
+   * active) and 66 undo steps, which also pushed the user's earlier work off
+   * the 100-step history. Nested batches fold into the outermost one.
+   */
+  batch(fn) {
+    if (this._batchDepth === 0) { this._batchPushed = false; this._batchDirty = false; }
+    this._batchDepth++;
+    try {
+      return fn();
+    } finally {
+      this._batchDepth--;
+      if (this._batchDepth === 0 && this._batchDirty) {
+        this._batchDirty = false;
+        this.onChange();
+      }
+    }
   }
 
   _id(p) { return `${p}${++this._seq}`; }
@@ -80,6 +109,11 @@ export class ScaffoldState {
     this._emit();
   }
   _pushHistory() {
+    // Inside a batch only the state before its first edit is worth keeping.
+    if (this._batchDepth > 0) {
+      if (this._batchPushed) return;
+      this._batchPushed = true;
+    }
     this._history.push(this.snapshot());
     if (this._history.length > 100) this._history.shift();
     this._future.length = 0;
@@ -100,7 +134,11 @@ export class ScaffoldState {
     return true;
   }
   snap(v) { const s = this.snapStep; return s > 0 ? Math.round(v / s) * s : v; }
-  _emit() { this.onChange(); }
+  _emit() {
+    this.version++;
+    if (this._batchDepth > 0) { this._batchDirty = true; return; }
+    this.onChange();
+  }
 
   // Bottom of the standard tube, above the base assembly.
   baseOffsetFt() {

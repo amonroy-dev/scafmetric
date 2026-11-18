@@ -122,11 +122,20 @@ export function getAdjacentCandidates(source, nodes, axes, maxProjFt, canUse) {
 }
 
 /** Closest unoccupied adjacent node at the same lift, or null. */
-export function findClosestUnoccupiedTarget(source, nodesAtLift, canUse) {
+/**
+ * A lift's grid frame: its principal axes and how far a neighbour may be. Both
+ * are quadratic in the nodes at the lift, so callers asking for many nodes on
+ * one lift compute this once and pass it in. Null when the lift has no grid.
+ */
+export function liftFrame(nodesAtLift) {
   const scale = computeAdjacencyScaleFt(nodesAtLift);
   const axes = computeLiftAxes(nodesAtLift, scale);
-  if (!axes) return null;
-  const adj = getAdjacentCandidates(source, nodesAtLift, axes, maxProjFor(scale), canUse);
+  return axes ? { axes, maxProj: maxProjFor(scale) } : null;
+}
+
+export function findClosestUnoccupiedTarget(source, nodesAtLift, canUse, frame = liftFrame(nodesAtLift)) {
+  if (!frame) return null;
+  const adj = getAdjacentCandidates(source, nodesAtLift, frame.axes, frame.maxProj, canUse);
   let best = null, bestD = Infinity;
   for (const c of adj) {
     const d = Math.hypot(c.x - source.x, c.y - source.y);
