@@ -43,7 +43,7 @@ const UNSUPPORTED_TEMPLATE = `
   <div class="sfw-notice-body">
     <div class="sfw-notice-ico" aria-hidden="true">&#128421;</div>
     <h3>Open this on a desktop browser</h3>
-    <p>The scaffold builder is a 3D modelling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, right-drag to orbit, and SHIFT and R while placing.</p>
+    <p>The scaffold builder is a 3D modelling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, SHIFT+middle-drag to orbit, the wheel to zoom, and SHIFT and R while placing.</p>
     <p class="sfw-notice-sub">For the best experience and accurate results, open Scafmetric on a laptop or desktop. Beam analysis itself works fine on this device &mdash; you can keep entering loads by hand, and your work is saved for 30 days either way.</p>
     <button type="button" class="sfw-btn primary" data-sfw-close>Back to beam analysis</button>
   </div>
@@ -141,7 +141,7 @@ const TEMPLATE = `
   </div>
   <footer class="sfw-foot">
     <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br>
-      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> back to Select · middle-drag pans · right-drag orbits</span><br>
+      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> back to Select · middle-drag pans · <kbd>SHIFT</kbd>+middle-drag orbits · double middle-click fits · wheel zooms to the cursor</span><br>
       <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
@@ -243,7 +243,7 @@ class Workspace {
       const btn = this.root.querySelector('[data-toggle="ortho"]');
       if (btn) btn.classList.toggle('is-on', mode === 'orthographic');
     };
-    this.viewcube = new ViewCube(this.engine, 92, { onHome: () => { this.engine.setView('home'); this._frame(); } });
+    this.viewcube = new ViewCube(this.engine, 92, { onHome: () => this.engine.setView('home', { animate: true, fit: this._modelBox() }) });
     stage.appendChild(this.viewcube.el);
 
     this.state = new ScaffoldState({
@@ -258,6 +258,14 @@ class Workspace {
     this.nodeGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
     this.engine.scene.add(this.contentGroup, this.nodeGroup, this.labelGroup);
+    // What navigation needs from the model: Zoom Extents fits the model box, the
+    // wheel and orbit look for model surfaces under the cursor, and an orbit
+    // pivot snaps to the nearest rosette.
+    this.engine.navHooks = {
+      modelBox: () => this._modelBox(),
+      pickables: () => this.contentGroup.children,
+      snapPoints: () => this.state.nodes().map(n => new THREE.Vector3(n.x, n.y, n.z)),
+    };
     this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4 });
 
     this.engine.raycaster.params.Line = { threshold: 0.25 };
@@ -578,9 +586,14 @@ class Workspace {
     el.textContent = bits.join(' · ');
   }
 
-  _frame() {
+  _modelBox() {
     const b = stateBounds(this.state);
-    if (b) this.engine.frame(new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)));
+    return b ? new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)) : null;
+  }
+
+  _frame() {
+    const box = this._modelBox();
+    if (box) this.engine.frame(box);
   }
 
   _sync() {
@@ -977,6 +990,7 @@ class Workspace {
 
   _applyView(v) {
     if (!v) return;
+    this.engine.cancelTransition();
     this.engine.setProjection(v.projection);
     this.engine.controls.target.set(v.target[0], v.target[1], v.target[2]);
     this.engine.camera.position.set(v.position[0], v.position[1], v.position[2]);

@@ -1,7 +1,7 @@
 // Screen gate for the scaffold builder.
 //
 // The workspace is a 3D CAD surface: a 96 px tool rail, the canvas, and a
-// 332 px sidebar, driven by middle-drag pan, right-drag orbit and SHIFT/R/ALT
+// 332 px sidebar, driven by middle-drag pan, SHIFT+middle-drag orbit and SHIFT/R/ALT
 // modifiers while placing. None of that works on a phone, so the builder is
 // gated rather than shipped broken, and the beam analysis carries on as normal.
 //

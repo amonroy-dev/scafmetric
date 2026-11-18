@@ -187,6 +187,45 @@ const CHECKS = {
     r.miss !== 'too-short' && `a short pair should report 'too-short', reported '${r.miss}'`,
     !/rosette levels/.test(r.hint || '') && `the hint should explain the 4-level climb, said: ${r.hint}`,
   ],
+  panTopView: r => [
+    r.error > 2 && `middle-drag in Top: the grabbed point should stay under the cursor, it is ${r.error}px off`,
+    (Math.abs(r.moved[0]) < 0.5 || Math.abs(r.moved[1]) < 0.5) && `middle-drag in Top must pan on both axes, moved ${JSON.stringify(r.moved)}`,
+    Math.abs(r.camDir[2]) < 0.999 && `panning must not tilt the top view, camera is at ${JSON.stringify(r.camDir)}`,
+  ],
+  wheelZoomTop: r => [
+    r.drift > 0.05 && `wheel in Top: the point under the cursor drifted ${r.drift} ft`,
+    !(r.zoomAfter > r.zoomBefore * 1.3) && `wheel up should zoom in, zoom ${r.zoomBefore} -> ${r.zoomAfter}`,
+  ],
+  wheelZoomPerspective: r => [
+    r.drift > 0.05 && `wheel in 3D: the point under the cursor drifted ${r.drift} ft`,
+    !(r.distAfter < r.distBefore) && `wheel up should move in, distance ${r.distBefore} -> ${r.distAfter}`,
+  ],
+  doubleMiddleFits: r => [
+    r.offBefore.inside && 'the setup pan should have pushed the model off screen',
+    !r.inside && 'double middle-click should bring the whole model into view',
+    r.fill < 0.6 && `Zoom Extents should fill the view, model spans ${r.fill}`,
+  ],
+  orbitShiftMiddle: r => [
+    r.projection !== 'perspective' && `orbit runs in perspective, got ${r.projection}`,
+    r.turned < 0.2 && `SHIFT+middle-drag should orbit, turned only ${r.turned} rad`,
+    r.pivotShiftPx > 3 && `the orbit pivot should hold its place on screen, moved ${r.pivotShiftPx}px`,
+    !r.markerShown && 'the pivot marker should show during an orbit',
+    !r.markerHiddenAfter && 'the pivot marker should hide after the orbit',
+  ],
+  orbitLockedInTop: r => [
+    Math.abs(r.camDir[2]) < 0.999 && `SHIFT+middle-drag must not turn out of Top, camera is at ${JSON.stringify(r.camDir)}`,
+  ],
+  viewTransition: r => [
+    !r.started && 'an animated view change should start a transition',
+    r.midDir && (Math.hypot(...r.midDir.map((c, i) => c - r.startDir[i])) < 0.05 || Math.hypot(r.midDir[0], r.midDir[1] + 1, r.midDir[2]) < 0.05)
+      && `halfway through, the camera should be between Home and Front, it is at ${JSON.stringify(r.midDir)}`,
+    r.projection !== 'orthographic' && `an animated face view should land orthographic, got ${r.projection}`,
+    Math.abs(r.camDir[1] + 1) > 0.001 && `an animated Front should land exactly on -Y, camera is at ${JSON.stringify(r.camDir)}`,
+  ],
+  historyButtons: r => [
+    !r.backPrevented && 'the mouse Back button should be swallowed over the canvas',
+    !r.open && 'the Back button must not close the builder',
+  ],
   viewTop: r => [
     r.projection !== 'orthographic' && `a face view must be orthographic, got ${r.projection}`,
     r.coverage < 0.008 && `top view rendered blank (coverage ${r.coverage})`,

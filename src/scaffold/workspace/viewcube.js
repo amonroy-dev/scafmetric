@@ -113,7 +113,7 @@ export class ViewCube {
     const normal = hit.face.normal.clone().applyQuaternion(this.cube.quaternion).normalize();
     let best = FACES[0], bd = -Infinity;
     for (const f of FACES) { const d = normal.dot(f.axis); if (d > bd) { bd = d; best = f; } }
-    this.engine.setView(best.name);
+    this.engine.setView(best.name, { animate: true });
   }
 
   destroy() {

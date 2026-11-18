@@ -96,6 +96,61 @@ window.__sv = (() => {
     }));
   }
 
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function canvasCenter() {
+    const r = canvas().getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  /** A mouse pointer event for navigation; middle button unless told otherwise. */
+  function navPointer(type, at, opts) {
+    const o = opts || {};
+    return canvas().dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      pointerId: 7, pointerType: 'mouse', isPrimary: true,
+      clientX: at.x, clientY: at.y,
+      button: type === 'pointermove' ? -1 : (o.button ?? 1),
+      buttons: type === 'pointerup' ? 0 : (o.buttons ?? 4),
+      shiftKey: !!o.shift,
+    }));
+  }
+
+  async function middleDrag(a, b, opts) {
+    navPointer('pointerdown', a, opts);
+    for (let i = 1; i <= 10; i++) {
+      navPointer('pointermove', { x: a.x + (b.x - a.x) * i / 10, y: a.y + (b.y - a.y) * i / 10 }, opts);
+      await raf(1);
+    }
+    navPointer('pointerup', b, opts);
+    await raf(2);
+  }
+
+  function wheel(at, deltaY) {
+    canvas().dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y, deltaY, deltaMode: 0 }));
+  }
+
+  /** The ground point (z = 0) under a client pixel. */
+  function groundAt(p) {
+    const g = ws().engine.projectClientToGround(p.x, p.y);
+    return g ? [g.x, g.y, g.z] : null;
+  }
+
+  /** Where the model's box corners land on the canvas, and how much of it they fill. */
+  function modelOnScreen() {
+    const b = ws()._modelBox();
+    const r = canvas().getBoundingClientRect();
+    const pts = [];
+    for (let i = 0; i < 8; i++) {
+      pts.push(project([i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z]));
+    }
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    return {
+      inside: pts.every(p => p.x >= r.left - 1 && p.x <= r.right + 1 && p.y >= r.top - 1 && p.y <= r.bottom + 1),
+      fill: +Math.max((Math.max(...xs) - Math.min(...xs)) / r.width, (Math.max(...ys) - Math.min(...ys)) / r.height).toFixed(3),
+    };
+  }
+
   function setField(id, value) {
     const el = ws().root.querySelector('#' + id);
     if (!el) return false;
@@ -472,6 +527,128 @@ window.__sv = (() => {
       ws()._frame();
       await raf(10);
       return { projection: ws().engine.projection, camDir: camDir(), coverage: coverage() };
+    },
+
+    // ScaffoldPro navigation, through real middle-button and wheel events.
+    // Middle-drag in Top: the grabbed ground point follows the cursor on BOTH
+    // axes. It used to move only sideways when looking straight down.
+    async panTopView() {
+      tool('select');
+      ws().engine.setView('top');
+      ws()._frame();
+      await raf(4);
+      const c = canvasCenter();
+      const a = { x: c.x - 120, y: c.y - 70 }, b = { x: a.x + 180, y: a.y + 120 };
+      const grabbed = groundAt(a);
+      const before = ws().engine.controls.target.toArray();
+      await middleDrag(a, b);
+      const landed = project(grabbed);
+      const after = ws().engine.controls.target.toArray();
+      return {
+        error: +Math.hypot(landed.x - b.x, landed.y - b.y).toFixed(3),
+        moved: [+(after[0] - before[0]).toFixed(3), +(after[1] - before[1]).toFixed(3)],
+        camDir: camDir(), projection: ws().engine.projection,
+      };
+    },
+
+    // Wheel in Top: the ground point under the cursor stays under it.
+    async wheelZoomTop() {
+      const c = canvasCenter();
+      const at = { x: c.x + 160, y: c.y + 90 };
+      const before = groundAt(at), zoomBefore = ws().engine.camera.zoom;
+      wheel(at, -300);
+      await raf(2);
+      const after = groundAt(at);
+      return { drift: +Math.hypot(after[0] - before[0], after[1] - before[1]).toFixed(4), zoomBefore, zoomAfter: ws().engine.camera.zoom };
+    },
+
+    // Wheel in perspective: whatever is under the cursor stays under it.
+    async wheelZoomPerspective() {
+      ws().engine.setView('home');
+      ws()._frame();
+      await raf(4);
+      const e = ws().engine;
+      const c = canvasCenter();
+      const at = { x: c.x + 60, y: c.y + 40 };
+      const before = groundAt(at), distBefore = e.camera.position.distanceTo(e.controls.target);
+      wheel(at, -200);
+      await raf(2);
+      const after = groundAt(at);
+      return {
+        drift: +Math.hypot(after[0] - before[0], after[1] - before[1], after[2] - before[2]).toFixed(4),
+        distBefore: +distBefore.toFixed(3), distAfter: +e.camera.position.distanceTo(e.controls.target).toFixed(3),
+      };
+    },
+
+    // Double middle-click is Zoom Extents: from off screen the model comes back.
+    async doubleMiddleFits() {
+      const c = canvasCenter();
+      await middleDrag(c, { x: c.x + 700, y: c.y + 380 });
+      const offBefore = modelOnScreen();
+      for (const n of [1, 2]) {
+        navPointer('pointerdown', c);
+        navPointer('pointerup', c);
+        canvas().dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1, detail: n, clientX: c.x, clientY: c.y }));
+      }
+      await sleep(450);
+      await raf(2);
+      return { offBefore, ...modelOnScreen() };
+    },
+
+    // Shift+middle orbits about the model centre while the whole model is in
+    // view; the pivot holds its place on screen and its marker shows meanwhile.
+    async orbitShiftMiddle() {
+      const center = ws()._modelBox().getCenter(ws().engine.camera.position.clone()).toArray();
+      const p0 = project(center), dir0 = camDir();
+      const c = canvasCenter();
+      navPointer('pointerdown', c, { shift: true });
+      for (let i = 1; i <= 10; i++) { navPointer('pointermove', { x: c.x + 16 * i, y: c.y - 6 * i }, { shift: true }); await raf(1); }
+      const markerShown = ws().engine._pivotMarker.visible;
+      navPointer('pointerup', { x: c.x + 160, y: c.y - 60 }, { shift: true });
+      await sleep(400);
+      await raf(2);
+      const p1 = project(center), dir1 = camDir();
+      return {
+        pivotShiftPx: +Math.hypot(p1.x - p0.x, p1.y - p0.y).toFixed(3),
+        turned: +Math.acos(Math.min(1, dir0[0] * dir1[0] + dir0[1] * dir1[1] + dir0[2] * dir1[2])).toFixed(3),
+        markerShown, markerHiddenAfter: !ws().engine._pivotMarker.visible, projection: ws().engine.projection,
+      };
+    },
+
+    // In an orthographic face, Shift+middle does not turn out of it.
+    async orbitLockedInTop() {
+      ws().engine.setView('top');
+      ws()._frame();
+      await raf(4);
+      const c = canvasCenter();
+      await middleDrag(c, { x: c.x + 160, y: c.y + 40 }, { shift: true });
+      await sleep(200);
+      return { camDir: camDir(), projection: ws().engine.projection };
+    },
+
+    // A ViewCube face travels on a timed curve and lands exactly on the face.
+    // The midpoint is sampled by time, not frame count, so a slow software GPU
+    // cannot finish the move before it is looked at.
+    async viewTransition() {
+      const e = ws().engine;
+      e.setView('home');
+      await raf(2);
+      const startDir = camDir();
+      e.setView('front', { animate: true });
+      const tr = e._transition;
+      let midDir = null;
+      if (tr) { e._stepTransition(tr.start + tr.duration / 2); midDir = camDir(); }
+      await sleep(800);
+      await raf(3);
+      return { started: !!tr, startDir, midDir, camDir: camDir(), projection: e.projection };
+    },
+
+    // The mouse's Back button is swallowed over the canvas, not navigated.
+    async historyButtons() {
+      const c = canvasCenter();
+      const notCancelled = navPointer('pointerdown', c, { button: 3, buttons: 8 });
+      navPointer('pointerup', c, { button: 3 });
+      return { backPrevented: notCancelled === false, open: !ws().root.hidden };
     },
 
     async lineView() {
