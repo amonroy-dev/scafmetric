@@ -1,0 +1,302 @@
+// Headless WebGL verification for the scaffold builder.
+//
+// Unit tests prove the math; they cannot prove anything reaches the screen.
+// This script runs the real built site in headless Chrome with a software GL
+// backend (SwiftShader), drives the builder through real pointer and keyboard
+// events, screenshots every step, and fails if a step did not change the model
+// or if the canvas came back blank.
+//
+//   npm run visual              build, then run the whole walkthrough
+//   npm run visual -- --keep    leave Chrome running (for a manual look)
+//
+// Screenshots and report.json land in .visual/ (git-ignored).
+
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, extname, normalize, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { Cdp, browserTargets } from './lib/cdp.mjs';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const DIST = join(ROOT, 'dist');
+const OUT = process.env.VISUAL_OUT || join(ROOT, '.visual');
+const KEEP = process.argv.includes('--keep');
+const WIDTH = 1600;
+const HEIGHT = 1000;
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.map': 'application/json; charset=utf-8',
+};
+
+const CHROME_CANDIDATES = [
+  process.env.CHROME_PATH,
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+].filter(Boolean);
+
+// Console noise that is expected when the site runs without Firebase env vars.
+const IGNORED_ERRORS = /firebase|auth-config|\/api\/|account\.js|installations|Failed to load resource/i;
+
+function findChrome() {
+  for (const p of CHROME_CANDIDATES) if (existsSync(p)) return p;
+  throw new Error(`No Chrome or Edge found. Set CHROME_PATH.\nLooked in:\n  ${CHROME_CANDIDATES.join('\n  ')}`);
+}
+
+async function serveDist() {
+  const rootWithSep = DIST.endsWith(sep) ? DIST : DIST + sep;
+  const server = createServer(async (req, res) => {
+    const clean = decodeURIComponent((req.url || '/').split('?')[0].split('#')[0]);
+    const rel = normalize(clean).replace(/^(\.\.[/\\])+/, '').replace(/^[/\\]+/, '');
+    let full = join(DIST, rel);
+    if (full !== DIST && !full.startsWith(rootWithSep)) { res.writeHead(403).end(); return; }
+    try {
+      const info = await stat(full);
+      if (info.isDirectory()) full = join(full, 'index.html');
+      const body = await readFile(full);
+      res.writeHead(200, { 'content-type': MIME[extname(full).toLowerCase()] || 'application/octet-stream' });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found');
+    }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  return { server, port: server.address().port };
+}
+
+function launchChrome(url) {
+  const bin = findChrome();
+  const profile = join(tmpdir(), `scafmetric-visual-${process.pid}`);
+  const port = 9222 + (process.pid % 500);
+  const args = [
+    '--headless=new',
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    `--window-size=${WIDTH},${HEIGHT}`,
+    // Software GL: no GPU in CI or on a headless box, but WebGL must still work.
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+    '--enable-unsafe-swiftshader',
+    '--hide-scrollbars',
+    '--mute-audio',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-extensions',
+    '--disable-sync',
+    '--disable-default-apps',
+    '--disable-background-networking',
+    '--disable-features=Translate,MediaRouter,OptimizationHints',
+    '--force-device-scale-factor=1',
+    url,
+  ];
+  const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const stderr = [];
+  child.stderr.on('data', c => stderr.push(c.toString()));
+  return { child, port, bin, profile, stderr };
+}
+
+function killChrome(child) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill('SIGKILL');
+  }
+}
+
+// What each step must have achieved. Returns a list of failures (empty = pass).
+const CHECKS = {
+  open: r => [
+    !r.gl?.ok && 'no WebGL context on the canvas',
+    r.coverage < 0.02 && `canvas is effectively blank (coverage ${r.coverage})`,
+    r.counts.columns !== 4 && `starter bay should seed 4 standards, got ${r.counts.columns}`,
+    r.counts.ledgers !== 4 && `starter bay should seed 4 ledgers, got ${r.counts.ledgers}`,
+  ],
+  marqueeSelect: r => [
+    r.selected !== 4 && `a marquee over the starter bay should select 4 standards, selected ${r.selected}`,
+  ],
+  autoHeightStandards: r => [
+    r.plan.length < 2 && `a 19.7 ft target should plan a multi-segment stack, got ${JSON.stringify(r.plan)}`,
+    r.added !== r.plan.length * 4 && `four clicks should add ${r.plan.length * 4} segments, added ${r.added}`,
+  ],
+  ledgersEveryLevel: r => [r.added < 4 && `SHIFT+click added only ${r.added} ledgers across 3 levels`],
+  bracePreview: r => [
+    !r.target && `hovering a bay face found no brace target (${r.miss})`,
+    r.ghosts < 1 && 'no brace ghost was drawn on hover',
+    r.target && r.target.levelB - r.target.levelA !== -4 && r.target.levelB - r.target.levelA !== 4
+      && `a diagonal must climb 4 rosette levels, got ${r.target.levelB - r.target.levelA}`,
+  ],
+  braceOne: r => [
+    r.added !== 1 && `clicking a face should place exactly 1 brace, placed ${r.added}`,
+    !(r.lengthFt > 1) && `brace length looks wrong: ${r.lengthFt}`,
+  ],
+  braceShiftFill: r => [r.added < 2 && `SHIFT+click braced only ${r.added} further faces`],
+  braceRotate: r => [r.after === r.before && `R did not flip the brace direction (${r.before})`],
+  deckOne: r => [
+    r.ghosts < 1 && 'no deck ghost was drawn on hover',
+    r.added !== 1 && `clicking a ledger should deck exactly 1 bay, got ${r.added}`,
+    r.boards < 2 && `a decked bay should lay multiple boards, got ${r.boards}`,
+  ],
+  deckShiftFill: r => [r.added < 1 && 'SHIFT+click decked no bays'],
+  liveLoadPatch: r => [
+    r.added !== 1 && `clicking a ledger should add 1 load patch, got ${r.added}`,
+    r.mode !== 'bays' && `placing a patch should switch the model to per-bay loads, got ${r.mode}`,
+    !(r.placedLiveLb > 0) && `the patch carried no live load (${r.placedLiveLb} lb)`,
+    !(r.cyanDelta > 0.002) && `the load patch never reached the screen (cyan ${r.cyanBefore} -> ${r.cyanAfter})`,
+  ],
+  blockRotate: r => [r.after === r.before && 'R did not rotate the block preview'],
+  blockDrag: r => [
+    r.addedColumns < 4 && `a block drag should raise at least 4 standards, got ${r.addedColumns}`,
+    r.addedLedgers < 4 && `a block drag should add ledgers, got ${r.addedLedgers}`,
+  ],
+  braceShortStackMessage: r => [
+    r.miss !== 'too-short' && `a short pair should report 'too-short', reported '${r.miss}'`,
+    !/rosette levels/.test(r.hint || '') && `the hint should explain the 4-level climb, said: ${r.hint}`,
+  ],
+  viewTop: r => [
+    r.projection !== 'orthographic' && `a face view must be orthographic, got ${r.projection}`,
+    r.coverage < 0.008 && `top view rendered blank (coverage ${r.coverage})`,
+    Math.abs(r.camDir[2]) < 0.999 && `top view must look straight down, camera is at ${JSON.stringify(r.camDir)}`,
+  ],
+  viewFront: r => [
+    r.projection !== 'orthographic' && `a face view must be orthographic, got ${r.projection}`,
+    r.coverage < 0.008 && `front view rendered blank (coverage ${r.coverage})`,
+    Math.abs(r.camDir[1] + 1) > 0.001 && `front view must look along -Y, camera is at ${JSON.stringify(r.camDir)}`,
+  ],
+  lineView: r => [r.coverage < 0.004 && `line view rendered blank (coverage ${r.coverage})`],
+  solidAgain: r => [
+    r.coverage < 0.02 && `solid view did not come back (coverage ${r.coverage})`,
+    !(r.legs > 0) && 'no legs in the takeoff',
+    !(r.bomLineItems > 0) && 'empty bill of materials',
+  ],
+};
+
+async function main() {
+  if (!existsSync(join(DIST, 'scaffold-app.js'))) {
+    throw new Error('dist/ is not built. Run `npm run build` first (or use `npm run visual`).');
+  }
+  await rm(OUT, { recursive: true, force: true });
+  await mkdir(OUT, { recursive: true });
+
+  const { server, port } = await serveDist();
+  const url = `http://127.0.0.1:${port}/calculator.html`;
+  const chrome = launchChrome(url);
+  const report = { url, chrome: chrome.bin, steps: [], errors: [], ignored: [], failures: [] };
+  let cdp = null;
+
+  try {
+    const targets = await browserTargets(chrome.port);
+    const page = targets.find(t => t.type === 'page' && t.url.includes('calculator.html')) || targets.find(t => t.type === 'page');
+    cdp = await Cdp.attach(page.webSocketDebuggerUrl);
+
+    await cdp.send('Page.enable');
+    await cdp.send('Runtime.enable');
+    await cdp.send('Log.enable');
+    cdp.on('Runtime.exceptionThrown', p => {
+      const d = p.exceptionDetails || {};
+      report.errors.push(`uncaught: ${d.exception?.description || d.text}`);
+    });
+    cdp.on('Log.entryAdded', p => {
+      const e = p.entry || {};
+      if (e.level !== 'error') return;
+      const line = `${e.source}: ${e.text}${e.url ? ` (${e.url})` : ''}`;
+      (IGNORED_ERRORS.test(line) ? report.ignored : report.errors).push(line);
+    });
+
+    // The page is already loading; make sure it has finished before driving it.
+    await cdp.send('Page.navigate', { url });
+    await new Promise(r => {
+      const done = () => r();
+      cdp.on('Page.loadEventFired', done);
+      setTimeout(done, 20000);
+    });
+    await new Promise(r => setTimeout(r, 400));
+
+    const driver = await readFile(join(ROOT, 'tests/visual/drive.js'), 'utf8');
+    await cdp.evaluate(driver, { awaitPromise: false });
+    const names = await cdp.evaluate('window.__sv.names');
+    console.log(`Chrome: ${chrome.bin}`);
+    console.log(`Driving ${names.length} steps at ${WIDTH}x${HEIGHT}\n`);
+
+    let index = 0;
+    for (const name of names) {
+      index += 1;
+      const label = `${String(index).padStart(2, '0')}-${name}`;
+      let result;
+      try {
+        result = await cdp.evaluate(`window.__sv.run(${JSON.stringify(name)})`);
+      } catch (err) {
+        report.failures.push(`${name}: ${err.message}`);
+        console.log(`  ${label}  THREW  ${err.message}`);
+        break;
+      }
+      await cdp.evaluate('window.__sv.paint()', { awaitPromise: false });
+      const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      await writeFile(join(OUT, `${label}.png`), Buffer.from(shot.data, 'base64'));
+
+      const checks = (CHECKS[name] ? CHECKS[name](result) : []).filter(Boolean);
+      for (const c of checks) report.failures.push(`${name}: ${c}`);
+      report.steps.push({ ...result, shot: `${label}.png`, failures: checks });
+
+      const mark = checks.length ? 'FAIL' : 'ok  ';
+      console.log(`  ${label}  ${mark}  ${summarize(result)}`);
+      for (const c of checks) console.log(`        ${c}`);
+    }
+
+    const pageErrors = await cdp.evaluate('window.__sv.drainErrors()');
+    for (const e of pageErrors || []) (IGNORED_ERRORS.test(e) ? report.ignored : report.errors).push(e);
+  } finally {
+    if (cdp) cdp.close();
+    if (!KEEP) killChrome(chrome.child);
+    server.close();
+  }
+
+  for (const e of report.errors) report.failures.push(`page error: ${e}`);
+  await writeFile(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
+
+  console.log(`\nScreenshots: ${OUT}`);
+  if (report.ignored.length) console.log(`Ignored ${report.ignored.length} auth/network console errors (no Firebase env).`);
+  if (report.failures.length) {
+    console.log(`\n${report.failures.length} failure(s):`);
+    for (const f of report.failures) console.log(`  - ${f}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`\nAll ${report.steps.length} steps rendered and behaved.`);
+  }
+}
+
+function summarize(r) {
+  const bits = [];
+  if (r.gl) bits.push(`${r.gl.renderer}`);
+  if (r.plan) bits.push(`plan ${r.plan.join('+')}`);
+  if (r.added !== undefined) bits.push(`+${r.added}`);
+  if (r.selected !== undefined) bits.push(`${r.selected} selected`);
+  if (r.addedColumns !== undefined) bits.push(`+${r.addedColumns} std, +${r.addedLedgers} ldg, +${r.addedBraces} brc`);
+  if (r.miss) bits.push(`miss: ${r.miss}`);
+  if (r.target) bits.push(`lift ${r.target.levelA}->${r.target.levelB}`);
+  if (r.lengthFt) bits.push(`${r.lengthFt} ft`);
+  if (r.boards) bits.push(`${r.boards} boards @ ${r.boardLengthFt} ft`);
+  if (r.before !== undefined && r.after !== undefined) bits.push(`${r.before} -> ${r.after}`);
+  if (r.placedLiveLb) bits.push(`${r.placedLiveLb} lb live`);
+  if (r.cyanDelta !== undefined) bits.push(`cyan +${r.cyanDelta}`);
+  if (r.projection) bits.push(r.projection);
+  if (r.coverage !== undefined) bits.push(`cov ${r.coverage}`);
+  if (r.legs) bits.push(`${r.legs} legs`);
+  if (r.bomLineItems) bits.push(`BOM ${r.bomLineItems}`);
+  return bits.join(' · ');
+}
+
+main().catch(err => {
+  console.error(err.message);
+  process.exitCode = 1;
+});

@@ -506,6 +506,17 @@ export function nodePickProxy(x, y, z) {
   return m;
 }
 
+// A ledger tube is 1.9 in across, which is about two pixels on screen at a
+// normal working zoom -- far too small to hover reliably. The deck and live
+// load tools both start from a ledger, so they get the same treatment as the
+// connection nodes: an invisible, fatter hit target around the real tube.
+export const LEDGER_PICK_DIAMETER_IN = 6;
+
+/** Invisible, generously sized hit target along a tube. */
+export function tubePickProxy(a, b, diameterIn = LEDGER_PICK_DIAMETER_IN) {
+  return tubeBetween(a, b, diameterIn, NODE_PICK_MAT);
+}
+
 export const NODE_MATERIALS = {
   // Node can start a placement with the active tool.
   valid: new THREE.MeshStandardMaterial({

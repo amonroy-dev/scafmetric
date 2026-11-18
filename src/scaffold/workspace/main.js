@@ -6,10 +6,11 @@ import { ViewCube } from './viewcube.js';
 import { Tools, TOOLS } from './tools.js';
 import { DEFAULT_BAY_LIVE_LOAD_PSF } from './liveloads.js';
 import { workspaceSupported } from './viewport.js';
+import { BRACE_DELTA_LIFT } from './braces.js';
 import { ScaffoldState, stateBounds } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
-  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, NODE_MATERIALS } from './parts.js';
+  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
@@ -516,7 +517,10 @@ class Workspace {
     const hint = this.$('sfw-hint');
     if (!hint) return;
     if (tool === 'brace') {
-      if (!count) { hint.textContent = 'No braceable face under the cursor — hover the side of a bay, between two standards.'; return; }
+      if (!count) {
+        hint.textContent = BRACE_MISS_HINT[info.reason] || BRACE_MISS_HINT['no-face'];
+        return;
+      }
       const dir = info.direction === 'descending' ? 'descending' : 'ascending';
       hint.textContent = info.batch
         ? `SHIFT: brace ${count} perimeter face${count === 1 ? '' : 's'} (${dir}, ${info.filter}, every ${info.nthBay} bay) — click or press Enter.`
@@ -634,6 +638,12 @@ class Workspace {
       const m = tubeBetween(l.a, l.b, 1.9, this._matFor(l.id, MATERIALS.ledger));
       m.userData = { id: l.id, kind: 'ledger' };
       this.contentGroup.add(m);
+      // Fat invisible hit target so the deck and live load tools can be hovered
+      // without landing on the 1.9 in tube exactly. Marked as a proxy so click
+      // cycling in select/erase ignores it.
+      const pick = tubePickProxy(l.a, l.b);
+      pick.userData = { id: l.id, kind: 'ledger', proxy: true };
+      this.contentGroup.add(pick);
     }
     for (const b of g.braces) {
       const m = tubeBetween(b.a, b.b, 1.69, this._matFor(b.id, MATERIALS.brace));
@@ -1027,11 +1037,23 @@ class Workspace {
   }
 }
 
+// Why a brace hover came up empty. The short-stack case is the one that used to
+// fail silently: a diagonal spans BRACE_DELTA_LIFT rosette levels, so both
+// standards need one more level than that.
+const BRACE_MISS_HINT = {
+  'no-face': 'No braceable face under the cursor — hover the side of a bay, between two standards.',
+  'too-short': `No diagonal fits there — a brace climbs ${BRACE_DELTA_LIFT} rosette levels, so both standards need ${BRACE_DELTA_LIFT + 1}. A single-segment standard has fewer: set a standard target height and click the stack again to build it taller.`,
+  'already-braced': 'Every lift on that face is already braced — hover a different bay or press R to brace the other way.',
+};
+
 function round(v, d) { const f = 10 ** d; return Math.round(v * f) / f; }
 
 const root = document.getElementById('scaffold-modal');
 if (root) {
   const ws = new Workspace(root);
+  // Handle for the headless WebGL harness (scripts/visual-check.mjs) and for
+  // debugging a live page from the console. Read-only as far as the app cares.
+  window.scaffoldWorkspace = ws;
   for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.addEventListener('click', () => ws.open());
   window.addEventListener('scafmetric:loads-imported', e => {
     const n = e.detail?.count ?? 0;

@@ -185,7 +185,10 @@ export class Engine {
     this.pointer.x = ((clientX - r.left) / r.width) * 2 - 1;
     this.pointer.y = -((clientY - r.top) / r.height) * 2 + 1;
     const v = new THREE.Vector3();
-    return this.raycaster.setFromCamera(this.pointer, this.camera).ray.intersectPlane(this.groundPlane, v) ? v : null;
+    // setFromCamera returns undefined in three.js, so the ray must be read
+    // from the raycaster afterwards -- chaining off it throws on every click.
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this.raycaster.ray.intersectPlane(this.groundPlane, v) ? v : null;
   }
 
   pick(objects, recursive = false) {
@@ -199,9 +202,14 @@ export class Engine {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const radius = Math.max(3, size.length() / 2);
+    // Zoom to fit keeps the direction you are already looking from. Forcing the
+    // home direction here threw away a chosen front/top/left view every time
+    // anything was added, which made the named views look like they did nothing.
+    const dir = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+    if (dir.lengthSq() < 1e-8) dir.copy(HOME_DIR); else dir.normalize();
     this.controls.target.copy(center);
     const dist = radius / Math.sin((this.persp.fov * Math.PI) / 180 / 2) * 1.08;
-    this.camera.position.copy(center).addScaledVector(HOME_DIR, dist);
+    this.camera.position.copy(center).addScaledVector(dir, dist);
     if (this.camera.isOrthographicCamera) {
       this.camera.zoom = this.frustumSize / Math.max(radius * 2.3, 1e-6);
       this.camera.updateProjectionMatrix();

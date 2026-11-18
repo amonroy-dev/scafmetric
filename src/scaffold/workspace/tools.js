@@ -18,11 +18,15 @@ import {
   getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
   DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
+import { buildSupportPair } from './supportspan.js';
 import { buildPlankPreviewForLedger, computePlankBatchPreview } from './planks.js';
 import {
   buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
 } from './braces.js';
 
+// How far from the tube the horizontal side-pick crossing may land before it
+// stops meaning "the cursor is on this side of that ledger".
+const SIDE_PICK_MAX_FT = 4;
 const DRAG_PX = 4;
 export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
@@ -60,6 +64,8 @@ export class Tools {
     // Block tool preview rotation, in 90 degree steps (R).
     this.rotationSteps = 0;
     this.sideFlipped = false;
+    // Why the last brace hover found nothing: 'no-face' | 'too-short' | 'already-braced'.
+    this.braceMiss = null;
     this.selection = new Set();
     this._down = null;
     this._marquee = null;
@@ -297,6 +303,7 @@ export class Tools {
     const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
     const ids = [];
     for (const h of hits) {
+      if (h.object.userData?.proxy) continue; // invisible hit targets never select
       const id = h.object.userData?.id;
       if (id && !ids.includes(id)) ids.push(id);
     }
@@ -369,20 +376,27 @@ export class Tools {
     this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
     const r = this.engine.raycaster.ray;
     const faces = this._faces();
-    if (!faces.length) return null;
+    if (!faces.length) { this.braceMiss = 'no-face'; return null; }
     const standards = [...this.state.standards.values()];
     const picked = pickFace(
       { origin: [r.origin.x, r.origin.y, r.origin.z], direction: [r.direction.x, r.direction.y, r.direction.z] },
       faces,
       { filter: this.braceFaceFilter, standards },
     );
-    if (!picked) return null;
+    if (!picked) { this.braceMiss = 'no-face'; return null; }
     const byColumn = nodesByColumn(this.state.nodes());
     const taken = (face, levelA, levelB) => {
       const t = this._faceEndpoints(face, byColumn, levelA, levelB);
       return t ? this._braceExistsBetween(t.a, t.b) : true;
     };
-    return faceBraceTarget(picked.face, byColumn, picked.cursorZ, this.braceDirection, taken, picked.side);
+    const target = faceBraceTarget(picked.face, byColumn, picked.cursorZ, this.braceDirection, taken, picked.side);
+    if (target) { this.braceMiss = null; return target; }
+    // Nothing placeable on a face we did hit. Say which of the two reasons it is,
+    // instead of failing silently: a diagonal climbs four rosette levels, so a
+    // single-segment standard can never carry one.
+    const ignoringTaken = faceBraceTarget(picked.face, byColumn, picked.cursorZ, this.braceDirection, null, picked.side);
+    this.braceMiss = ignoringTaken ? 'already-braced' : 'too-short';
+    return null;
   }
 
   _faceEndpoints(face, byColumn, levelA, levelB) {
@@ -451,14 +465,37 @@ export class Tools {
   _pickLedger(e) {
     this.engine.setPointerFromEvent(e);
     this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
+    const ray = this.engine.raycaster.ray;
     const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
     for (const h of hits) {
       const d = h.object.userData || {};
       if (d.kind !== 'ledger' && d.kind !== 'line') continue;
       const ledger = this.state.ledgers.get(d.id);
-      if (ledger) return { ledger, point: { x: h.point.x, y: h.point.y, z: h.point.z } };
+      if (ledger) return { ledger, point: this._sidePoint(ledger, ray, h.point) };
     }
     return null;
+  }
+
+  /**
+   * Where the cursor is, for the purpose of choosing a side of a ledger.
+   *
+   * The raycast hit lands on the TUBE SURFACE, which always leans toward the
+   * camera -- reading the side from it means you can never deck inward from an
+   * outside view. Use where the cursor ray crosses the horizontal plane the
+   * deck would lie in instead, and only fall back to the surface hit when the
+   * view is too flat for that crossing to be near the ledger.
+   */
+  _sidePoint(ledger, ray, hitPoint) {
+    const z = (ledger.a[2] + ledger.b[2]) / 2;
+    if (Math.abs(ray.direction.z) > 1e-3) {
+      const t = (z - ray.origin.z) / ray.direction.z;
+      if (t > 0) {
+        const x = ray.origin.x + ray.direction.x * t;
+        const y = ray.origin.y + ray.direction.y * t;
+        if (Math.hypot(x - hitPoint.x, y - hitPoint.y) <= SIDE_PICK_MAX_FT) return { x, y, z };
+      }
+    }
+    return { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
   }
 
   /** SHIFT: load every bay along the connected run of ledgers at this lift. */
@@ -594,7 +631,14 @@ export class Tools {
   /** Side of a ledger to use, honouring an R flip. */
   _sideFor(ledger, point) {
     const natural = getLedgerSideSign(ledger, point);
-    return this.sideFlipped ? (natural === 1 ? -1 : 1) : natural;
+    const want = this.sideFlipped ? (natural === 1 ? -1 : 1) : natural;
+    // A side with no opposite ledger has no bay, so nothing can go there. Rather
+    // than silently doing nothing, fall back to the side that does have one; R
+    // still picks between them when both are real bays.
+    const ledgers = this.state.ledgerList();
+    if (buildSupportPair(ledger, ledgers, want)) return want;
+    const other = want === 1 ? -1 : 1;
+    return buildSupportPair(ledger, ledgers, other) ? other : want;
   }
 
   _updateGhost(e) {
@@ -649,6 +693,7 @@ export class Tools {
       this.hooks.onPreview?.('brace', plan.length, {
         batch: e.shiftKey, direction: this.braceDirection,
         filter: this.braceFaceFilter, nthBay: this.braceNthBay,
+        reason: this.braceMiss,
       });
       return;
     }
