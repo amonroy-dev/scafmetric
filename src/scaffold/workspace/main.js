@@ -141,7 +141,7 @@ const TEMPLATE = `
   </div>
   <footer class="sfw-foot">
     <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br>
-      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> cancels · middle-drag pans · right-drag orbits</span><br>
+      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> back to Select · middle-drag pans · right-drag orbits</span><br>
       <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
@@ -182,12 +182,13 @@ class Workspace {
     document.addEventListener('keydown', e => {
       if (this.root.hidden) return;
       if (e.key === 'Escape') {
-        // Escape cancels the in-progress action only. It must never close the
-        // builder, which previously dumped the user back to the beam form.
+        // Escape cancels the in-progress action and drops back to the Select
+        // tool. It must never close the builder, which previously dumped the
+        // user back to the beam form.
         e.preventDefault();
-        if (this.tools) { this.tools.pending = null; this.tools._clearGhost(); this.tools._clearOverlay(); this.tools.transformHook = null; }
         this._transform = null;
-        this.$('sfw-hint').textContent = 'Action cancelled. Close with the × button; your model is saved.';
+        if (this.tools) { this.tools.transformHook = null; this.tools._clearOverlay(); this.tools.setTool('select'); }
+        this.$('sfw-hint').textContent = `${TOOL_META.select.hint} Close with the × button; your model is saved.`;
         return;
       }
       const mod = e.ctrlKey || e.metaKey;
@@ -255,11 +256,9 @@ class Workspace {
 
     this.contentGroup = new THREE.Group();
     this.nodeGroup = new THREE.Group();
-    this.beamGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
-    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.beamGroup, this.labelGroup);
+    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.labelGroup);
     this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4 });
-    this.beamMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x0b4f49, emissiveIntensity: 0.6, roughness: 0.4, metalness: 0.5 });
 
     this.engine.raycaster.params.Line = { threshold: 0.25 };
     this.tools = new Tools(this.engine, this.state, {
@@ -307,13 +306,15 @@ class Workspace {
     purgeExpired();
     const wip = loadWip(KEYS.scaffold);
     const el = this.$('sfw-retain');
+    // A fresh builder starts empty, looking straight down, with the standard
+    // tool ready to place the first leg.
     if (wip && wip.data) {
-      try { this.state.restore(wip.data); } catch { this._seedStarter(); }
+      try { this.state.restore(wip.data); } catch { this.state.clear(); }
       if (el) el.textContent = `${RETENTION_NOTICE} Restored from this device, ${formatSavedAt(wip.savedAt)}.`;
-    } else {
-      this._seedStarter();
-      if (el) el.textContent = RETENTION_NOTICE;
+    } else if (el) {
+      el.textContent = RETENTION_NOTICE;
     }
+    this.engine.setView('top');
     this._restoreViews();
     // If the account holds a newer copy, take it instead.
     loadServerWorkspace().then(server => {
@@ -331,22 +332,6 @@ class Workspace {
     this._renderViews();
     this._refreshProps();
     this._sync();
-  }
-
-  _seedStarter() {
-    const part = getPart('standards', DEFAULT_PART.standards);
-    const b = 7;
-    for (const [x, y] of [[0, 0], [b, 0], [0, b], [b, b]]) this.state.addStandard(x, y, part.lengthFt);
-    // Ledgers at the first connection level around the bay.
-    const nodes = this.state.nodes().filter(n => n.level === 1);
-    const at = (x, y) => nodes.find(n => n.x === x && n.y === y);
-    const pairs = [[[0, 0], [b, 0]], [[0, b], [b, b]], [[0, 0], [0, b]], [[b, 0], [b, b]]];
-    for (const [p, q] of pairs) {
-      const a = at(p[0], p[1]), c = at(q[0], q[1]);
-      if (a && c) this.state.addLedger([a.x, a.y, a.z], [c.x, c.y, c.z]);
-    }
-    const c0 = at(0, 0), c1 = at(b, b);
-    if (c0 && c1) this.state.addPlank([c0.x, c0.y, c0.z], [c1.x, c1.y, c1.z]);
   }
 
   _buildToolbar() {
@@ -881,11 +866,10 @@ class Workspace {
     return { beam: beamFromSupports([pos, start], [pos, start + span], { offToleranceFt: OFF_TOLERANCE_FT }), draw: { a: [pos, start, 0], b: [pos, start + span, 0] }, span };
   }
 
+  // The beam line is not drawn in the model; it only locates legs for import.
   _updateBeam() {
     if (!this.engine) return;
-    this.beamGroup.clear();
-    const { draw, span } = this._currentBeam();
-    this.beamGroup.add(tubeBetween(draw.a, draw.b, 4, this.beamMat));
+    const { span } = this._currentBeam();
     this.$('sfw-span').textContent = `${round(span, 3)} ft`;
     this._refreshTakeoff();
   }

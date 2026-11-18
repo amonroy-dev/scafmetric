@@ -53,12 +53,26 @@ function findChrome() {
   throw new Error(`No Chrome or Edge found. Set CHROME_PATH.\nLooked in:\n  ${CHROME_CANDIDATES.join('\n  ')}`);
 }
 
+// The calculator page and its bundles are kept out of dist/ so the deployed
+// site can only serve them through the paid-access gate. Locally there is no
+// gate, so serve them from where the build leaves them.
+const PRIVATE_ASSETS = {
+  '/calculator.html': join(ROOT, 'calculator.html'),
+  '/app.js': join(ROOT, 'workspace-private', 'app.js'),
+  '/scaffold-app.js': join(ROOT, 'workspace-private', 'scaffold-app.js'),
+};
+
 async function serveDist() {
   const rootWithSep = DIST.endsWith(sep) ? DIST : DIST + sep;
   const server = createServer(async (req, res) => {
     const clean = decodeURIComponent((req.url || '/').split('?')[0].split('#')[0]);
     const rel = normalize(clean).replace(/^(\.\.[/\\])+/, '').replace(/^[/\\]+/, '');
-    let full = join(DIST, rel);
+    let full = PRIVATE_ASSETS[clean] || join(DIST, rel);
+    if (PRIVATE_ASSETS[clean]) {
+      try { const body = await readFile(full); res.writeHead(200, { 'content-type': MIME[extname(full)] }); res.end(body); }
+      catch { res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found'); }
+      return;
+    }
     if (full !== DIST && !full.startsWith(rootWithSep)) { res.writeHead(403).end(); return; }
     try {
       const info = await stat(full);
@@ -118,12 +132,22 @@ function killChrome(child) {
 const CHECKS = {
   open: r => [
     !r.gl?.ok && 'no WebGL context on the canvas',
-    r.coverage < 0.02 && `canvas is effectively blank (coverage ${r.coverage})`,
-    r.counts.columns !== 4 && `starter bay should seed 4 standards, got ${r.counts.columns}`,
-    r.counts.ledgers !== 4 && `starter bay should seed 4 ledgers, got ${r.counts.ledgers}`,
+    r.counts.columns !== 0 && `a fresh builder should start empty, got ${r.counts.columns} standards`,
+    r.counts.ledgers !== 0 && `a fresh builder should start empty, got ${r.counts.ledgers} ledgers`,
+    r.initial.projection !== 'orthographic' && `a fresh builder should open in the top view, got ${r.initial.projection}`,
+    Math.abs(r.initial.camDir[2]) < 0.999 && `the opening view must look straight down, camera is at ${JSON.stringify(r.initial.camDir)}`,
+    r.initial.tool !== 'standard' && `the standard tool should be active on open, got ${r.initial.tool}`,
+    r.initial.activeButton !== 'standard' && `the toolbar should highlight Standard on open, got ${r.initial.activeButton}`,
+    r.initial.coverage > 0.002 && `an empty model should draw nothing teal (no beam line), coverage ${r.initial.coverage}`,
+  ],
+  escToSelect: r => [
+    r.fromBrace !== 'select' && `Esc from the brace tool should switch to Select, got ${r.fromBrace}`,
+    r.fromStandard !== 'select' && `Esc from the standard tool should switch to Select, got ${r.fromStandard}`,
+    r.activeButton !== 'select' && `the toolbar should highlight Select after Esc, got ${r.activeButton}`,
+    !r.open && 'Esc must not close the builder',
   ],
   marqueeSelect: r => [
-    r.selected !== 4 && `a marquee over the starter bay should select 4 standards, selected ${r.selected}`,
+    r.selected !== 4 && `a marquee over the four placed stacks should select 4 standards, selected ${r.selected}`,
   ],
   autoHeightStandards: r => [
     r.plan.length < 2 && `a 19.7 ft target should plan a multi-segment stack, got ${JSON.stringify(r.plan)}`,
@@ -182,7 +206,7 @@ const CHECKS = {
 };
 
 async function main() {
-  if (!existsSync(join(DIST, 'scaffold-app.js'))) {
+  if (!existsSync(PRIVATE_ASSETS['/scaffold-app.js'])) {
     throw new Error('dist/ is not built. Run `npm run build` first (or use `npm run visual`).');
   }
   await rm(OUT, { recursive: true, force: true });

@@ -214,7 +214,8 @@ window.__sv = (() => {
   }
 
   const steps = {
-    // Open the builder from the real page button, on the starter bay.
+    // Open the builder from the real page button with no saved work: it must
+    // start empty, in the top view, with the standard tool active.
     async open() {
       for (const k of Object.keys(localStorage)) {
         if (k.indexOf('scafmetric:wip:') === 0) localStorage.removeItem(k);
@@ -223,23 +224,38 @@ window.__sv = (() => {
       for (let i = 0; i < 300 && !(ws() && ws().engine); i++) await raf(1);
       if (!(ws() && ws().engine)) throw new Error('engine never started');
       await raf(30);
-      ws().engine.setView('home');
-      ws()._frame();
-      await raf(8);
-      return { gl: glInfo(), counts: counts(), coverage: coverage(), hint: hint() };
+      // Measure teal with the grid hidden: its thin centre axes are teal too.
+      ws().engine.grid.visible = false;
+      await raf(3);
+      const tealOnEmpty = coverage();
+      ws().engine.grid.visible = true;
+      await raf(3);
+      const initial = {
+        projection: ws().engine.projection, camDir: camDir(), tool: ws().tools.tool,
+        activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
+        // Teal pixels on an empty model: the old beam line drew a teal bar here.
+        coverage: tealOnEmpty,
+      };
+      return { gl: glInfo(), counts: counts(), coverage: coverage(), hint: hint(), initial };
     },
 
-    // Left-drag marquee. This is the path that threw on every pointerdown
-    // because the ground projection chained off Raycaster.setFromCamera.
-    async marqueeSelect() {
-      tool('select');
-      await drag([-3, -3, 0], [BAY + 3, BAY + 3, 0]);
-      const selected = ws().selection.length;
-      ws().selection = [];
-      ws().tools.selection.clear();
-      ws()._rebuildContent();
-      await raf(3);
-      return { selected, counts: counts() };
+    // Esc drops any tool back to Select, through a real document-level keypress.
+    async escToSelect() {
+      // The rest of the walkthrough builds from the home view.
+      ws().engine.setView('home');
+      await raf(8);
+      tool('brace');
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      await raf(2);
+      const fromBrace = ws().tools.tool;
+      tool('standard');
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      await raf(2);
+      return {
+        fromBrace, fromStandard: ws().tools.tool,
+        activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
+        open: !ws().root.hidden, hint: hint(),
+      };
     },
 
     // Typed target height: one click builds the whole planned stack, and a click
@@ -257,6 +273,20 @@ window.__sv = (() => {
         added: counts().segments - before, counts: counts(),
         note: (ws().$('sfw-stdh-note') || {}).textContent || null,
       };
+    },
+
+    // Left-drag marquee over the four stacks just placed. This is the path that
+    // threw on every pointerdown because the ground projection chained off
+    // Raycaster.setFromCamera.
+    async marqueeSelect() {
+      tool('select');
+      await drag([-3, -3, 0], [BAY + 3, BAY + 3, 0]);
+      const selected = ws().selection.length;
+      ws().selection = [];
+      ws().tools.selection.clear();
+      ws()._rebuildContent();
+      await raf(3);
+      return { selected, counts: counts() };
     },
 
     // SHIFT fills every bay at the level of the node under the cursor.
