@@ -11,6 +11,7 @@ Set the following in Vercel project environment settings (never put credentials 
 - `NEXT_PUBLIC_APP_URL`: exact canonical HTTPS application origin, with no path. The session endpoint accepts requests only from this origin.
 - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`: Firebase Admin service-account configuration, server-side only. Use a restricted service account and store the private key securely.
 - `SESSION_SECRET`: a unique, high-entropy secret of at least 32 characters, server-side only.
+- `SIGNUPS_OPEN` (optional): new accounts are paused while Scafmetric is a work in progress. Existing accounts and `ADMIN_UIDS` owners can still sign in; anyone else sees a work-in-progress notice and no account is created. Set exactly `true` and redeploy to let new users sign up.
 
 Signed-in users explicitly accept the terms and preliminary-use notice once per version. The server records the version and acceptance time in the account record. The full terms are in `terms.html`; keep the summary in `signin.html` consistent and bump TERMS_VERSION in src/terms.js when the terms or notice change so users are prompted again.
 

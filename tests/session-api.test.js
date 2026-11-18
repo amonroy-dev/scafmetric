@@ -88,3 +88,35 @@ test('admin navigation is exposed only for an allowlisted, active, fully onboard
   const unavailable=createSessionHandler({ env:adminEnv, accountStatus:async () => { throw Error('unavailable'); } });
   r=response(); await unavailable(req('GET', null, { cookie:cookieForUser('u1') }), r); assert.equal(r.statusCode, 503); assert.notEqual(r.body.isAdmin, true);
 });
+
+test('while signups are paused, people without an account are refused before any record or session is created', async () => {
+  let created=0;
+  const handler=createSessionHandler({ env, verifyToken:async () => decoded, accountFor:async () => { created++; return {}; }, accountStatus:async () => null });
+  let r=response(); await handler(req('POST',{ idToken:'good' }),r);
+  assert.equal(r.statusCode,403); assert.equal(r.body.signupsPaused,true); assert.match(r.body.error,/work in progress/);
+  assert.equal(created,0); assert.equal(r.headers['Set-Cookie'],undefined);
+  r=response(); await handler(req('GET',null),r); assert.equal(r.body.signupsOpen,false);
+  const storageDown=createSessionHandler({ env, verifyToken:async () => decoded, accountFor:async () => { created++; return {}; }, accountStatus:async () => { throw Error('unavailable'); } });
+  r=response(); await storageDown(req('POST',{ idToken:'good' }),r); assert.equal(r.statusCode,503); assert.equal(created,0); assert.equal(r.headers['Set-Cookie'],undefined);
+});
+
+test('while signups are paused, existing accounts and allowlisted owners still sign in', async () => {
+  let seen;
+  const existing=createSessionHandler({ env, verifyToken:async () => decoded, accountFor:async () => ({}), accountStatus:async user => { seen=user; return { termsAccepted:true, profileComplete:true }; } });
+  let r=response(); await existing(req('POST',{ idToken:'good' }),r);
+  assert.equal(r.statusCode,200); assert.match(r.headers['Set-Cookie'],/HttpOnly/); assert.deepEqual(seen,{ uid:decoded.uid, email:decoded.email });
+  const owner=createSessionHandler({ env:{ ...env, ADMIN_UIDS:'u1' }, verifyToken:async () => decoded, accountFor:async () => ({}), accountStatus:async () => null });
+  r=response(); await owner(req('POST',{ idToken:'good' }),r); assert.equal(r.statusCode,200);
+});
+
+test('setting SIGNUPS_OPEN=true lets new users create accounts again', async () => {
+  let created=0;
+  const openEnv={ ...env, SIGNUPS_OPEN:'true' };
+  const handler=createSessionHandler({ env:openEnv, verifyToken:async () => decoded, accountFor:async () => { created++; return {}; }, accountStatus:async () => null });
+  let r=response(); await handler(req('POST',{ idToken:'good' }),r); assert.equal(r.statusCode,200); assert.equal(created,1);
+  r=response(); await handler(req('GET',null),r); assert.equal(r.body.signupsOpen,true);
+  for (const value of ['1','yes','TRUE','']) {
+    const closed=createSessionHandler({ env:{ ...env, SIGNUPS_OPEN:value }, verifyToken:async () => decoded, accountFor:async () => ({}), accountStatus:async () => null });
+    r=response(); await closed(req('POST',{ idToken:'good' }),r); assert.equal(r.statusCode,403);
+  }
+});

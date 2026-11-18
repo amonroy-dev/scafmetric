@@ -3,7 +3,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { ensureAccount, readAccount, hasProfile, normalizeProfile, TERMS_VERSION } from '../../server/account.js';
 import { COOKIE_NAME, cookieFor, getSessionCookie, issueSession, sameOrigin, verifySession } from '../../server/session-core.js';
-import { canAccessAdmin } from '../../server/admin-access.js';
+import { canAccessAdmin, isAdminUid } from '../../server/admin-access.js';
+import { SIGNUPS_PAUSED_MESSAGE, signupsOpen } from '../../server/signups.js';
 
 let adminAuth;
 let firestore;
@@ -43,11 +44,12 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
     if (req.method === 'GET') {
       const configured = isConfigured(env);
       const user = verifySession(getSessionCookie(req.headers.cookie), env);
-      if (!configured || !user) return send(res, 200, { configured, authenticated: false });
+      const open = signupsOpen(env);
+      if (!configured || !user) return send(res, 200, { configured, authenticated: false, signupsOpen: open });
       try {
         const account = await accountStatus(user);
-        return send(res, 200, account ? { configured, authenticated: true, user, termsAccepted: account.termsAccepted === true, profileComplete: account.profileComplete === true, isAdmin: canAccessAdmin(user, account, env), termsVersion: TERMS_VERSION } : { configured, authenticated: false });
-      } catch { return send(res, 503, { configured, authenticated: false, error: 'Account storage is unavailable.' }); }
+        return send(res, 200, account ? { configured, authenticated: true, user, termsAccepted: account.termsAccepted === true, profileComplete: account.profileComplete === true, isAdmin: canAccessAdmin(user, account, env), termsVersion: TERMS_VERSION, signupsOpen: open } : { configured, authenticated: false, signupsOpen: open });
+      } catch { return send(res, 503, { configured, authenticated: false, signupsOpen: open, error: 'Account storage is unavailable.' }); }
     }
     if (!['POST', 'DELETE'].includes(req.method)) {
       res.setHeader('Allow', 'GET, POST, DELETE');
@@ -77,6 +79,13 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
     let decoded;
     try { decoded = await verifyToken(body.idToken, env); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
     if (!decoded || decoded.email_verified !== true || typeof decoded.uid !== 'string' || !decoded.uid || typeof decoded.email !== 'string' || !decoded.email) return send(res, 401, { error: 'ID token could not be verified.' });
+    // While signups are paused, refuse anyone without an existing account before
+    // an account record or session is created. Allowlisted owners always pass.
+    if (!signupsOpen(env) && !isAdminUid(decoded, env)) {
+      let existing;
+      try { existing = await accountStatus({ uid: decoded.uid, email: decoded.email }); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
+      if (!existing) return send(res, 403, { error: SIGNUPS_PAUSED_MESSAGE, signupsPaused: true });
+    }
     try {
       const account = await accountFor({ uid: decoded.uid, email: decoded.email, creationTime: decoded.creationTime, acceptTermsVersion: body.acceptTermsVersion, profile: body.profile });
       const { token, expiresAt } = issueSession({ uid: decoded.uid, email: decoded.email, name: typeof decoded.name === 'string' && decoded.name ? decoded.name : decoded.email }, env);

@@ -4,7 +4,8 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRe
 import { validateSignupProfile, savePendingSignup, readPendingSignup, clearPendingSignup, pendingForUser } from './signup-profile.js';
 
 const $ = id => document.getElementById(id);
-let auth, view = 'signin', busy = false, pendingTermsUser = null, pendingTermsVersion = null, pendingProfileUser = null, pendingSignup = null;
+let auth, view = 'signin', busy = false, pendingTermsUser = null, pendingTermsVersion = null, pendingProfileUser = null, pendingSignup = null, signupsPaused = false;
+const SIGNUPS_PAUSED = 'Scafmetric is a work in progress, so new accounts are paused for now. Please check back soon.';
 const settings = () => ({ url: `${location.origin}/signin.html`, handleCodeInApp: false });
 const notify = (message = '') => { $('auth-status').textContent = message; $('auth-status').hidden = !message; };
 const errors = {
@@ -14,7 +15,7 @@ const errors = {
  'auth/network-request-failed': "We couldn't reach the server. Check your connection and try again.", 'auth/unauthorized-domain': "Sign-in isn't enabled for this web address.",
  'auth/operation-not-allowed': "This sign-in method isn't available right now.", 'auth/user-disabled': 'This account has been disabled.'
 };
-const failure = e => notify(['The terms have changed. Reload this page to review them.', 'Your browser could not keep your signup details for Google sign-in. Please allow session storage or use email.'].includes(e?.message) ? e.message : errors[e?.code] || 'Something went wrong. Please try again.');
+const failure = e => notify(['The terms have changed. Reload this page to review them.', 'Your browser could not keep your signup details for Google sign-in. Please allow session storage or use email.', SIGNUPS_PAUSED].includes(e?.message) ? e.message : errors[e?.code] || 'Something went wrong. Please try again.');
 const storage = () => { try { return sessionStorage; } catch { return null; } };
 const signupProfile = () => validateSignupProfile({ name:$('signup-name').value, company:$('signup-company').value, discovery:$('signup-discovery').value });
 function updateControls() {
@@ -36,11 +37,12 @@ function setBusy(value) {
  $('signin-tab').disabled = value; $('signup-tab').disabled = value; updateControls();
 }
 function setView(next) {
+ if (signupsPaused && next === 'signup') next = 'signin';
  view = next; notify(); $('password').value = ''; $('password').type = 'password'; $('show-password').textContent = 'Show'; $('show-password').setAttribute('aria-pressed', 'false');
  const signup = next === 'signup', reset = next === 'reset', verify = next === 'verify', terms = next === 'terms', profile = next === 'profile';
  $('auth-form').hidden = verify || terms || profile; $('verify-view').hidden = !verify; $('terms-view').hidden = !terms; $('profile-view').hidden = !profile;
  $('google-signin').hidden = verify || terms || profile || reset; document.querySelector('.divider').hidden = verify || terms || profile || reset;
- $('auth-tabs').hidden = reset || verify || terms || profile; $('signup-details').hidden = !signup; $('password-row').hidden = reset;
+ $('auth-tabs').hidden = signupsPaused || reset || verify || terms || profile; $('signup-details').hidden = !signup; $('password-row').hidden = reset;
  $('forgot-password').hidden = signup; $('back-to-signin').hidden = !reset;
  $('signin-tab').setAttribute('aria-selected', String(next === 'signin')); $('signup-tab').setAttribute('aria-selected', String(signup));
  $('password').autocomplete = signup ? 'new-password' : 'current-password';
@@ -59,6 +61,12 @@ async function finish(user, acceptTermsVersion, profile) {
  const idToken = await user.getIdToken(true);
  const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken, acceptTermsVersion, profile}) });
  if (response.status === 409) throw new Error('The terms have changed. Reload this page to review them.');
+ if (response.status === 403 && (await response.json().catch(() => ({}))).signupsPaused === true) {
+  // No account exists for this person and none was created; sign them back out.
+  if (auth) await signOut(auth).catch(() => {});
+  forgetSignup();
+  throw new Error(SIGNUPS_PAUSED);
+ }
  if (!response.ok) throw new Error('Session could not be created.');
  const session=await response.json();
  if (session.termsVersion !== TERMS_VERSION) { notify('The terms have changed. Reload this page to review them.'); return; }
@@ -133,6 +141,7 @@ async function initialize() {
   const [configResponse,serverResponse]=await Promise.all([fetch('/auth-config.json',{cache:'no-store'}),fetch('/api/auth/session',{cache:'no-store'})]);
   if(!configResponse.ok || !serverResponse.ok) return;
   const config=await configResponse.json(), server=await serverResponse.json();
+  if(server.signupsOpen !== true) { signupsPaused=true; $('signups-paused-notice').hidden=false; $('mode-title').textContent='Sign in'; $('mode-description').textContent='Existing accounts can sign in to the beam workspace.'; setView('signin'); }
   if(!config.apiKey || !config.authDomain || !config.projectId || !server.configured) return;
   auth=getAuth(initializeApp(config)); $('config-notice').hidden=true; setBusy(false);
   const result=await getRedirectResult(auth); if(result?.user) {setBusy(true);try { const saved=readPendingSignup(storage()); if(saved?.provider === 'google' && saved.uid === null) bindSignup(result.user, saved.profile, 'google'); await finish(result.user); } finally { setBusy(false); }}
