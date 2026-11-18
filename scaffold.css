@@ -86,7 +86,15 @@
 /* ---------------------------------------------------------------- */
 .sfw-stage{position:relative;overflow:hidden;background:#eceef0}
 .sfw-stage canvas{display:block}
-.sfw-viewbar{position:absolute;top:12px;left:12px;z-index:4;display:flex;gap:2px;padding:3px;background:var(--sfw-bg);border:1px solid var(--sfw-line);border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+/* Floating bar on the canvas: view toggles, then undo / redo. */
+.sfw-stagebar{position:absolute;top:12px;left:12px;z-index:4;display:flex;align-items:center;gap:8px}
+.sfw-viewbar,.sfw-history{display:flex;gap:2px;padding:3px;background:var(--sfw-bg);border:1px solid var(--sfw-line);border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.sfw-hist-btn{display:grid;place-items:center;width:32px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--sfw-ink);cursor:pointer;transition:background-color .12s,color .12s}
+.sfw-hist-btn svg{width:18px;height:18px}
+.sfw-hist-btn:hover{background:var(--sfw-hover)}
+.sfw-hist-btn[aria-disabled=true]{color:var(--sfw-faint);cursor:default}
+.sfw-hist-btn[aria-disabled=true]:hover{background:transparent}
+.sfw-hist-btn:focus-visible{outline:2px solid var(--sfw-ink);outline-offset:1px}
 .sfw-toggle{height:28px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--sfw-ink-2);font:500 12px/1 var(--sfw-font);cursor:pointer;white-space:nowrap;transition:background-color .12s,color .12s}
 .sfw-toggle:hover{background:var(--sfw-hover);color:var(--sfw-ink)}
 .sfw-toggle.is-on{background:var(--sfw-ink);color:#fff}

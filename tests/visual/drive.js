@@ -293,6 +293,7 @@ window.__sv = (() => {
         activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
         // Teal pixels on an empty model: the old beam line drew a teal bar here.
         coverage: tealOnEmpty,
+        undoDisabled: ws().root.querySelector('.sfw-history [data-act="undo"]').getAttribute('aria-disabled'),
       };
       return { gl: glInfo(), counts: counts(), coverage: coverage(), hint: hint(), initial };
     },
@@ -644,6 +645,44 @@ window.__sv = (() => {
       await sleep(800);
       await raf(3);
       return { started: !!tr, startDir, midDir, camDir: camDir(), projection: e.projection };
+    },
+
+    // Undo / redo with the real keys and the canvas arrows, on ScaffoldPro's
+    // rules: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z; typing in a field keeps the
+    // field's own undo.
+    async undoRedo() {
+      ws().engine.setView('top');
+      ws()._frame();
+      await raf(4);
+      tool('standard');
+      setField('sfw-stdh', 0);
+      const undoBtn = ws().root.querySelector('.sfw-history [data-act="undo"]');
+      const redoBtn = ws().root.querySelector('.sfw-history [data-act="redo"]');
+      const ctrl = (k, shift) => document.body.dispatchEvent(new KeyboardEvent('keydown', {
+        key: k, code: 'Key' + k.toUpperCase(), ctrlKey: true, shiftKey: !!shift, bubbles: true, cancelable: true,
+      }));
+      const before = counts().columns;
+      await click([BAY / 2, BAY / 2, 0]);
+      const placed = counts().columns;
+      const undoEnabled = undoBtn.getAttribute('aria-disabled') === 'false';
+      ctrl('z'); await raf(2); const afterCtrlZ = counts().columns;
+      const redoEnabled = redoBtn.getAttribute('aria-disabled') === 'false';
+      ctrl('y'); await raf(2); const afterCtrlY = counts().columns;
+      ctrl('z'); ctrl('z', true); await raf(2); const afterShiftZ = counts().columns;
+      undoBtn.click(); await raf(2); const afterButton = counts().columns;
+      const field = ws().$('sfw-stdh');
+      field.focus();
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true }));
+      await raf(2);
+      const afterFieldCtrlZ = counts().columns;
+      field.blur();
+      tool('select');
+      const v = ws().root.querySelector('.sfw-viewbar').getBoundingClientRect();
+      const h = ws().root.querySelector('.sfw-history').getBoundingClientRect();
+      return {
+        before, placed, undoEnabled, afterCtrlZ, redoEnabled, afterCtrlY, afterShiftZ, afterButton, afterFieldCtrlZ,
+        besideView: h.left >= v.right && Math.abs(h.top - v.top) < 4,
+      };
     },
 
     // The mouse's Back button is swallowed over the canvas, not navigated.

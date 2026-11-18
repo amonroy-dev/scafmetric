@@ -32,8 +32,9 @@ const ICONS = {
   plank: svg('<rect x="2.5" y="7.5" width="15" height="5" rx="1"/><path d="M7.5 7.5v5M12.5 7.5v5"/>'),
   liveload: svg('<path d="M3 16h14M6.5 4v7.5M4.5 9.5l2 2 2-2M13.5 4v7.5M11.5 9.5l2 2 2-2"/>'),
   erase: svg('<path d="M7.5 16.5h9M3.9 12.3l6.9-6.9a1.4 1.4 0 012 0l2.8 2.8a1.4 1.4 0 010 2l-6.1 6.1H7.4l-3.5-3.5a.4.4 0 010-.5zM8.3 9.1l4.3 4.3"/>'),
-  undo: svg('<path d="M7.5 5.5L4 9l3.5 3.5M4 9h8.5a4 4 0 010 8H10"/>'),
-  redo: svg('<path d="M12.5 5.5L16 9l-3.5 3.5M16 9H7.5a4 4 0 000 8H10"/>'),
+  // Undo2 / Redo2 from lucide, as ScaffoldPro's toolbar uses them.
+  undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>',
   close: svg('<path d="M5 5l10 10M15 5L5 15"/>'),
   monitor: svg('<rect x="2.5" y="3.5" width="15" height="10" rx="1.5"/><path d="M7 16.5h6M10 13.5v3"/>'),
 };
@@ -51,6 +52,13 @@ const TOOL_META = {
   erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
+
+// As ScaffoldPro's App.tsx: typing in a field keeps the field's own undo.
+function isTextInputTarget(target) {
+  if (!target || !(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+}
 
 const UNSUPPORTED_TEMPLATE = `
 <div class="sfw-backdrop" data-sfw-close></div>
@@ -78,20 +86,23 @@ const TEMPLATE = `
       <p>Model the scaffold, then send its leg loads to the beam.</p>
     </div>
     <div class="sfw-head-actions">
-      <button type="button" class="sfw-icon-btn" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${ICONS.undo}</button>
-      <button type="button" class="sfw-icon-btn" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${ICONS.redo}</button>
-      <span class="sfw-sep" aria-hidden="true"></span>
       <button type="button" class="sfw-icon-btn" data-sfw-close aria-label="Close">${ICONS.close}</button>
     </div>
   </header>
   <div class="sfw-body">
     <div class="sfw-toolbar" id="sfw-toolbar" role="toolbar" aria-label="Tools"></div>
     <div class="sfw-stage" id="sfw-stage">
-      <div class="sfw-viewbar" role="toolbar" aria-label="View">
-        <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic projection">Orthographic</button>
-        <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Centerline view">Lines</button>
-        <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">Leg loads</button>
-        <button type="button" class="sfw-toggle" data-toggle="panlock" title="Left-drag pans (for trackpads)">Pan</button>
+      <div class="sfw-stagebar">
+        <div class="sfw-viewbar" role="toolbar" aria-label="View">
+          <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic projection">Orthographic</button>
+          <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Centerline view">Lines</button>
+          <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">Leg loads</button>
+          <button type="button" class="sfw-toggle" data-toggle="panlock" title="Left-drag pans (for trackpads)">Pan</button>
+        </div>
+        <div class="sfw-history" role="toolbar" aria-label="History">
+          <button type="button" class="sfw-hist-btn" data-act="undo" aria-label="Undo" title="Nothing to undo" aria-disabled="true">${ICONS.undo}</button>
+          <button type="button" class="sfw-hist-btn" data-act="redo" aria-label="Redo" title="Nothing to redo" aria-disabled="true">${ICONS.redo}</button>
+        </div>
       </div>
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
@@ -176,7 +187,7 @@ const TEMPLATE = `
   </div>
   <footer class="sfw-foot">
     <p class="sfw-disclaimer">Preliminary tributary takeoff with dead and live load kept separate, using generic tubes.<br>
-      <span class="sfw-keys"><kbd>Shift</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates · <kbd>Esc</kbd> Select · Middle-drag pans · <kbd>Shift</kbd>+middle-drag orbits · Double middle-click fits · Wheel zooms</span><br>
+      <span class="sfw-keys"><kbd>Shift</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates · <kbd>Esc</kbd> Select · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo · Middle-drag pans · <kbd>Shift</kbd>+middle-drag orbits · Double middle-click fits · Wheel zooms</span><br>
       <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
@@ -231,19 +242,50 @@ class Workspace {
         this.$('sfw-hint').textContent = `${TOOL_META.select.hint} Close with the × button; your model is saved.`;
         return;
       }
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) this.state?.redo(); else this.state?.undo();
-        this.selection = [];
-        this._sync();
-      } else if (mod && (e.key === 'y' || e.key === 'Y')) {
-        e.preventDefault();
-        this.state?.redo();
-        this.selection = [];
-        this._sync();
-      }
+      // Undo / redo, with ScaffoldPro's rules (App.tsx): Ctrl/Cmd+Z undoes,
+      // Ctrl+Y or Ctrl/Cmd+Shift+Z redoes. A held key does not repeat, a key
+      // another handler already took is left alone, and typing in a field
+      // keeps the field's own undo rather than undoing the model.
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      const isUndo = key === 'z' && !e.shiftKey;
+      const isRedo = key === 'y' || (key === 'z' && e.shiftKey);
+      if (!isUndo && !isRedo) return;
+      if (e.repeat || e.defaultPrevented || isTextInputTarget(e.target)) return;
+      e.preventDefault();
+      if (isUndo) this._undo(); else this._redo();
     });
+  }
+
+  _undo() {
+    if (!this.state?.canUndo()) return;
+    this.state.undo();
+    this._afterHistoryStep();
+  }
+
+  _redo() {
+    if (!this.state?.canRedo()) return;
+    this.state.redo();
+    this._afterHistoryStep();
+  }
+
+  // Whatever was selected or half-placed may no longer exist.
+  _afterHistoryStep() {
+    this.selection = [];
+    if (this.tools) { this.tools.selection.clear(); this.tools.pending = null; this.tools._clearGhost(); }
+    this._sync();
+    this._refreshProps();
+  }
+
+  _refreshHistory() {
+    const states = { undo: this.state?.canUndo(), redo: this.state?.canRedo() };
+    for (const btn of this.root.querySelectorAll('[data-act]')) {
+      const can = !!states[btn.dataset.act];
+      btn.setAttribute('aria-disabled', String(!can));
+      btn.title = btn.dataset.act === 'undo'
+        ? (can ? 'Undo (Ctrl+Z)' : 'Nothing to undo')
+        : (can ? 'Redo (Ctrl+Y)' : 'Nothing to redo');
+    }
   }
 
   _bindClose() {
@@ -372,11 +414,13 @@ class Workspace {
       try {
         this.state.restore(server.scaffold);
         this.state.resetHistory();
+        this._refreshHistory();
         this._sync();
         if (el) el.textContent = `${RETENTION_NOTICE} Restored from your account, ${formatSavedAt(winner.savedAt)}.`;
       } catch { /* keep the local copy */ }
     });
     this.state.resetHistory();
+    this._refreshHistory();
     this._renderViews();
     this._refreshProps();
     this._sync();
@@ -400,9 +444,7 @@ class Workspace {
     }
     for (const btn of this.root.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
-        if (btn.dataset.act === 'undo') this.state.undo(); else this.state.redo();
-        this.selection = [];
-        this._sync();
+        if (btn.dataset.act === 'undo') this._undo(); else this._redo();
       });
     }
   }
@@ -629,6 +671,7 @@ class Workspace {
 
   _sync() {
     if (!this.engine) return;
+    this._refreshHistory();
     this._rebuildContent();
     this._rebuildNodes();
     this._updateBeam();
