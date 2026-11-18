@@ -2,6 +2,9 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { readAccount } from '../server/account.js';
 import { saveProject } from '../server/project-collection.js';
+import { checkEntitlement } from '../server/entitlement.js';
+import { createPaidVerifier } from '../server/stripe-paid.js';
+import { billingStripe } from '../server/billing.js';
 import { getSessionCookie, sameOrigin, verifySession } from '../server/session-core.js';
 import { isConfigured } from './auth/session.js';
 
@@ -23,7 +26,7 @@ function parseInput(body) {
   return project && preparer ? { project, preparer, submissionId: body.submissionId.toLowerCase() } : null;
 }
 
-export function createProjectsHandler({ env = process.env, accountFor = user => readAccount(database(env), user), store = (user, input) => saveProject(database(env), user, input) } = {}) {
+export function createProjectsHandler({ env = process.env, getDatabase = () => database(env), accountFor = user => readAccount(getDatabase(), user), store = (user, input) => saveProject(getDatabase(), user, input), entitlementFor = checkEntitlement, verifyPaid } = {}) {
   return async function projects(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     if (req.method !== 'POST') {
@@ -50,10 +53,12 @@ export function createProjectsHandler({ env = process.env, accountFor = user => 
       const account = await accountFor(user);
       if (!account) return res.status(401).json({ error: 'Account is unavailable. Please sign in again.' });
       if (account.termsAccepted !== true || account.profileComplete !== true) return res.status(403).json({ error: 'Complete your account details and accept the current terms before saving project information.' });
+      const entitlement = await entitlementFor({ db: getDatabase(), uid: user.uid, verifyPaid });
+      if (entitlement?.hasAccess !== true) return res.status(403).json({ error: 'Paid access is required to save project information.' });
       const result = await store(user, input);
       if (result.conflict) return res.status(409).json({ error: 'This submission was already saved with different details.' });
       return res.status(200).json({ ok: true, duplicate: result.duplicate });
     } catch { return res.status(503).json({ error: 'Project collection is unavailable.' }); }
   };
 }
-export default createProjectsHandler();
+export default createProjectsHandler({verifyPaid: uid => createPaidVerifier({stripe:billingStripe(process.env),db:database(process.env),priceId:process.env.STRIPE_PRICE_ID})(uid)});

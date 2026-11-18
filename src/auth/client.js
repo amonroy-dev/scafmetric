@@ -47,6 +47,14 @@ function setView(next) {
  $('submit-auth').textContent = reset ? 'Send reset link' : signup ? 'Create account' : 'Sign in';
  updateControls();
 }
+async function continueAfterSignIn() {
+ let destination = '/billing.html';
+ try {
+  const response = await fetch('/api/billing/status', { cache:'no-store' });
+  if (response.ok && (await response.json()).hasAccess === true) destination = '/calculator.html';
+ } catch { /* The billing page explains outages and offers retry. */ }
+ location.replace(destination);
+}
 async function finish(user, acceptTermsVersion, profile) {
  const idToken = await user.getIdToken(true);
  const response = await fetch('/api/auth/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({idToken, acceptTermsVersion, profile}) });
@@ -63,7 +71,7 @@ async function finish(user, acceptTermsVersion, profile) {
  if (!session.profileComplete) { pendingProfileUser=user; $('profile-name').value ||= user.displayName || ''; setView('profile'); return; }
  pendingProfileUser=null;
  forgetSignup();
- location.replace('/calculator.html');
+ await continueAfterSignIn();
 }
 $('accept-terms').addEventListener('click', async () => {
  if (busy || !pendingTermsUser || !pendingTermsVersion) return;
@@ -128,7 +136,7 @@ async function initialize() {
   if(!config.apiKey || !config.authDomain || !config.projectId || !server.configured) return;
   auth=getAuth(initializeApp(config)); $('config-notice').hidden=true; setBusy(false);
   const result=await getRedirectResult(auth); if(result?.user) {setBusy(true);try { const saved=readPendingSignup(storage()); if(saved?.provider === 'google' && saved.uid === null) bindSignup(result.user, saved.profile, 'google'); await finish(result.user); } finally { setBusy(false); }}
-  else { await auth.authStateReady(); const saved=readPendingSignup(storage()), user=auth.currentUser; if(saved?.provider === 'email' && pendingForUser(saved,user?.uid)) { pendingSignup=saved; if(user.emailVerified) {setBusy(true);try{await finish(user)}finally{setBusy(false)}} else {$('verify-address').textContent=user.email || '';setView('verify')} } }
+  else { await auth.authStateReady(); const saved=readPendingSignup(storage()), user=auth.currentUser; if(saved?.provider === 'email' && pendingForUser(saved,user?.uid)) { pendingSignup=saved; if(user.emailVerified) {setBusy(true);try{await finish(user)}finally{setBusy(false)}} else {$('verify-address').textContent=user.email || '';setView('verify')} } else if (server.authenticated && server.termsAccepted && server.profileComplete) await continueAfterSignIn(); }
  } catch(e) { if(auth) { failure(e); setBusy(false); } }
 }
 initialize();

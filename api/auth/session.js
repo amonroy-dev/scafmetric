@@ -45,8 +45,8 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
       const user = verifySession(getSessionCookie(req.headers.cookie), env);
       if (!configured || !user) return send(res, 200, { configured, authenticated: false });
       try {
-        const trial = await accountStatus(user);
-        return send(res, 200, trial ? { configured, authenticated: true, user, trial, termsAccepted: trial.termsAccepted === true, profileComplete: trial.profileComplete === true, isAdmin: canAccessAdmin(user, trial, env), termsVersion: TERMS_VERSION } : { configured, authenticated: false });
+        const account = await accountStatus(user);
+        return send(res, 200, account ? { configured, authenticated: true, user, termsAccepted: account.termsAccepted === true, profileComplete: account.profileComplete === true, isAdmin: canAccessAdmin(user, account, env), termsVersion: TERMS_VERSION } : { configured, authenticated: false });
       } catch { return send(res, 503, { configured, authenticated: false, error: 'Account storage is unavailable.' }); }
     }
     if (!['POST', 'DELETE'].includes(req.method)) {

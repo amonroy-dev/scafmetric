@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureAccount, readAccount, TRIAL_MS, TERMS_VERSION } from '../server/account.js';
+import { ensureAccount, readAccount, TERMS_VERSION } from '../server/account.js';
 
 function fakeDatabase() {
   const docs = new Map(); let queue = Promise.resolve();
@@ -16,21 +16,37 @@ function fakeDatabase() {
 }
 const identity = { uid: 'user123', email: 'Customer@Example.com', creationTime: '2020-01-01T00:00:00.000Z' };
 
-test('trial uses Firebase account creation time, not first sign-in', async () => {
+test('new account records have no trial and are bound to verified Firebase creation time', async () => {
   const db = fakeDatabase();
   const account = await ensureAccount(db, identity);
-  assert.equal(account.trialStartedAt, '2020-01-01T00:00:00.000Z');
-  assert.equal(Date.parse(account.trialEndsAt) - Date.parse(account.trialStartedAt), TRIAL_MS);
-  assert.equal((await readAccount(db, { uid: identity.uid, email: identity.email })).trialActive, false);
+  assert.equal(account.authCreatedAt, '2020-01-01T00:00:00.000Z');
+  assert.equal(account.trialStartedAt, undefined);
+  assert.equal(account.trialEndsAt, undefined);
+  assert.equal((await readAccount(db, identity)).trialActive, undefined);
 });
 
-test('repeat and concurrent sign-ins cannot extend an existing trial', async () => {
+test('repeat and concurrent sign-ins preserve account identity', async () => {
   const db = fakeDatabase();
   const [first, second] = await Promise.all([ensureAccount(db, identity), ensureAccount(db, identity)]);
   assert.deepEqual(first, second);
   assert.equal(db.docs.size, 1);
   await assert.rejects(ensureAccount(db, { ...identity, creationTime: '2021-01-01T00:00:00.000Z' }));
   assert.deepEqual(db.docs.get(identity.uid), first);
+});
+
+test('legacy accounts remain valid and retain trial fields without granting trial access', async () => {
+  const db = fakeDatabase();
+  const legacy = { uid:identity.uid, email:identity.email.toLowerCase(), active:true, trialStartedAt:'2020-01-01T00:00:00.000Z', trialEndsAt:'2020-01-15T00:00:00.000Z' };
+  db.docs.set(identity.uid, { ...legacy });
+  const before = await readAccount(db, identity);
+  assert.equal(before.termsAccepted, false);
+  assert.equal(before.trialActive, undefined);
+  const migrated = await ensureAccount(db, identity);
+  assert.equal(migrated.authCreatedAt, '2020-01-01T00:00:00.000Z');
+  assert.equal(migrated.trialStartedAt, legacy.trialStartedAt);
+  assert.equal(migrated.trialEndsAt, legacy.trialEndsAt);
+  assert.equal((await readAccount(db, identity)).trialActive, undefined);
+  await assert.rejects(ensureAccount(db, { ...identity, creationTime:'2021-01-01T00:00:00.000Z' }));
 });
 
 test('invalid, missing, and disabled account data fail closed', async () => {
@@ -44,7 +60,7 @@ test('invalid, missing, and disabled account data fail closed', async () => {
 });
 
 
-test('acceptance is explicit, versioned and persists without extending trial', async () => {
+test('acceptance is explicit, versioned and persists with account identity', async () => {
   const db = fakeDatabase();
   const before = await ensureAccount(db, identity);
   assert.equal((await readAccount(db, identity)).termsAccepted, false);
@@ -52,7 +68,7 @@ test('acceptance is explicit, versioned and persists without extending trial', a
   const accepted = await ensureAccount(db, { ...identity, acceptTermsVersion: TERMS_VERSION });
   assert.equal(accepted.termsVersion, TERMS_VERSION);
   assert.ok(Number.isFinite(Date.parse(accepted.termsAcceptedAt)));
-  assert.equal(accepted.trialEndsAt, before.trialEndsAt);
+  assert.equal(accepted.authCreatedAt, before.authCreatedAt);
   assert.equal((await readAccount(db, identity)).termsAccepted, true);
   const repeat = await ensureAccount(db, identity);
   assert.equal(repeat.termsAcceptedAt, accepted.termsAcceptedAt);
@@ -72,17 +88,17 @@ test('an account that accepted the previous terms must accept the updated terms'
   await assert.rejects(ensureAccount(db, { ...identity, acceptTermsVersion:'draft-2026-11-16' }));
   const accepted = await ensureAccount(db, { ...identity, acceptTermsVersion:TERMS_VERSION });
   assert.equal((await readAccount(db, identity)).termsAccepted, true);
-  assert.equal(accepted.trialEndsAt, account.trialEndsAt);
+  assert.equal(accepted.authCreatedAt, account.authCreatedAt);
 });
 
-test('profile completion stores bounded, trimmed fields on the verified account without altering its trial or terms', async () => {
+test('profile completion stores bounded, trimmed fields without altering account identity or terms', async () => {
   const db = fakeDatabase();
   const original = await ensureAccount(db, { ...identity, acceptTermsVersion: TERMS_VERSION });
   assert.equal((await readAccount(db, identity)).profileComplete, false);
   const updated = await ensureAccount(db, { ...identity, profile: { name: '  Alex Rivera ', company: '  Example Co  ', discovery: ' Colleague ', ignored: 'not stored' } });
   assert.deepEqual(updated.profile, { name: 'Alex Rivera', company: 'Example Co', discovery: 'Colleague' });
   assert.ok(Number.isFinite(Date.parse(updated.profileUpdatedAt)));
-  assert.equal(updated.trialEndsAt, original.trialEndsAt);
+  assert.equal(updated.authCreatedAt, original.authCreatedAt);
   assert.equal(updated.termsAcceptedAt, original.termsAcceptedAt);
   assert.equal((await readAccount(db, identity)).profileComplete, true);
   assert.deepEqual((await ensureAccount(db, identity)).profile, updated.profile);

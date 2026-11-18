@@ -17,11 +17,11 @@ test('configured status is based only on required settings, fails closed on miss
 
 test('only verified Firebase identities receive a secure session after account creation', async () => {
   let calls=0;
-  const handler=createSessionHandler({ env, verifyToken: async token => token==='good' ? decoded : null, accountFor: async data => { calls++; assert.equal(data.creationTime, decoded.creationTime); }, accountStatus: async () => ({ trialActive:false }) });
+  const handler=createSessionHandler({ env, verifyToken: async token => token==='good' ? decoded : null, accountFor: async data => { calls++; assert.equal(data.creationTime, decoded.creationTime); }, accountStatus: async () => ({ termsAccepted:false, profileComplete:false }) });
   let r=response(); await handler(req('POST',{idToken:'bad'}),r); assert.equal(r.statusCode,401); assert.equal(calls,0);
   r=response(); await handler(req('POST',{idToken:'good'}),r); assert.equal(r.statusCode,200); assert.equal(calls,1); assert.match(r.headers['Set-Cookie'], /HttpOnly; SameSite=Lax; Secure/);
   const cookie=r.headers['Set-Cookie'].split(';')[0];
-  r=response(); await handler(req('GET',null,{cookie}),r); assert.equal(r.statusCode,200); assert.equal(r.body.authenticated,true); assert.equal(r.body.trial.trialActive,false);
+  r=response(); await handler(req('GET',null,{cookie}),r); assert.equal(r.statusCode,200); assert.equal(r.body.authenticated,true); assert.equal(r.body.trial,undefined);
   r=response(); await handler(req('DELETE',null),r); assert.equal(r.statusCode,200); assert.match(r.headers['Set-Cookie'], /Max-Age=0/);
 });
 
@@ -40,7 +40,7 @@ test('session reports acceptance and stores it only when current terms are expli
   let account = {};
   const handler = createSessionHandler({ env, verifyToken: async () => decoded,
     accountFor: async data => { if (data.acceptTermsVersion) account = { termsVersion:data.acceptTermsVersion, termsAcceptedAt:new Date().toISOString() }; return account; },
-    accountStatus: async () => ({ trialActive:false, termsAccepted:account.termsVersion === TERMS_VERSION }) });
+    accountStatus: async () => ({ termsAccepted:account.termsVersion === TERMS_VERSION }) });
   let r=response(); await handler(req('POST',{ idToken:'good' }),r);
   assert.equal(r.body.termsAccepted,false); assert.equal(r.body.termsVersion,TERMS_VERSION);
   const cookie=r.headers['Set-Cookie'].split(';')[0];

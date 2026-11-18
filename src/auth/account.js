@@ -2,16 +2,23 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signOut } from 'firebase/auth';
 const anchor = document.getElementById('account-link');
 const adminLink = document.getElementById('admin-link');
+const billingLink = document.getElementById('billing-link');
+let signingOut = false;
 if (anchor) {
   fetch('/api/auth/session', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(session => {
     if (!session?.authenticated) return;
     if (adminLink && session.isAdmin === true) adminLink.hidden = false;
+    if (billingLink) fetch('/api/billing/status', { cache:'no-store' }).then(r => r.ok ? r.json() : null).then(billing => {
+      if (!signingOut && billing?.canManageBilling === true) billingLink.hidden = false;
+    }).catch(() => {});
     anchor.textContent = 'Sign out';
     anchor.href = '#';
     anchor.addEventListener('click', async e => {
       e.preventDefault();
       try {
+        signingOut = true;
         if (adminLink) adminLink.hidden = true;
+        if (billingLink) billingLink.hidden = true;
         const response = await fetch('/api/auth/session', { method:'DELETE' });
         if (!response.ok) throw new Error('Sign out failed');
         const configResponse = await fetch('/auth-config.json');
@@ -20,7 +27,7 @@ if (anchor) {
           if (config.apiKey && config.authDomain && config.projectId) await signOut(getAuth(getApps()[0] || initializeApp(config)));
         }
         location.href = '/signin.html';
-      } catch { anchor.textContent = 'Sign out failed. Try again.'; }
+      } catch { signingOut = false; anchor.textContent = 'Sign out failed. Try again.'; }
     });
   }).catch(() => {});
 }

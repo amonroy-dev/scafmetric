@@ -12,12 +12,20 @@ const firebaseConfig = {
 };
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist', { recursive: true });
-for (const path of ['index.html', 'calculator.html', 'signin.html', 'terms.html', 'terms.css', 'admin.html', 'admin.js', 'admin.css', 'app.js', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'capacity.css', 'auth.css', 'scaffold.css', 'src', 'public']) {
+// Calculator HTML and its JavaScript are served only through the authenticated
+// workspace function. Do not copy them into the public output: static files
+// take precedence over Vercel rewrites and would bypass the access check.
+for (const path of ['index.html', 'signin.html', 'terms.html', 'terms.css', 'billing.html', 'billing.css', 'billing.js', 'admin.html', 'admin.js', 'admin.css', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'capacity.css', 'auth.css', 'scaffold.css', 'public']) {
   await cp(path, `dist/${path}`, { recursive: true });
 }
 await build({ entryPoints: ['src/auth/client.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/auth.js', minify: true });
 await build({ entryPoints: ['src/auth/account.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/account.js', minify: true });
-// Scaffold-to-beam 3D workspace (three.js). Bundled so the static site needs no CDN.
-await build({ entryPoints: ['src/scaffold/workspace/main.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/scaffold-app.js', minify: true });
+// Bundle the calculator outside the public output. Serving one protected asset
+// avoids repeated entitlement checks on every imported JavaScript module.
+await mkdir('workspace-private', { recursive:true });
+await build({ entryPoints: ['app.js'], bundle:true, format:'esm', platform:'browser', target:['es2020'], outfile:'workspace-private/app.js', minify:true });
+// Scaffold-to-beam 3D workspace (three.js). Bundled so the site needs no CDN, and
+// kept private like app.js because calculator.html loads it.
+await build({ entryPoints: ['src/scaffold/workspace/main.js'], bundle:true, format:'esm', platform:'browser', target:['es2020'], outfile:'workspace-private/scaffold-app.js', minify:true });
 await writeFile('dist/auth-config.json', JSON.stringify(firebaseConfig));
 console.log('Static site built in dist/');

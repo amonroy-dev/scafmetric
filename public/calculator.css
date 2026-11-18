@@ -40,6 +40,7 @@
   .account-nav { margin-left:8px; padding:8px 0; color:#c4cfdd; text-decoration:none; font-size:13px; font-weight:500; white-space:nowrap; }
   .account-nav:hover { color:#fff; }
   .admin-nav { color:var(--ws-aqua-2); }
+  .billing-nav-short { display:none; }
 
   /* Page heading */
   .page { max-width:1600px; margin:0 auto; padding:28px 28px 56px; background:none; }
@@ -606,6 +607,8 @@
 }
 @media screen and (min-width:761px) and (max-height:760px) { .action-bar { position:relative; } }
 @media screen and (max-width:600px) {
+  .billing-nav-full { display:none; }
+  .billing-nav-short { display:inline; }
   .bracing-diagram-panels { grid-template-columns:1fr; }
   .bracing-diagram-section svg { width:min(100%,260px); margin:0 auto; }
   .bracing-diagram-header { align-items:flex-start; padding:12px; }

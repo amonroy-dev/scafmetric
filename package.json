@@ -12,6 +12,7 @@
   "dependencies": {
     "firebase": "12.13.0",
     "firebase-admin": "13.10.0",
+    "stripe": "^23.0.0",
     "three": "^0.170.0"
   },
   "devDependencies": {
