@@ -182,9 +182,12 @@ window.__sv = (() => {
     const ctx = off.getContext('2d');
     ctx.drawImage(c, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
+    // Compare against the live scene background, whatever colour the theme sets.
+    const bg = ws().engine.scene.background.getHex();
+    const br = (bg >> 16) & 255, bgG = (bg >> 8) & 255, bb = bg & 255;
     let lit = 0;
     for (let i = 0; i < data.length; i += 4) {
-      if (Math.abs(data[i] - 0x0a) + Math.abs(data[i + 1] - 0x11) + Math.abs(data[i + 2] - 0x20) > 24) lit++;
+      if (Math.abs(data[i] - br) + Math.abs(data[i + 1] - bgG) + Math.abs(data[i + 2] - bb) > 24) lit++;
     }
     return +(lit / (w * h)).toFixed(4);
   }

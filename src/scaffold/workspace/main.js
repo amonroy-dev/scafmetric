@@ -19,17 +19,36 @@ import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired,
 import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 
+// Line icons, 20px grid, drawn in currentColor.
+const svg = d => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  select: svg('<path d="M5 3.5l10 6.2-4.4 1.2-2.3 4.3L5 3.5z"/>'),
+  standard: svg('<path d="M10 3v12.5M6.5 16.5h7M8.2 3h3.6M7.8 8h4.4M7.8 12h4.4"/>'),
+  block: svg('<rect x="3.5" y="3.5" width="13" height="13" rx="1.5"/><path d="M3.5 10h13M10 3.5v13"/>'),
+  ledger: svg('<path d="M5 10h10"/><circle cx="3.6" cy="10" r="1.4"/><circle cx="16.4" cy="10" r="1.4"/>'),
+  brace: svg('<path d="M4 3.5v13M16 3.5v13M4 15L16 5"/>'),
+  truss: svg('<path d="M3 14.5h14M4 6h12M4 6l3 8.5L10 6l3 8.5L16 6"/>'),
+  bracket: svg('<path d="M5 3v14M5 6h10M5 11.5L15 6"/>'),
+  plank: svg('<rect x="2.5" y="7.5" width="15" height="5" rx="1"/><path d="M7.5 7.5v5M12.5 7.5v5"/>'),
+  liveload: svg('<path d="M3 16h14M6.5 4v7.5M4.5 9.5l2 2 2-2M13.5 4v7.5M11.5 9.5l2 2 2-2"/>'),
+  erase: svg('<path d="M7.5 16.5h9M3.9 12.3l6.9-6.9a1.4 1.4 0 012 0l2.8 2.8a1.4 1.4 0 010 2l-6.1 6.1H7.4l-3.5-3.5a.4.4 0 010-.5zM8.3 9.1l4.3 4.3"/>'),
+  undo: svg('<path d="M7.5 5.5L4 9l3.5 3.5M4 9h8.5a4 4 0 010 8H10"/>'),
+  redo: svg('<path d="M12.5 5.5L16 9l-3.5 3.5M16 9H7.5a4 4 0 000 8H10"/>'),
+  close: svg('<path d="M5 5l10 10M15 5L5 15"/>'),
+  monitor: svg('<rect x="2.5" y="3.5" width="15" height="10" rx="1.5"/><path d="M7 16.5h6M10 13.5v3"/>'),
+};
+
 const TOOL_META = {
-  select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
-  block: { label: 'Block', icon: '▦', hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck. R rotates it 90 degrees.' },
-  standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard. Type a target height below and one click builds the whole planned stack.' },
-  ledger: { label: 'Ledger', icon: '─', hint: 'ONE click on a rosette node runs a ledger to the nearest open standard. SHIFT+click fills every bay at that level.' },
-  brace: { label: 'Brace', icon: '╱', hint: 'Hover a bay FACE — height under the cursor picks the lift. R flips ascending/descending. SHIFT+click braces every perimeter face at that height.' },
-  truss: { label: 'Truss', icon: '⬟', hint: 'Click two rosette nodes to span a truss between them.' },
-  bracket: { label: 'Bracket', icon: '⊢', hint: 'Click a rosette node to hang a side bracket, drawn from generic tubing. The arm points away from the scaffold.' },
-  plank: { label: 'Plank', icon: '▭', hint: 'Click a LEDGER to deck the bay on that side with best-fit 9 in / 6 in boards. R flips the side. SHIFT+click decks the whole run.' },
-  liveload: { label: 'Live load', icon: '▨', hint: 'Click a LEDGER to load the bay on that side at the psf below. R flips the side. SHIFT+click loads every bay along the run. Each patch keeps its own psf.' },
-  erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
+  select: { label: 'Select', icon: ICONS.select, hint: 'Click to select, Shift+click to add. Drag left to right for a window, right to left for a crossing; Ctrl+drag adds. Delete removes.' },
+  block: { label: 'Block', icon: ICONS.block, hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck. R rotates it 90°.' },
+  standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
+  ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level.' },
+  brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
+  truss: { label: 'Truss', icon: ICONS.truss, hint: 'Click two rosette nodes to span a truss between them.' },
+  bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Click a rosette node to hang a side bracket. The arm points away from the scaffold.' },
+  plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R flips the side. Shift+click decks the whole run.' },
+  liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a ledger to load the bay on that side at the bay patch psf. R flips the side. Shift+click loads every bay along the run.' },
+  erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
 
@@ -37,11 +56,11 @@ const UNSUPPORTED_TEMPLATE = `
 <div class="sfw-backdrop" data-sfw-close></div>
 <div class="sfw-dialog sfw-dialog--notice" role="dialog" aria-modal="true" aria-label="Scaffold builder unavailable">
   <header class="sfw-head">
-    <div><span class="sfw-kicker">SCAFFOLD &rarr; BEAM</span><h2>Scaffold builder</h2></div>
-    <button type="button" class="sfw-x" data-sfw-close aria-label="Close">&times;</button>
+    <div><h2>Scaffold builder</h2></div>
+    <button type="button" class="sfw-icon-btn" data-sfw-close aria-label="Close">${ICONS.close}</button>
   </header>
   <div class="sfw-notice-body">
-    <div class="sfw-notice-ico" aria-hidden="true">&#128421;</div>
+    <div class="sfw-notice-ico">${ICONS.monitor}</div>
     <h3>Open this on a desktop browser</h3>
     <p>The scaffold builder is a 3D modelling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, SHIFT+middle-drag to orbit, the wheel to zoom, and SHIFT and R while placing.</p>
     <p class="sfw-notice-sub">For the best experience and accurate results, open Scafmetric on a laptop or desktop. Beam analysis itself works fine on this device &mdash; you can keep entering loads by hand, and your work is saved for 30 days either way.</p>
@@ -54,12 +73,28 @@ const TEMPLATE = `
 <div class="sfw-backdrop" data-sfw-close></div>
 <div class="sfw-dialog" role="dialog" aria-modal="true" aria-label="Scaffold builder">
   <header class="sfw-head">
-    <div><span class="sfw-kicker">SCAFFOLD → BEAM</span><h2>Scaffold builder</h2></div>
-    <button type="button" class="sfw-x" data-sfw-close aria-label="Close">×</button>
+    <div>
+      <h2>Scaffold builder</h2>
+      <p>Model the scaffold, then send its leg loads to the beam.</p>
+    </div>
+    <div class="sfw-head-actions">
+      <button type="button" class="sfw-icon-btn" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">${ICONS.undo}</button>
+      <button type="button" class="sfw-icon-btn" data-act="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">${ICONS.redo}</button>
+      <span class="sfw-sep" aria-hidden="true"></span>
+      <button type="button" class="sfw-icon-btn" data-sfw-close aria-label="Close">${ICONS.close}</button>
+    </div>
   </header>
   <div class="sfw-body">
-    <div class="sfw-toolbar" id="sfw-toolbar"></div>
-    <div class="sfw-stage" id="sfw-stage"><div class="sfw-hint" id="sfw-hint"></div></div>
+    <div class="sfw-toolbar" id="sfw-toolbar" role="toolbar" aria-label="Tools"></div>
+    <div class="sfw-stage" id="sfw-stage">
+      <div class="sfw-viewbar" role="toolbar" aria-label="View">
+        <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic projection">Orthographic</button>
+        <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Centerline view">Lines</button>
+        <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">Leg loads</button>
+        <button type="button" class="sfw-toggle" data-toggle="panlock" title="Left-drag pans (for trackpads)">Pan</button>
+      </div>
+      <div class="sfw-hint" id="sfw-hint"></div>
+    </div>
     <aside class="sfw-side">
       <div class="sfw-group">
         <h3>Catalog</h3>
@@ -75,7 +110,7 @@ const TEMPLATE = `
         <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
-        <div class="sfw-counts" id="sfw-counts"></div>
+        <dl class="sfw-counts" id="sfw-counts"></dl>
         <button type="button" class="sfw-btn ghost" id="sfw-clear">Clear all</button>
       </div>
       <div class="sfw-group">
@@ -116,17 +151,17 @@ const TEMPLATE = `
         </div>
       </div>
       <div class="sfw-group">
-        <h3>Views <button type="button" class="sfw-mini" id="sfw-view-save">SAVE</button></h3>
+        <h3>Saved views <button type="button" class="sfw-link" id="sfw-view-save">Save current</button></h3>
         <div id="sfw-views" class="sfw-views-list"></div>
       </div>
       <div class="sfw-group">
-        <h3>Bill of materials <button type="button" class="sfw-mini" id="sfw-bom-csv">CSV</button></h3>
+        <h3>Bill of materials <button type="button" class="sfw-link" id="sfw-bom-csv">Export CSV</button></h3>
         <div class="sfw-table-wrap sfw-bom-wrap"><table class="sfw-table sfw-bom"><thead><tr><th>Item</th><th>Qty</th><th>Wt (lb)</th></tr></thead><tbody id="sfw-bom-rows"></tbody></table></div>
         <div class="sfw-totals" id="sfw-bom-total"></div>
         <button type="button" class="sfw-btn ghost sfw-mt" id="sfw-dxf">Export DXF centerlines</button>
       </div>
       <div class="sfw-group">
-        <h3>Beam &amp; import</h3>
+        <h3>Beam and import</h3>
         <div class="sfw-grid2">
           <label>Runs along<select id="sfw-axis"><option value="x">X</option><option value="y">Y</option></select></label>
           <label>Position<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
@@ -140,8 +175,8 @@ const TEMPLATE = `
     </aside>
   </div>
   <footer class="sfw-foot">
-    <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br>
-      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> back to Select · middle-drag pans · <kbd>SHIFT</kbd>+middle-drag orbits · double middle-click fits · wheel zooms to the cursor</span><br>
+    <p class="sfw-disclaimer">Preliminary tributary takeoff with dead and live load kept separate, using generic tubes.<br>
+      <span class="sfw-keys"><kbd>Shift</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates · <kbd>Esc</kbd> Select · Middle-drag pans · <kbd>Shift</kbd>+middle-drag orbits · Double middle-click fits · Wheel zooms</span><br>
       <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
@@ -150,17 +185,22 @@ const TEMPLATE = `
   </footer>
 </div>`;
 
+// Leg-load tag: a dark label with an orange load tick, legible on the light canvas.
 function labelSprite(text) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(6,11,20,0.82)';
-  g.fillRect(0, 0, 256, 64);
-  g.strokeStyle = '#ffa41b'; g.lineWidth = 3; g.strokeRect(1.5, 1.5, 253, 61);
-  g.fillStyle = '#ffd79a';
-  g.font = 'bold 30px monospace';
+  const r = 14;
+  g.beginPath();
+  g.moveTo(r + 2, 2); g.arcTo(254, 2, 254, 62, r); g.arcTo(254, 62, 2, 62, r); g.arcTo(2, 62, 2, 2, r); g.arcTo(2, 2, 254, 2, r);
+  g.closePath();
+  g.fillStyle = '#18181b'; g.fill();
+  g.fillStyle = '#fb923c';
+  g.fillRect(18, 22, 6, 20);
+  g.fillStyle = '#ffffff';
+  g.font = '600 30px Inter, "Segoe UI", system-ui, sans-serif';
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(text, 128, 34);
+  g.fillText(text, 138, 34);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   sp.scale.set(1.9, 0.48, 1);
@@ -266,7 +306,7 @@ class Workspace {
       pickables: () => this.contentGroup.children,
       snapPoints: () => this.state.nodes().map(n => new THREE.Vector3(n.x, n.y, n.z)),
     };
-    this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4 });
+    this.nodeActiveMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1e3a8a, emissiveIntensity: 0.5, metalness: 0.3, roughness: 0.4 });
 
     this.engine.raycaster.params.Line = { threshold: 0.25 };
     this.tools = new Tools(this.engine, this.state, {
@@ -345,17 +385,7 @@ class Workspace {
   _buildToolbar() {
     const bar = this.$('sfw-toolbar');
     bar.innerHTML =
-      TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('')
-      + `<div class="sfw-toggles">
-           <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic view">ORTHO</button>
-           <button type="button" class="sfw-toggle" data-toggle="panlock" title="Lock left-drag to pan">PAN</button>
-           <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">LOADS</button>
-           <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Line (centerline) view">LINE</button>
-         </div>
-         <div class="sfw-toggles">
-           <button type="button" class="sfw-toggle" data-act="undo" title="Undo (Ctrl+Z)">UNDO</button>
-           <button type="button" class="sfw-toggle" data-act="redo" title="Redo (Ctrl+Shift+Z)">REDO</button>
-         </div>`;
+      TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('');
     for (const btn of bar.querySelectorAll('[data-tool]')) {
       btn.addEventListener('click', () => {
         this.tools.setTool(btn.dataset.tool);
@@ -364,10 +394,11 @@ class Workspace {
         if (cat && this.$('sfw-cat').value !== cat) { this.$('sfw-cat').value = cat; this._onCategoryChange(false); }
       });
     }
-    for (const btn of bar.querySelectorAll('[data-toggle]')) {
+    // View toggles sit on the canvas and undo/redo in the header.
+    for (const btn of this.root.querySelectorAll('[data-toggle]')) {
       btn.addEventListener('click', () => this._toggle(btn.dataset.toggle, btn));
     }
-    for (const btn of bar.querySelectorAll('[data-act]')) {
+    for (const btn of this.root.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
         if (btn.dataset.act === 'undo') this.state.undo(); else this.state.redo();
         this.selection = [];
@@ -691,17 +722,17 @@ class Workspace {
   _rebuildSkeleton() {
     const model = buildCenterlineModel(this.state);
     const colours = {
-      [LAYERS.standard]: 0x9fb2cc,
-      [LAYERS.ledger]: 0x3dd9c9,
-      [LAYERS.brace]: 0x8a7bd8,
-      [LAYERS.truss]: 0xffc266,
-      [LAYERS.bracket]: 0x6ee7b7,
-      [LAYERS.guardrail]: 0xffa41b,
+      [LAYERS.standard]: 0x3f3f46,
+      [LAYERS.ledger]: 0x2563eb,
+      [LAYERS.brace]: 0x7c3aed,
+      [LAYERS.truss]: 0xb45309,
+      [LAYERS.bracket]: 0x047857,
+      [LAYERS.guardrail]: 0xea580c,
     };
     this._lineMats = this._lineMats || {};
     for (const seg of model.segments) {
       const selected = seg.id && this.selection.includes(seg.id);
-      const colour = selected ? 0xa855f7 : (colours[seg.layer] ?? 0xaebbd1);
+      const colour = selected ? 0x2563eb : (colours[seg.layer] ?? 0x71717a);
       const key = `${colour}`;
       if (!this._lineMats[key]) this._lineMats[key] = new THREE.LineBasicMaterial({ color: colour });
       const geo = new THREE.BufferGeometry().setFromPoints([
@@ -713,7 +744,7 @@ class Workspace {
     }
     // Joint markers so splices and connections read clearly.
     this._jointGeo = this._jointGeo || new THREE.SphereGeometry(0.1, 8, 6);
-    this._jointMat = this._jointMat || new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this._jointMat = this._jointMat || new THREE.MeshBasicMaterial({ color: 0x18181b });
     for (const p of model.points) {
       const m = new THREE.Mesh(this._jointGeo, this._jointMat);
       m.position.set(p[0], p[1], p[2]);
@@ -857,10 +888,12 @@ class Workspace {
 
   _updateCounts() {
     const s = this.state;
-    this.$('sfw-counts').innerHTML =
-      `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span>` +
-      `<span>${s.planks.size + s.plankPlacements.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>` +
-      (s.liveLoads.size ? `<span>${s.liveLoads.size} load</span>` : '');
+    const rows = [
+      ['Standards', s.standards.size], ['Ledgers', s.ledgers.size], ['Braces', s.braces.size],
+      ['Decks', s.planks.size + s.plankPlacements.size], ['Trusses', s.trusses.size], ['Guardrails', s.guardrails.size],
+    ];
+    if (s.liveLoads.size) rows.push(['Load patches', s.liveLoads.size]);
+    this.$('sfw-counts').innerHTML = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
   }
 
   _beamSpan() { return window.scafmetric?.getBeamSpanFt?.() || 20; }
@@ -911,7 +944,7 @@ class Workspace {
     const { imported, skipped } = toBeamPointLoads(located);
     this._importable = imported;
     const dead = imported.reduce((s, e) => s + e.deadLb, 0), live = imported.reduce((s, e) => s + e.liveLb, 0);
-    this.$('sfw-totals').innerHTML = `<div><dt>Legs</dt><dd>${imported.length}</dd></div><div><dt>ΣDead</dt><dd>${round(dead, 0)} lb</dd></div><div><dt>ΣLive</dt><dd>${round(live, 0)} lb</dd></div>`;
+    this.$('sfw-totals').innerHTML = `<div><dt>Legs</dt><dd>${imported.length}</dd></div><div><dt>Dead</dt><dd>${round(dead, 0)} lb</dd></div><div><dt>Live</dt><dd>${round(live, 0)} lb</dd></div>`;
     const warn = this.$('sfw-warn');
     if (skipped.length) { warn.hidden = false; warn.textContent = `${skipped.length} selected leg(s) off the beam line or past the span — excluded.`; }
     else warn.hidden = true;

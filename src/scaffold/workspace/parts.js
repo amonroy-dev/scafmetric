@@ -39,8 +39,8 @@ export const MATERIALS = {
   ledger: new THREE.MeshStandardMaterial({ color: 0xa8aeb6, metalness: 0.3, roughness: 0.32 }),
   brace: new THREE.MeshStandardMaterial({ color: 0x98a0aa, metalness: 0.3, roughness: 0.36 }),
   plank: new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.18, roughness: 0.62 }),
-  selected: new THREE.MeshStandardMaterial({ color: 0xa855f7, emissive: 0xa855f7, emissiveIntensity: 0.45, metalness: 0.2, roughness: 0.4 }),
-  ghost: new THREE.MeshStandardMaterial({ color: 0x3dd9c9, transparent: true, opacity: 0.45, depthWrite: false, metalness: 0.2, roughness: 0.5 }),
+  selected: new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1d4ed8, emissiveIntensity: 0.35, metalness: 0.2, roughness: 0.4 }),
+  ghost: new THREE.MeshStandardMaterial({ color: 0x2563eb, transparent: true, opacity: 0.4, depthWrite: false, metalness: 0.2, roughness: 0.5 }),
 };
 
 // Shared geometries (never disposed; scaled per instance).
@@ -520,11 +520,11 @@ export function tubePickProxy(a, b, diameterIn = LEDGER_PICK_DIAMETER_IN) {
 export const NODE_MATERIALS = {
   // Node can start a placement with the active tool.
   valid: new THREE.MeshStandardMaterial({
-    color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4,
+    color: 0x2563eb, emissive: 0x1e3a8a, emissiveIntensity: 0.5, metalness: 0.3, roughness: 0.4,
   }),
   // Node exists but the active tool cannot use it (nothing to connect to).
   invalid: new THREE.MeshStandardMaterial({
-    color: 0x5b6577, emissive: 0x000000, metalness: 0.2, roughness: 0.6,
+    color: 0xa1a1aa, emissive: 0x000000, metalness: 0.2, roughness: 0.6,
     transparent: true, opacity: 0.55,
   }),
 };

@@ -41,7 +41,7 @@ export class Engine {
   constructor(container) {
     this.container = container;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#0a1120');
+    this.scene.background = new THREE.Color('#eceef0');
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -160,6 +160,8 @@ export class Engine {
     }
     this._makeControls();
     this.controls.target.copy(target);
+    // Plans and elevations read as drawings: no ground shadow outside 3D.
+    if (this.ground) this.ground.visible = mode !== 'orthographic';
     this.resize();
     this.controls.update();
     this.onProjectionChange?.(this.projection);
@@ -181,12 +183,13 @@ export class Engine {
   }
 
   _addGroundAndGrid() {
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.ShadowMaterial({ opacity: 0.3 }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.ShadowMaterial({ opacity: 0.1 }));
     ground.receiveShadow = true;
     this.scene.add(ground);
+    this.ground = ground;
 
-    const grid = new THREE.GridHelper(200, 200, 0x3dd9c9, 0x1d2b42);
-    grid.material.opacity = 0.3;
+    const grid = new THREE.GridHelper(200, 200, 0xa8acb2, 0xd7dade);
+    grid.material.opacity = 0.9;
     grid.material.transparent = true;
     grid.rotation.x = Math.PI / 2;
     this.scene.add(grid);
@@ -197,7 +200,7 @@ export class Engine {
   _makePivotMarker() {
     const marker = new THREE.Mesh(
       new THREE.SphereGeometry(1, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffa41b, depthTest: false, transparent: true, opacity: 0.95 }),
+      new THREE.MeshBasicMaterial({ color: 0x2563eb, depthTest: false, transparent: true, opacity: 0.95 }),
     );
     marker.renderOrder = 999;
     marker.visible = false;
