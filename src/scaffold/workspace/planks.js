@@ -79,6 +79,61 @@ export function plankRectFromPair(pair) {
   };
 }
 
+/** The direction the boards run for a placement, as an axis angle in [0, PI). */
+export function plankRunAxis(ledger) {
+  const a = Math.atan2(ledger.b[1] - ledger.a[1], ledger.b[0] - ledger.a[0]) + Math.PI / 2;
+  return ((a % Math.PI) + Math.PI) % Math.PI;
+}
+
+/** True when two axis angles are the same line. */
+export function sameRunAxis(a, b) {
+  const d = Math.abs(((a - b) % Math.PI + Math.PI) % Math.PI);
+  return Math.min(d, Math.PI - d) < 0.05;
+}
+
+/**
+ * The same opening decked the other way, as ScaffoldPro's R does it: boards
+ * spanning the OTHER pair of ledgers round the bay, so they run square to how
+ * they ran. Returns { ledgerId, sideSign }, or null when the opening is bounded
+ * one way only and so can only be decked one way.
+ */
+export function crossPlankPlacement(sourceLedger, ledgers, sideSign) {
+  const pair = buildSupportPair(sourceLedger, ledgers, sideSign);
+  if (!pair) return null;
+  const { source, signedOffsetFt, overlapMinFt, overlapMaxFt } = pair;
+  const centre = {
+    x: source.mid.x + source.dir.x * (overlapMinFt + overlapMaxFt) / 2 + source.perp.x * signedOffsetFt / 2,
+    y: source.mid.y + source.dir.y * (overlapMinFt + overlapMaxFt) / 2 + source.perp.y * signedOffsetFt / 2,
+  };
+  // The bay's ends: ledgers square to this pair, at either end of the overlap.
+  const ends = [];
+  for (const l of ledgers) {
+    if (l.id === sourceLedger.id || Math.abs((l.a[2] + l.b[2]) / 2 - source.z) > 1 / 12) continue;
+    const dx = l.b[0] - l.a[0], dy = l.b[1] - l.a[1], len = Math.hypot(dx, dy);
+    if (len < 1 || Math.abs((dx * source.dir.x + dy * source.dir.y) / len) > 0.15) continue;
+    const mid = { x: (l.a[0] + l.b[0]) / 2, y: (l.a[1] + l.b[1]) / 2 };
+    const along = (mid.x - source.mid.x) * source.dir.x + (mid.y - source.mid.y) * source.dir.y;
+    const atEnd = Math.min(Math.abs(along - overlapMinFt), Math.abs(along - overlapMaxFt));
+    if (atEnd < 0.25) ends.push({ ledger: l, along });
+  }
+  ends.sort((p, q) => p.along - q.along);
+  for (const { ledger } of ends) {
+    const frameDir = { x: ledger.b[0] - ledger.a[0], y: ledger.b[1] - ledger.a[1] };
+    const len = Math.hypot(frameDir.x, frameDir.y);
+    const perp = { x: -frameDir.y / len, y: frameDir.x / len };
+    const mid = { x: (ledger.a[0] + ledger.b[0]) / 2, y: (ledger.a[1] + ledger.b[1]) / 2 };
+    const side = (centre.x - mid.x) * perp.x + (centre.y - mid.y) * perp.y >= 0 ? 1 : -1;
+    const crossPair = buildSupportPair(ledger, ledgers, side);
+    if (!crossPair) continue;
+    const r = plankRectFromPair(crossPair);
+    // Only the same opening counts: the cross bay must sit where this one does.
+    if (Math.hypot((r.x0 + r.x1) / 2 - centre.x, (r.y0 + r.y1) / 2 - centre.y) < 0.5) {
+      return { ledgerId: ledger.id, sideSign: side };
+    }
+  }
+  return null;
+}
+
 function hasPlacement(existing, ledgerId, sideSign) {
   return existing.some(p => p.ledgerId === ledgerId && p.sideSign === sideSign);
 }

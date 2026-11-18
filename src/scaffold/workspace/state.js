@@ -150,8 +150,13 @@ export class ScaffoldState {
   standardTopZ(s) { return this.baseOffsetFt() + this.standardHeightFt(s); }
 
   // --- placement -----------------------------------------------------------
-  addStandard(x, y, lengthFt) { this._pushHistory();
-    const sx = this.snap(x), sy = this.snap(y);
+  /**
+   * Add a segment at (x, y), on top of any standard already there. `exact`
+   * skips the grid snap, for the Block tool, whose bays need not land on it.
+   */
+  addStandard(x, y, lengthFt, { exact = false } = {}) { this._pushHistory();
+    const fix = v => Math.round(v * 1e6) / 1e6;
+    const sx = exact ? fix(x) : this.snap(x), sy = exact ? fix(y) : this.snap(y);
     const existing = this.standardAt(sx, sy);
     if (existing) { existing.segments.push(lengthFt); this._emit(); return existing; }
     const s = { id: this._id('S'), x: sx, y: sy, segments: [lengthFt] };
@@ -381,16 +386,11 @@ export class ScaffoldState {
    */
   nodes() {
     const out = [];
-    const base = this.baseOffsetFt();
-    const first = inchesToFeet(FIRST_NODE_OFFSET_IN);
-    const spacing = inchesToFeet(NODE_SPACING_IN);
     for (const s of this.standards.values()) {
       const top = this.standardTopZ(s);
-      if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: base + first - spacing, level: 0, columnId: s.id });
-      let level = 1;
-      for (let z = base + first; z <= top + 1e-6; z += spacing) {
-        out.push({ x: s.x, y: s.y, z, level, columnId: s.id });
-        level++;
+      if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: this.liftZ(0), level: 0, columnId: s.id });
+      for (let level = 1; this.liftZ(level) <= top + 1e-6; level++) {
+        out.push({ x: s.x, y: s.y, z: this.liftZ(level), level, columnId: s.id });
       }
     }
     for (const k of this.brackets.values()) out.push(this.bracketTipNode(k));
@@ -401,6 +401,17 @@ export class ScaffoldState {
   liftAt(z) {
     const base = this.baseOffsetFt();
     return Math.round((z - base - inchesToFeet(FIRST_NODE_OFFSET_IN)) / inchesToFeet(NODE_SPACING_IN)) + 1;
+  }
+
+  /** The height of a lift's rosettes: one formula, so every user agrees exactly. */
+  liftZ(lift) {
+    return this.baseOffsetFt() + inchesToFeet(FIRST_NODE_OFFSET_IN) + (lift - 1) * inchesToFeet(NODE_SPACING_IN);
+  }
+
+  /** How many rosettes a standard carries (its top lift). */
+  standardLifts(s) {
+    const tubeIn = this.standardHeightFt(s) * 12;
+    return tubeIn + 1e-6 < FIRST_NODE_OFFSET_IN ? 0 : Math.floor((tubeIn - FIRST_NODE_OFFSET_IN) / NODE_SPACING_IN + 1e-6) + 1;
   }
 
   /** The rosette at a side bracket's tip, as a connection node. */

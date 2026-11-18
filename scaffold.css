@@ -109,6 +109,21 @@
   color:var(--sfw-ink-2);font:400 12.5px/1.45 var(--sfw-font);text-align:center;pointer-events:none}
 .sfw-hint:empty{display:none}
 
+/* Block card: comes up over the canvas with the Block tool (ScaffoldPro's block
+   settings). Same fields and type as the side panel, on a floating card. */
+.sfw-blockcard{position:absolute;top:58px;left:12px;z-index:4;width:272px;max-height:calc(100% - 120px);overflow-y:auto;
+  padding:12px 14px 14px;border:1px solid var(--sfw-line);border-bottom:1px solid var(--sfw-line);border-radius:10px;
+  background:var(--sfw-bg);box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.sfw-blockcard[hidden]{display:none}
+.sfw-blockcard h3{margin:0 0 10px}
+.sfw-blockcard h3 .sfw-icon-btn{width:26px;height:26px;margin:-4px -6px -4px 0}
+.sfw-blockcard h3 .sfw-icon-btn svg{width:15px;height:15px}
+.sfw-blockcard .sfw-grid2{row-gap:10px}
+.sfw-blockcard .sfw-note{padding:8px 10px;border-radius:6px;background:var(--sfw-subtle)}
+.sfw-blockcard-foot{display:flex;align-items:center;gap:10px;margin-top:10px;font:400 12px/1.3 var(--sfw-font);color:var(--sfw-muted)}
+.sfw-blockcard-foot .sfw-btn{width:auto;margin:0;padding:0 14px}
+.sfw-blockcard-foot kbd{padding:0 4px;border:1px solid var(--sfw-line-strong);border-radius:4px;font:500 11px/16px var(--sfw-font);color:var(--sfw-ink-2)}
+
 /* ---------------------------------------------------------------- */
 /* Side panel                                                        */
 /* ---------------------------------------------------------------- */

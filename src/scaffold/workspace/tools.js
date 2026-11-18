@@ -12,19 +12,23 @@ import * as THREE from 'three';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
-  findClosestUnoccupiedTarget, computeBatchPlan, planBlock, planStandardSegmentsForHeight, liftFrame,
+  findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame,
+  planBlockRecipe, planStandardSegmentsForLift, rotateOffset90, snapBlockCenter, BLOCK_DEFAULTS,
 } from './planning.js';
-import { hitData } from './instancing.js';
+import { hitData, instanceMeshes, clearGroup } from './instancing.js';
 import {
   getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
   DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
 import { buildSupportPair } from './supportspan.js';
-import { buildPlankPreviewForLedger, computePlankBatchPreview } from './planks.js';
+import {
+  buildPlankPreviewForLedger, computePlankBatchPreview, crossPlankPlacement, plankRunAxis, sameRunAxis,
+} from './planks.js';
 import {
   buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
-  bracketTipFaces, footprintCentroid,
+  bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
 } from './braces.js';
+import { bracketDirections, chooseBracketDirection, runCentroid } from './bracketdirs.js';
 
 // How far from the tube the horizontal side-pick crossing may land before it
 // stops meaning "the cursor is on this side of that ledger".
@@ -34,6 +38,9 @@ export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss',
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
+// The block ghost's footprint: blue, and green once snapped (ScaffoldPro's cue).
+const BLOCK_OUTLINE = new THREE.LineBasicMaterial({ color: 0x2563eb });
+const BLOCK_OUTLINE_SNAPPED = new THREE.LineBasicMaterial({ color: 0x16a34a });
 
 function normalizeRect(a, b) {
   return { xMin: Math.min(a.x, b.x), xMax: Math.max(a.x, b.x), yMin: Math.min(a.y, b.y), yMax: Math.max(a.y, b.y) };
@@ -71,9 +78,18 @@ export class Tools {
     // Standard tool: when set, placing a standard builds a planned stack that
     // reaches this height instead of dropping a single catalog segment.
     this.standardTargetHeightFt = 0;
-    // Block tool preview rotation, in 90 degree steps (R).
+    // Block tool: ScaffoldPro's block recipe (the block card edits it) and the
+    // preview's quarter turns (R).
+    this.blockSettings = { ...BLOCK_DEFAULTS };
     this.rotationSteps = 0;
+    // Live load tool: R puts the patch on the other side of the ledger.
     this.sideFlipped = false;
+    // Bracket tool: steps round the free directions from the outward one (R).
+    // Kept across tools, as ScaffoldPro keeps it, so a turn holds for the row.
+    this.bracketTurn = 0;
+    // Plank tool: which way the boards run, per lift (R), as ScaffoldPro keeps
+    // it per level. Keyed by lift height; the value is the run axis angle.
+    this.plankAxisByLift = new Map();
     // Why the last brace hover found nothing: 'no-face' | 'too-short' | 'already-braced'.
     this.braceMiss = null;
     this.selection = new Set();
@@ -109,8 +125,23 @@ export class Tools {
   _setShift(held) {
     if (this.shiftHeld === held) return;
     this.shiftHeld = held;
+    this._refreshGhost();
+  }
+
+  /**
+   * Redraw the preview where the pointer already is: after Shift, R, or a
+   * change to the block card, so the change is on screen in the same frame
+   * instead of waiting for the mouse to move.
+   */
+  _refreshGhost() {
     if (!this._hoverAt || this._marquee || this.engine.navigating) return;
-    this._updateGhost({ ...this._hoverAt, shiftKey: held, ctrlKey: false, altKey: false, buttons: 0 });
+    this._updateGhost({ ...this._hoverAt, shiftKey: this.shiftHeld, ctrlKey: false, altKey: false, buttons: 0 });
+  }
+
+  /** Change the block recipe (from the block card). */
+  setBlockSettings(patch) {
+    Object.assign(this.blockSettings, patch);
+    this._refreshGhost();
   }
 
   setTool(name) {
@@ -133,7 +164,8 @@ export class Tools {
   // which keeps a plain hover in Select from redrawing the scene.
   _clearGhost() {
     if (!this.ghostGroup.children.length) return;
-    this.ghostGroup.clear();
+    // The block ghost is instanced, so its buffers are freed here.
+    clearGroup(this.ghostGroup);
     this.engine.invalidate?.();
   }
   _clearOverlay() {
@@ -229,10 +261,6 @@ export class Tools {
     this._clearOverlay();
     if (!down) return;
     const dragged = down.moved >= DRAG_PX;
-    if (this.tool === 'block' && marquee && dragged) {
-      this.placeBlock(normalizeRect(marquee.start, marquee.current));
-      return;
-    }
     if (marquee && dragged) { this._finishMarquee(marquee, down.ctrl || this.tool !== 'select'); return; }
     if (dragged) return; // camera/aborted drag
     this._act(e);
@@ -245,18 +273,14 @@ export class Tools {
   _drawMarquee() {
     this._clearOverlay();
     const m = this._marquee;
-    const r = this.tool === 'block'
-      ? this.orientRect(normalizeRect(m.start, m.current))
-      : normalizeRect(m.start, m.current);
+    const r = normalizeRect(m.start, m.current);
     const w = Math.max(r.xMax - r.xMin, 1e-4);
     const d = Math.max(r.yMax - r.yMin, 1e-4);
     const crossing = m.currentClientX < m.startClientX;
-    // Source palette: window = blue, crossing = green; block rect = orange.
-    const isBlock = this.tool === 'block';
-    const edgeColor = isBlock ? 0xffa41b : (crossing ? 0x34d399 : 0x60a5fa);
-    const fillColor = isBlock ? 0xffc266 : (crossing ? 0x6ee7b7 : 0x93c5fd);
-    const opacity = isBlock ? 0.14 : (crossing ? 0.12 : 0.08);
-    const color = edgeColor;
+    // Source palette: window = blue, crossing = green.
+    const edgeColor = crossing ? 0x34d399 : 0x60a5fa;
+    const fillColor = crossing ? 0x6ee7b7 : 0x93c5fd;
+    const opacity = crossing ? 0.12 : 0.08;
     const fill = new THREE.Mesh(PLANE_GEO, new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
     fill.position.set((r.xMin + r.xMax) / 2, (r.yMin + r.yMax) / 2, 0.04);
     fill.scale.set(w, d, 1);
@@ -296,6 +320,12 @@ export class Tools {
       if (plan.length > 1) this.hooks.onBulkFill?.(plan.length, 'standard segment');
       return;
     }
+    // A click places the block the ghost is showing.
+    if (this.tool === 'block') {
+      const placement = this._blockPlacement(e);
+      if (placement) this.placeBlockAt(placement);
+      return;
+    }
     if (this.tool === 'select' || this.tool === 'erase') {
       this.engine.setPointerFromEvent(e);
       const id = this._cyclePick(e);
@@ -322,7 +352,8 @@ export class Tools {
       if (!hit) return;
       const side = this._sideFor(hit.ledger, hit.point);
       if (e.shiftKey) { this._batchFillPlanks(hit.ledger, side); return; }
-      s.addPlankOnLedger(hit.ledger.id, side);
+      const p = this._plankPlacementFor(hit.ledger, side);
+      if (!this._isDecked(p)) s.addPlankOnLedger(p.ledgerId, p.sideSign);
       return;
     }
     // Live load patches attach to a ledger, not a node: pick the ledger and the
@@ -348,8 +379,8 @@ export class Tools {
     }
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      // Brackets hang on a standard's rosettes, never off another bracket's tip.
-      if (part && !node.bracketId) s.addBracket(node, this._outwardDir(node), part.lengthFt);
+      const dir = this._bracketDir(node);
+      if (part && dir) s.addBracket(node, dir, part.lengthFt);
       return;
     }
 
@@ -363,17 +394,66 @@ export class Tools {
     }
   }
 
-  // Direction pointing away from the scaffold footprint centre.
-  _outwardDir(node) {
-    const cols = [...this.state.standards.values()];
-    if (!cols.length) return [1, 0];
-    const cx = cols.reduce((a, c) => a + c.x, 0) / cols.length;
-    const cy = cols.reduce((a, c) => a + c.y, 0) / cols.length;
-    let dx = node.x - cx, dy = node.y - cy;
-    if (Math.hypot(dx, dy) < 1e-6) return [1, 0];
-    // Snap to the dominant axis so brackets sit square to the bay.
-    if (Math.abs(dx) >= Math.abs(dy)) return [Math.sign(dx), 0];
-    return [0, Math.sign(dy)];
+  /**
+   * Which way a bracket on this rosette points, as ScaffoldPro chooses: square
+   * to the run, out of the run's middle by default, R steps round the free
+   * directions. Null when the rosette has no free direction, or is itself a
+   * bracket's tip (brackets hang on standards, not off other brackets).
+   */
+  _bracketDir(node) {
+    if (!node || node.bracketId) return null;
+    const ledgers = this.state.ledgerList();
+    const directions = bracketDirections(node, { ledgers, brackets: [...this.state.brackets.values()] });
+    const centroid = runCentroid(node, ledgers, [...this.state.standards.values()]);
+    return chooseBracketDirection(node, directions, centroid, this.bracketTurn);
+  }
+
+  // --- decks: which way the boards run --------------------------------------
+
+  _liftKey(z) { return Math.round(z * 1000); }
+
+  /**
+   * The deck to lay for the bay picked by a ledger and side, honouring the run
+   * direction chosen with R for this lift. Falls back to the picked ledger's
+   * own pair when the opening is bounded one way only.
+   */
+  _plankPlacementFor(ledger, side) {
+    const natural = { ledgerId: ledger.id, sideSign: side };
+    const want = this.plankAxisByLift.get(this._liftKey((ledger.a[2] + ledger.b[2]) / 2));
+    if (want === undefined || sameRunAxis(want, plankRunAxis(ledger))) return natural;
+    return crossPlankPlacement(ledger, this.state.ledgerList(), side) || natural;
+  }
+
+  /** True when this placement's opening already has a deck, either way round. */
+  _isDecked(placement) {
+    const ledger = this.state.ledgers.get(placement.ledgerId);
+    if (!ledger) return true;
+    const pair = buildSupportPair(ledger, this.state.ledgerList(), placement.sideSign);
+    if (!pair) return true;
+    const { source, signedOffsetFt, overlapMinFt, overlapMaxFt } = pair;
+    const cx = source.mid.x + source.dir.x * (overlapMinFt + overlapMaxFt) / 2 + source.perp.x * signedOffsetFt / 2;
+    const cy = source.mid.y + source.dir.y * (overlapMinFt + overlapMaxFt) / 2 + source.perp.y * signedOffsetFt / 2;
+    return this.state.plankBays().some(d =>
+      Math.abs(d.z - source.z) < 0.1 && Math.hypot((d.x0 + d.x1) / 2 - cx, (d.y0 + d.y1) / 2 - cy) < 0.5);
+  }
+
+  /**
+   * R with the Plank tool: turn the boards in the hovered opening to run the
+   * other way, decking off the other pair of ledgers, and keep that for the
+   * whole lift. Returns the new run axis, or null when the opening is bounded
+   * one way only.
+   */
+  _turnPlankRun() {
+    const hit = this._hoverAt ? this._pickLedger(this._hoverAt) : null;
+    if (!hit) return undefined;
+    const side = this._sideFor(hit.ledger, hit.point);
+    const current = this._plankPlacementFor(hit.ledger, side);
+    const currentLedger = this.state.ledgers.get(current.ledgerId);
+    const cross = crossPlankPlacement(currentLedger, this.state.ledgerList(), current.sideSign);
+    if (!cross) return null;
+    const axis = plankRunAxis(this.state.ledgers.get(cross.ledgerId));
+    this.plankAxisByLift.set(this._liftKey((currentLedger.a[2] + currentLedger.b[2]) / 2), axis);
+    return axis;
   }
 
   /**
@@ -547,17 +627,36 @@ export class Tools {
 
   /** SHIFT: deck every bay along the connected run of ledgers at this lift. */
   _batchFillPlanks(ledger, sideSign) {
-    const existing = [...this.state.plankPlacements.values()];
-    const previews = computePlankBatchPreview(ledger, this.state.ledgerList(), sideSign, existing);
+    const placements = this._plankRunPlacements(ledger, sideSign);
     const added = this.state.batch(() => {
       let n = 0;
-      for (const p of previews) {
-        if (this.state.addPlankOnLedger(p.placement.ledgerId, p.placement.sideSign)) n++;
+      for (const p of placements) {
+        if (this._isDecked(p)) continue;
+        if (this.state.addPlankOnLedger(p.ledgerId, p.sideSign)) n++;
       }
       return n;
     });
     this.hooks.onBulkFill?.(added, 'deck');
     return added;
+  }
+
+  /**
+   * Every bay along the run, each decked the way R chose for this lift, less
+   * any opening already decked either way round.
+   */
+  _plankRunPlacements(ledger, sideSign) {
+    const ledgers = this.state.ledgerList();
+    const seen = new Set();
+    const out = [];
+    for (const preview of computePlankBatchPreview(ledger, ledgers, sideSign, [])) {
+      const runLedger = this.state.ledgers.get(preview.placement.ledgerId);
+      const p = this._plankPlacementFor(runLedger, preview.placement.sideSign);
+      const key = `${p.ledgerId}:${p.sideSign}`;
+      if (seen.has(key) || this._isDecked(p)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
   }
 
   _batchFillLedgers(level) {
@@ -622,81 +721,143 @@ export class Tools {
     return added;
   }
 
+  // --- blocks ---------------------------------------------------------------
+  // As ScaffoldPro's PlaceBlockTool: the block card holds the recipe, a ghost
+  // of the whole block follows the pointer and snaps onto the standards beside
+  // it, R turns it a quarter turn, and a click places it.
+
+  _blockPlan() {
+    const s = this.state;
+    return planBlockRecipe(this.blockSettings, {
+      liftZ: lift => s.liftZ(lift),
+      showBaseCollar: s.base.showBaseCollar,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
+      ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
+    });
+  }
+
+  /** Where the block would go with the pointer at `e`, or null off the ground. */
+  _blockPlacement(e) {
+    const g = this._groundSnap(e);
+    if (!g) return null;
+    const plan = this._blockPlan();
+    const c = snapBlockCenter(g, plan, this.rotationSteps, [...this.state.standards.values()]);
+    return { plan, center: { x: c.x, y: c.y }, snapped: c.snapped, rotationSteps: this.rotationSteps };
+  }
+
+  /** A placement in world feet: plain data the ghost and the placement share. */
+  _blockWorld({ plan, center, rotationSteps }) {
+    const s = this.state;
+    const at = o => {
+      const r = rotateOffset90(o, rotationSteps);
+      return { x: center.x + r.x, y: center.y + r.y };
+    };
+    const xyz = (o, lift) => { const p = at(o); return [p.x, p.y, s.liftZ(lift)]; };
+    const braces = plan.braces.map(b => {
+      // Just outside the face, as the Brace tool places them.
+      const n = rotateOffset90(b.normal, rotationSteps);
+      const a = xyz(b.a, b.lift), z = xyz(b.b, b.toLift);
+      const ox = n.x * PERP_OFFSET_FT, oy = n.y * PERP_OFFSET_FT;
+      return { a: [a[0] + ox, a[1] + oy, a[2]], b: [z[0] + ox, z[1] + oy, z[2]] };
+    });
+    const decks = plan.decks.map(d => {
+      const p = at({ x: d.x0, y: d.y0 }), q = at({ x: d.x1, y: d.y1 });
+      return { x0: Math.min(p.x, q.x), y0: Math.min(p.y, q.y), x1: Math.max(p.x, q.x), y1: Math.max(p.y, q.y), z: s.liftZ(d.lift) };
+    });
+    const corners = [[plan.xs[0], plan.ys[0]], [plan.xs[plan.xs.length - 1], plan.ys[0]],
+      [plan.xs[plan.xs.length - 1], plan.ys[plan.ys.length - 1]], [plan.xs[0], plan.ys[plan.ys.length - 1]]]
+      .map(([x, y]) => at({ x, y }));
+    return {
+      standards: plan.standards.map(at),
+      ledgers: plan.ledgers.map(l => ({ a: xyz(l.a, l.lift), b: xyz(l.b, l.lift) })),
+      braces, decks, corners,
+    };
+  }
+
   /**
-   * Turn the dragged rectangle a quarter turn about its centre for each press
-   * of R, which is what rotates the block: the footprint swaps width for depth,
-   * so the bay subdivision runs the other way.
+   * Place a block. Standards already standing where the block wants one are
+   * shared, not stacked on: they get only the segments they are short of.
+   * Ledgers, braces and decks already there are left alone. One undo step.
    */
-  orientRect(rect) {
-    if ((this.rotationSteps % 2) === 0) return rect;
-    const cx = (rect.xMin + rect.xMax) / 2;
-    const cy = (rect.yMin + rect.yMax) / 2;
-    const halfW = (rect.xMax - rect.xMin) / 2;
-    const halfD = (rect.yMax - rect.yMin) / 2;
-    return { xMin: cx - halfD, xMax: cx + halfD, yMin: cy - halfW, yMax: cy + halfW };
-  }
-
-  /** Block tool: lay out a full scaffold block over the dragged ground rect. */
-  placeBlock(rawRect) {
-    const rect = this.orientRect(rawRect);
+  placeBlockAt(placement) {
     const s = this.state;
-    const plan = planBlock({
-      x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
-      heightFt: this.blockHeightFt ?? 19.6875,
-      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
-      ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
-      maxLevel: 0,
+    const { plan } = placement;
+    const w = this._blockWorld(placement);
+    const lengths = CATALOG.standards.parts.map(p => p.lengthFt);
+    let added = 0;
+    s.batch(() => {
+      for (const p of w.standards) {
+        const existing = s.standardAt(p.x, p.y);
+        if (!existing) {
+          for (const len of plan.segments) s.addStandard(p.x, p.y, len, { exact: true });
+          added++;
+          continue;
+        }
+        const short = plan.requiredLift - s.standardLifts(existing);
+        if (short > 0) for (const len of planStandardSegmentsForLift(short, lengths)) s.addStandard(p.x, p.y, len, { exact: true });
+      }
+      const ledgerKeys = new Set([...s.ledgers.values()].map(l => segmentKey(l.a, l.b)));
+      for (const l of w.ledgers) {
+        const k = segmentKey(l.a, l.b);
+        if (ledgerKeys.has(k)) continue;
+        ledgerKeys.add(k);
+        s.addLedger(l.a, l.b);
+      }
+      for (const b of w.braces) if (!this._braceExistsBetween(b.a, b.b)) s.addBrace(b.a, b.b);
+      const decked = s.plankBays();
+      for (const d of w.decks) {
+        const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2;
+        if (decked.some(e => Math.abs(e.z - d.z) < 0.1 && Math.hypot((e.x0 + e.x1) / 2 - cx, (e.y0 + e.y1) / 2 - cy) < 0.5)) continue;
+        s.addPlank([d.x0, d.y0, d.z], [d.x1, d.y1, d.z]);
+      }
     });
-    if (!plan) return 0;
-    // One edit for the whole block: one rebuild, one undo step.
-    s.batch(() => this._layBlock(rect, plan));
-    this.hooks.onBulkFill?.(plan.standards.length, 'block');
-    return plan.standards.length;
+    this.hooks.onBulkFill?.(added, 'block');
+    return added;
   }
 
-  _layBlock(rect, plan) {
+  /** The block ghost: the whole block, drawn faint, and its footprint. */
+  _blockGhost(e) {
+    const placement = this._blockPlacement(e);
+    if (!placement) return;
     const s = this.state;
-    for (const st of plan.standards) {
-      for (const len of st.segments) s.addStandard(st.x, st.y, len);
+    const w = this._blockWorld(placement);
+    const mat = MATERIALS.ghost;
+    const base = s.baseOffsetFt();
+    const top = base + placement.plan.segments.reduce((a, b) => a + b, 0);
+    const meshes = [];
+    for (const p of w.standards) meshes.push(verticalTube(p.x, p.y, base, top, STANDARD_TUBE_OD_IN, mat));
+    for (const l of w.ledgers) meshes.push(tubeBetween(l.a, l.b, 1.9, mat));
+    for (const b of w.braces) meshes.push(tubeBetween(b.a, b.b, 1.69, mat));
+    for (const d of w.decks) {
+      for (const b of s.plankBoards({ id: 'ghost', ...d })) meshes.push(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat));
     }
-    // Levels available now that the standards exist.
-    const all = s.nodes().filter(n => !n.bracketId);
-    const maxLevel = all.reduce((m, n) => Math.max(m, n.level), 0);
-    const replan = planBlock({
-      x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
-      heightFt: this.blockHeightFt ?? 19.6875,
-      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
-      ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
-      maxLevel,
-      // ScaffoldPro starts the block at the base collar's rosette when there is one.
-      startLevel: s.base.showBaseCollar ? 0 : 1,
+    for (const m of instanceMeshes(meshes)) this.ghostGroup.add(m);
+    // Footprint: blue, green once it has snapped onto the standards beside it.
+    const outline = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(w.corners.map(c => new THREE.Vector3(c.x, c.y, 0.03))),
+      placement.snapped ? BLOCK_OUTLINE_SNAPPED : BLOCK_OUTLINE,
+    );
+    outline.userData.ownsGeometry = true;
+    this.ghostGroup.add(outline);
+    const { plan } = placement;
+    this.hooks.onPreview?.('block', w.standards.length, {
+      snapped: placement.snapped,
+      widthFt: plan.widthFt, depthFt: plan.depthFt,
+      deckZ: plan.deckLifts.length ? s.liftZ(plan.deckLifts[plan.deckLifts.length - 1]) : null,
+      levels: plan.deckLifts.length,
+      rotation: placement.rotationSteps * 90,
     });
-    const nodeAt = (x, y, level) => all.find(n =>
-      Math.hypot(n.x - x, n.y - y) < 1e-6 && n.level === level);
-
-    for (const l of replan.ledgers) {
-      const a = nodeAt(l.a.x, l.a.y, l.level), b = nodeAt(l.b.x, l.b.y, l.level);
-      if (a && b) s.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
-    }
-    for (const br of replan.braces) {
-      const a = nodeAt(br.a.x, br.a.y, br.level), b = nodeAt(br.b.x, br.b.y, br.toLevel);
-      if (a && b) s.addBrace([a.x, a.y, a.z], [b.x, b.y, b.z]);
-    }
-    for (const d of replan.decks) {
-      const a = nodeAt(d.x0, d.y0, d.level), b = nodeAt(d.x1, d.y1, d.level);
-      if (a && b) s.addPlank([a.x, a.y, a.z], [b.x, b.y, b.z]);
-    }
   }
+
 
   _key(e) {
     const t = e.target;
     const inField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
     // Shift for a capital letter in a field is typing, not a fill.
     if (e.key === 'Shift') { if (!inField && !e.repeat) this._setShift(true); return; }
-    // R rotates, as in the source app. What it rotates depends on the tool:
-    // the block preview turns 90 degrees, a brace flips ascending/descending,
-    // and a deck or load patch flips to the other side of the ledger.
-    if ((e.key === 'r' || e.key === 'R') && !inField && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // R rotates, as in the source app; what it turns depends on the tool (see
+    // rotate()). A held key does not keep turning.
+    if ((e.key === 'r' || e.key === 'R') && !inField && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       this.rotate();
       return;
@@ -722,24 +883,40 @@ export class Tools {
     }
   }
 
-  /** R: rotate / flip whatever the active tool is about to place. */
+  /**
+   * R: turn whatever the active tool is about to place, as ScaffoldPro does,
+   * and show it at once where the pointer already is:
+   *   block    a quarter turn
+   *   brace    ascending / descending
+   *   bracket  the next free direction round the rosette
+   *   plank    the boards run the other way across the hovered opening
+   *   liveload the patch goes on the other side of the ledger
+   */
   rotate() {
+    // Redraw first, then report: what R did is the news, not the usual hover hint.
+    const done = (tool, value) => { this._refreshGhost(); this.hooks.onRotate?.(tool, value); return value; };
     if (this.tool === 'block') {
       this.rotationSteps = (this.rotationSteps + 1) % 4;
-      this.hooks.onRotate?.('block', this.rotationSteps);
-      return this.rotationSteps;
+      return done('block', this.rotationSteps);
     }
     if (this.tool === 'brace') {
       this.braceDirection = this.braceDirection === 'ascending' ? 'descending' : 'ascending';
-      this.hooks.onRotate?.('brace', this.braceDirection);
-      return this.braceDirection;
+      return done('brace', this.braceDirection);
     }
-    if (this.tool === 'plank' || this.tool === 'liveload') {
-      // Flip to the other side of the hovered ledger, and stay flipped until
-      // R is pressed again or the tool changes.
+    if (this.tool === 'bracket') {
+      this.bracketTurn++;
+      const node = this._hoverAt ? this._nearestNode(this._hoverAt) : null;
+      const dir = node ? this._bracketDir(node) : null;
+      return done('bracket', dir);
+    }
+    if (this.tool === 'plank') {
+      // undefined: nothing hovered; null: the opening decks one way only.
+      return done('plank', this._turnPlankRun());
+    }
+    if (this.tool === 'liveload') {
+      // The other side of the hovered ledger, until R again or the tool changes.
       this.sideFlipped = !this.sideFlipped;
-      this.hooks.onRotate?.(this.tool, this.sideFlipped ? 'flipped' : 'cursor');
-      return this.sideFlipped;
+      return done('liveload', this.sideFlipped ? 'flipped' : 'cursor');
     }
     if (this.tool === 'truss' || this.tool === 'ledger') {
       // Nothing to rotate; report so the UI can say so rather than go silent.
@@ -773,7 +950,8 @@ export class Tools {
   _buildGhost(e) {
     this._clearGhost();
     this._pendingBatch = null;
-    if (this.tool === 'select' || this.tool === 'erase' || this.tool === 'block') return;
+    if (this.tool === 'select' || this.tool === 'erase') return;
+    if (this.tool === 'block') { this._blockGhost(e); return; }
     if (this.tool === 'liveload') {
       const hit = this._pickLedger(e);
       if (!hit) return;
@@ -796,20 +974,24 @@ export class Tools {
       const hit = this._pickLedger(e);
       if (!hit) return;
       const side = this._sideFor(hit.ledger, hit.point);
-      const existing = [...this.state.plankPlacements.values()];
       const ledgers = this.state.ledgerList();
-      const previews = e.shiftKey
-        ? computePlankBatchPreview(hit.ledger, ledgers, side, existing)
-        : [buildPlankPreviewForLedger(hit.ledger, ledgers, side, existing)].filter(Boolean);
-      for (const p of previews) {
-        for (const b of p.deck.boards) {
+      // Each bay decked the way R chose for this lift.
+      const placements = e.shiftKey
+        ? this._plankRunPlacements(hit.ledger, side)
+        : [this._plankPlacementFor(hit.ledger, side)].filter(p => !this._isDecked(p));
+      let crossed = false;
+      for (const p of placements) {
+        const preview = buildPlankPreviewForLedger(this.state.ledgers.get(p.ledgerId), ledgers, p.sideSign, []);
+        if (!preview) continue;
+        crossed ||= p.ledgerId !== hit.ledger.id;
+        for (const b of preview.deck.boards) {
           this.ghostGroup.add(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, MATERIALS.ghost));
         }
       }
-      this._pendingBatch = e.shiftKey && previews.length
-        ? { count: previews.length, label: 'deck', apply: () => this._batchFillPlanks(hit.ledger, side) }
+      this._pendingBatch = e.shiftKey && placements.length
+        ? { count: placements.length, label: 'deck', apply: () => this._batchFillPlanks(hit.ledger, side) }
         : null;
-      this.hooks.onPreview?.('plank', previews.length, { batch: e.shiftKey, flipped: this.sideFlipped });
+      this.hooks.onPreview?.('plank', placements.length, { batch: e.shiftKey, crossed });
       return;
     }
     // Braces: ghost the diagonal on the hovered face, or the whole perimeter run.
@@ -876,7 +1058,9 @@ export class Tools {
     }
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      if (part && !node.bracketId) for (const m of buildSideBracket(node, this._outwardDir(node), part.lengthFt, mat)) this.ghostGroup.add(m);
+      const dir = this._bracketDir(node);
+      if (part && dir) for (const m of buildSideBracket(node, dir, part.lengthFt, mat)) this.ghostGroup.add(m);
+      this.hooks.onPreview?.('bracket', dir ? 1 : 0, { dir });
       return;
     }
     if (this.pending && this.tool === 'truss') {

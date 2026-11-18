@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 import { ScaffoldState } from '../src/scaffold/workspace/state.js';
 import { inchesToFeet, BASE_COLLAR, buildBaseAssembly } from '../src/scaffold/workspace/parts.js';
-import { planBlock } from '../src/scaffold/workspace/planning.js';
+import { planBlockRecipe } from '../src/scaffold/workspace/planning.js';
 import { buildCenterlineModel, LAYERS } from '../src/scaffold/workspace/dxf.js';
 import { faceBraceTarget, nodesByColumn, planPerimeterBraces, buildFaceGraph } from '../src/scaffold/workspace/braces.js';
 import { bracketWeightLb } from '../src/scaffold/workspace/bom.js';
@@ -125,11 +125,14 @@ test('the bracket tool cannot hang a bracket off another bracket\'s tip', () => 
 });
 
 test('a block starts at the base collar\'s rosette when there is one', () => {
-  const opts = { x0: 0, y0: 0, x1: 14, y1: 7, heightFt: 19.7, standardLengthsFt: [9.84375, 6.5625], ledgerLengthsFt: [7], maxLevel: 12 };
-  const withCollar = planBlock({ ...opts, startLevel: 0 });
-  assert.deepEqual(withCollar.levels, [0, 4, 8, 12]);
-  assert.ok(withCollar.braces.every(b => b.level % 4 === 0 && b.toLevel === b.level + 4), 'braces between ledgered lifts');
-  assert.deepEqual(planBlock({ ...opts, startLevel: 1 }).levels, [1, 5, 9]);
+  const s = new ScaffoldState({ snapStep: 1 });
+  const recipe = { widthFt: 14, depthFt: 7, heightFt: 19.7, plankedLevelsCount: 1, braceFrontBack: 'slash' };
+  const opts = { liftZ: l => s.liftZ(l), standardLengthsFt: [9.84375, 6.5625], ledgerLengthsFt: [7] };
+  const withCollar = planBlockRecipe(recipe, { ...opts, showBaseCollar: true });
+  assert.equal(withCollar.ledgerLifts[0], 0, 'bottom ledgers on the collar rosette');
+  assert.ok(withCollar.braces.every(b => b.lift % 4 === 0 && b.toLift === b.lift + 4), 'braces between ledgered lifts');
+  const without = planBlockRecipe(recipe, { ...opts, showBaseCollar: false });
+  assert.equal(without.ledgerLifts[0], 1, 'no collar: the standard\'s first rosette');
 });
 
 test('the line view draws the base assembly and each bracket as its frame', () => {

@@ -261,82 +261,198 @@ export function planStandardSegmentsForHeight(targetHeightFt, standardLengthsFt)
   return out; // largest-first
 }
 
+
+// ---------------------------------------------------------------------------
+// The Block tool, as ScaffoldPro's PlaceBlockTool lays a block out from its
+// recipe (blockPlanning.ts: buildStandardPlan, computeWorkingDeckLiftIndices,
+// computeLedgerLiftIndices; PlaceBlockTool.tsx: buildBlockPreviewGeometry).
+// ---------------------------------------------------------------------------
+
+// Rosette pitch up a standard, inches. Every catalog standard is a whole
+// number of pitches long, so rosettes add up segment by segment.
+const ROSETTE_PITCH_IN = 19.6875;
+
+export const BLOCK_BRACE_OPTIONS = ['off', 'slash', 'backslash'];
+
+/** ScaffoldPro's block defaults (its Reset button). */
+export const BLOCK_DEFAULTS = Object.freeze({
+  widthFt: 7,
+  depthFt: 3,
+  heightFt: 10,
+  plankedLevelsCount: 1,
+  includeBaseDeck: false,
+  braceFrontBack: 'off',
+  braceLeftRight: 'off',
+  ledgerEveryN: BRACE_DELTA_LIFT,
+});
+
+/** Rosettes on one standard segment. */
+export function rosettesOnSegment(lengthFt) {
+  return Math.max(1, Math.round((lengthFt * 12) / ROSETTE_PITCH_IN));
+}
+
 /**
- * Plan a whole scaffold block over a ground rectangle: standard grid, segment
- * stacks, ledger runs at each lift, perimeter bracing and a top deck.
- * Returns plain data; the caller turns it into state mutations.
+ * Standard segments carrying at least `requiredLift` rosettes: the least
+ * overshoot, then the fewest pieces, longest at the bottom.
  */
-export function planBlock(opts) {
-  const {
-    x0, y0, x1, y1, heightFt,
-    standardLengthsFt, ledgerLengthsFt,
-    ledgerEveryNLevels = BRACE_DELTA_LIFT,
-    maxLevel = Infinity,
-    // The lowest lift: 0 is the base collar's rosette, 1 the standard's first.
-    startLevel = 1,
-    brace = true,
-    deck = true,
-  } = opts;
+export function planStandardSegmentsForLift(requiredLift, standardLengthsFt) {
+  const need = Math.max(1, Math.round(requiredLift));
+  const parts = [...standardLengthsFt].sort((a, b) => b - a).map(ft => ({ ft, n: rosettesOnSegment(ft) }));
+  if (!parts.length) return [];
+  const maxK = need + Math.max(...parts.map(p => p.n));
+  const best = new Array(maxK + 1).fill(null);
+  best[0] = [];
+  for (let k = 1; k <= maxK; k++) {
+    for (const p of parts) {
+      if (p.n > k || !best[k - p.n]) continue;
+      const cand = [...best[k - p.n], p.ft].sort((a, b) => b - a);
+      const cur = best[k];
+      if (!cur || cand.length < cur.length || (cand.length === cur.length && cand[0] > cur[0])) best[k] = cand;
+    }
+  }
+  for (let k = need; k <= maxK; k++) if (best[k]) return best[k];
+  return [parts[0].ft];
+}
 
-  const minX = Math.min(x0, x1), maxX = Math.max(x0, x1);
-  const minY = Math.min(y0, y1), maxY = Math.max(y0, y1);
-  const widthFt = maxX - minX, depthFt = maxY - minY;
-  if (widthFt < 0.5 || depthFt < 0.5) return null;
+/** A plan offset turned a quarter turn `steps` times, as ScaffoldPro's rotateOffset90. */
+export function rotateOffset90({ x, y }, steps = 0) {
+  const s = ((Math.round(steps) % 4) + 4) % 4;
+  if (s === 1) return { x: -y, y: x };
+  if (s === 2) return { x: -x, y: -y };
+  if (s === 3) return { x: y, y: -x };
+  return { x, y };
+}
 
+/**
+ * Lay a block out from its recipe, centred on the origin, unrotated.
+ *
+ *   heightFt          the height of the TOP working deck, not of the standards
+ *   plankedLevelsCount decks at every fourth lift, counted down from the top one
+ *                     that fits under heightFt (plus lift 0 with includeBaseDeck)
+ *   standards         long enough to stand two lifts above the top deck, where
+ *                     its guardrails go
+ *   ledgers           from the lowest rosette (the base collar's when there is
+ *                     one) every ledgerEveryN lifts up to the deck height, and
+ *                     at every deck so no deck is left without its ledgers
+ *   braces            full height, lift pairs four apart, on the faces asked
+ *                     for: front/back (the width faces) and left/right
+ *
+ * `liftZ(lift)` gives a lift's height; `showBaseCollar` says whether lift 0
+ * exists. Returns plain data in block-local feet; the caller places it.
+ */
+export function planBlockRecipe(recipe, { liftZ, showBaseCollar = true, standardLengthsFt, ledgerLengthsFt }) {
+  const r = { ...BLOCK_DEFAULTS, ...recipe };
+  const widthFt = Math.max(0.5, Number(r.widthFt) || BLOCK_DEFAULTS.widthFt);
+  const depthFt = Math.max(0.5, Number(r.depthFt) || BLOCK_DEFAULTS.depthFt);
+  const heightFt = Math.max(0.1, Number(r.heightFt) || BLOCK_DEFAULTS.heightFt);
   const layoutX = chooseBayLayout(widthFt, ledgerLengthsFt);
   const layoutY = chooseBayLayout(depthFt, ledgerLengthsFt);
-  const segments = planStandardSegmentsForHeight(heightFt, standardLengthsFt);
+  const halfW = widthFt / 2, halfD = depthFt / 2;
+  const xs = Array.from({ length: layoutX.bays + 1 }, (_, i) => i * layoutX.spacingFt - halfW);
+  const ys = Array.from({ length: layoutY.bays + 1 }, (_, j) => j * layoutY.spacingFt - halfD);
+  const fits = lift => liftZ(lift) <= heightFt + 1e-6;
 
-  const xs = Array.from({ length: layoutX.bays + 1 }, (_, i) => minX + i * layoutX.spacingFt);
-  const ys = Array.from({ length: layoutY.bays + 1 }, (_, i) => minY + i * layoutY.spacingFt);
+  // Working decks: top-down from the highest fourth lift under the height.
+  const candidates = [];
+  if (r.includeBaseDeck && showBaseCollar) candidates.push(0);
+  for (let lift = 4; lift < 400 && fits(lift); lift += 4) candidates.push(lift);
+  const deckLifts = candidates
+    .sort((a, b) => b - a)
+    .slice(0, Math.max(0, Math.round(Number(r.plankedLevelsCount) || 0)))
+    .sort((a, b) => a - b);
+  const topDeck = deckLifts.length ? deckLifts[deckLifts.length - 1] : null;
+  const requiredLift = topDeck !== null ? topDeck + 2 : 2;
+  const segments = planStandardSegmentsForLift(requiredLift, standardLengthsFt);
+  const topLift = segments.reduce((n, ft) => n + rosettesOnSegment(ft), 0);
+
+  const startLift = showBaseCollar ? 0 : 1;
+  const everyN = Math.max(1, Math.round(Number(r.ledgerEveryN) || BRACE_DELTA_LIFT));
+  const ledgerSet = new Set(deckLifts);
+  for (let lift = startLift; lift <= topLift && fits(lift); lift += everyN) ledgerSet.add(lift);
+  const ledgerLifts = [...ledgerSet].sort((a, b) => a - b);
 
   const standards = [];
-  for (const y of ys) for (const x of xs) standards.push({ x, y, segments: segments.slice() });
-
-  // Ledger lifts as ScaffoldPro lays them: from the lowest rosette (the base
-  // collar's when there is one), then every N up.
-  const levels = [];
-  for (let lv = startLevel; lv <= maxLevel; lv += ledgerEveryNLevels) levels.push(lv);
+  for (const y of ys) for (const x of xs) standards.push({ x, y });
 
   const ledgers = [];
-  for (const level of levels) {
-    for (let j = 0; j < ys.length; j++) {
+  for (const lift of ledgerLifts) {
+    for (const y of ys) for (let i = 0; i < xs.length - 1; i++) ledgers.push({ a: { x: xs[i], y }, b: { x: xs[i + 1], y }, lift });
+    for (const x of xs) for (let j = 0; j < ys.length - 1; j++) ledgers.push({ a: { x, y: ys[j] }, b: { x, y: ys[j + 1] }, lift });
+  }
+
+  const bracePairs = [];
+  for (let lift = startLift; lift + BRACE_DELTA_LIFT <= topLift; lift += BRACE_DELTA_LIFT) bracePairs.push([lift, lift + BRACE_DELTA_LIFT]);
+  const braces = [];
+  if (r.braceFrontBack !== 'off') {
+    for (const faceSign of [1, -1]) {
+      const ascending = faceSign === 1 ? r.braceFrontBack === 'slash' : r.braceFrontBack === 'backslash';
+      const y = faceSign * halfD;
       for (let i = 0; i < xs.length - 1; i++) {
-        ledgers.push({ a: { x: xs[i], y: ys[j] }, b: { x: xs[i + 1], y: ys[j] }, level });
-      }
-    }
-    for (let i = 0; i < xs.length; i++) {
-      for (let j = 0; j < ys.length - 1; j++) {
-        ledgers.push({ a: { x: xs[i], y: ys[j] }, b: { x: xs[i], y: ys[j + 1] }, level });
+        const [x0, x1] = ascending ? [xs[i], xs[i + 1]] : [xs[i + 1], xs[i]];
+        for (const [lo, hi] of bracePairs) braces.push({ a: { x: x0, y }, b: { x: x1, y }, lift: lo, toLift: hi, normal: { x: 0, y: faceSign } });
       }
     }
   }
-
-  // Perimeter bracing: one diagonal per perimeter bay per lift.
-  const braces = [];
-  if (brace) {
-    // Between consecutive ledger lifts, so each diagonal lands on a ledgered rosette.
-    for (let lv = startLevel; lv + ledgerEveryNLevels <= maxLevel; lv += ledgerEveryNLevels) {
-      for (let i = 0; i < xs.length - 1; i++) {
-        for (const y of [ys[0], ys[ys.length - 1]]) {
-          if (ys.length === 1 && y !== ys[0]) continue;
-          braces.push({ a: { x: xs[i], y }, b: { x: xs[i + 1], y }, level: lv, toLevel: lv + ledgerEveryNLevels });
-        }
-      }
+  if (r.braceLeftRight !== 'off') {
+    for (const faceSign of [1, -1]) {
+      const ascending = faceSign === 1 ? r.braceLeftRight === 'slash' : r.braceLeftRight === 'backslash';
+      const x = faceSign * halfW;
       for (let j = 0; j < ys.length - 1; j++) {
-        for (const x of [xs[0], xs[xs.length - 1]]) {
-          if (xs.length === 1 && x !== xs[0]) continue;
-          braces.push({ a: { x, y: ys[j] }, b: { x, y: ys[j + 1] }, level: lv, toLevel: lv + ledgerEveryNLevels });
-        }
+        const [y0, y1] = ascending ? [ys[j], ys[j + 1]] : [ys[j + 1], ys[j]];
+        for (const [lo, hi] of bracePairs) braces.push({ a: { x, y: y0 }, b: { x, y: y1 }, lift: lo, toLift: hi, normal: { x: faceSign, y: 0 } });
       }
     }
   }
 
   const decks = [];
-  if (deck && levels.length) {
-    const topLevel = levels[levels.length - 1];
-    decks.push({ x0: minX, y0: minY, x1: maxX, y1: maxY, level: topLevel });
+  for (const lift of deckLifts) {
+    for (let j = 0; j < ys.length - 1; j++) for (let i = 0; i < xs.length - 1; i++) {
+      decks.push({ x0: xs[i], y0: ys[j], x1: xs[i + 1], y1: ys[j + 1], lift });
+    }
   }
 
-  return { xs, ys, layoutX, layoutY, segments, standards, ledgers, braces, decks, levels };
+  return {
+    widthFt, depthFt, heightFt, layoutX, layoutY, xs, ys,
+    segments, requiredLift, topLift, deckLifts, ledgerLifts,
+    standards, ledgers, braces, decks,
+  };
+}
+
+export const BLOCK_SNAP_RADIUS_FT = 1.25;
+
+/**
+ * Where to put a block whose centre is near `center` so it joins what is
+ * already standing, as ScaffoldPro's ghost does: line one of its edge
+ * standards up with an existing standard within 1.25 ft, prefer the spot that
+ * shares the most standards, and refuse a full overlap (a corner or one face
+ * may be shared; the block may not land on top of another).
+ */
+export function snapBlockCenter(center, plan, rotationSteps, existing) {
+  const plain = { x: center.x, y: center.y, snapped: false };
+  if (!existing.length) return plain;
+  const key = (x, y) => `${Math.round(x * 1000)},${Math.round(y * 1000)}`;
+  const taken = new Set(existing.map(p => key(p.x, p.y)));
+  const xMin = plan.xs[0], xMax = plan.xs[plan.xs.length - 1];
+  const yMin = plan.ys[0], yMax = plan.ys[plan.ys.length - 1];
+  const offsets = plan.standards.map(o => rotateOffset90(o, rotationSteps));
+  const boundary = plan.standards
+    .filter(o => o.x === xMin || o.x === xMax || o.y === yMin || o.y === yMax)
+    .map(o => rotateOffset90(o, rotationSteps));
+  const maxOverlap = Math.max(plan.xs.length, plan.ys.length);
+
+  let best = null;
+  for (const o of boundary) {
+    const ix = center.x + o.x, iy = center.y + o.y;
+    for (const p of existing) {
+      const dist = Math.hypot(p.x - ix, p.y - iy);
+      if (dist > BLOCK_SNAP_RADIUS_FT) continue;
+      const cx = center.x + (p.x - ix), cy = center.y + (p.y - iy);
+      let overlaps = 0;
+      for (const q of offsets) if (taken.has(key(cx + q.x, cy + q.y))) overlaps++;
+      if (overlaps <= 0 || overlaps > maxOverlap) continue;
+      const score = overlaps * 1000 - dist * 10;
+      if (!best || score > best.score) best = { x: cx, y: cy, score };
+    }
+  }
+  return best ? { x: best.x, y: best.y, snapped: true } : plain;
 }

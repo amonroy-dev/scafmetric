@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   computeAdjacencyScaleFt, computeLiftAxes, findNearestAlongAxis,
   getAdjacentCandidates, maxProjFor, findClosestUnoccupiedTarget,
-  computeBatchPlan, chooseBayLayout, planStandardSegmentsForHeight, planBlock,
+  computeBatchPlan, chooseBayLayout, planStandardSegmentsForHeight, planBlockRecipe,
   PERP_TOL_FT, BRACE_DELTA_LIFT,
 } from '../src/scaffold/workspace/planning.js';
 
@@ -124,21 +124,22 @@ test('standard stacking fits within the target height, largest first', () => {
   assert.equal(planStandardSegmentsForHeight(0.5, lengths).length, 1);
 });
 
-test('planBlock lays out a grid with ledgers, bracing and a deck', () => {
-  const plan = planBlock({
-    x0: 0, y0: 0, x1: 21, y1: 14, heightFt: 20,
-    standardLengthsFt: [9.84375, 6.5625, 4.921875, 3.28125, 1.640625],
-    ledgerLengthsFt: [10, 8, 7, 6, 5, 4, 3.5, 3, 2],
-    maxLevel: 8,
-  });
+test('a block recipe lays out a grid with ledgers, bracing and decks', () => {
+  // Lifts 19 11/16 in apart from 1.3 ft up, the collar's at lift 0.
+  const liftZ = lift => 1.3 + (lift - 1) * 1.640625;
+  const plan = planBlockRecipe(
+    { widthFt: 21, depthFt: 14, heightFt: 20, plankedLevelsCount: 2, braceFrontBack: 'slash', braceLeftRight: 'off' },
+    { liftZ, showBaseCollar: true, standardLengthsFt: [9.84375, 6.5625, 4.921875, 3.28125, 1.640625], ledgerLengthsFt: [10, 8, 7, 6, 5, 4, 3.5, 3, 2] },
+  );
   assert.equal(plan.layoutX.bays, 3);
   assert.equal(plan.layoutY.bays, 2);
   assert.equal(plan.standards.length, 4 * 3, '4 x-lines by 3 y-lines');
   assert.ok(plan.ledgers.length > 0);
+  assert.equal(plan.decks.length, 2 * 3 * 2, 'two levels of six bays');
+  // every brace rises exactly BRACE_DELTA_LIFT levels, on the front and back only
   assert.ok(plan.braces.length > 0);
-  assert.equal(plan.decks.length, 1);
-  // every brace rises exactly BRACE_DELTA_LIFT levels
-  for (const b of plan.braces) assert.equal(b.toLevel - b.level, BRACE_DELTA_LIFT);
-  // a degenerate rect produces nothing
-  assert.equal(planBlock({ x0: 0, y0: 0, x1: 0.1, y1: 0.1, heightFt: 10, standardLengthsFt: [6.5], ledgerLengthsFt: [7] }), null);
+  for (const b of plan.braces) {
+    assert.equal(b.toLift - b.lift, BRACE_DELTA_LIFT);
+    assert.equal(Math.abs(b.a.y), 7, 'front/back faces only');
+  }
 });

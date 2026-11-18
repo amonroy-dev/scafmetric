@@ -12,6 +12,7 @@ import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
+import { BLOCK_DEFAULTS } from './planning.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 import { deriveBom, bomToCsv } from './bom.js';
@@ -42,13 +43,13 @@ const ICONS = {
 
 const TOOL_META = {
   select: { label: 'Select', icon: ICONS.select, hint: 'Click to select, Shift+click to add. Drag left to right for a window, right to left for a crossing; Ctrl+drag adds. Delete removes.' },
-  block: { label: 'Block', icon: ICONS.block, hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck. R rotates it 90°.' },
+  block: { label: 'Block', icon: ICONS.block, hint: 'Set the block in the card, then click the grid to place it. It snaps onto the standards beside it. R turns it 90°.' },
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
   ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
   truss: { label: 'Truss', icon: ICONS.truss, hint: 'Click two rosette nodes to span a truss between them.' },
-  bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Click a rosette node to hang a side bracket. The arm points away from the scaffold.' },
-  plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R flips the side. Shift+click decks the whole run.' },
+  bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
+  plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
   liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a ledger to load the bay on that side at the bay patch psf. R flips the side. Shift+click loads every bay along the run.' },
   erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
 };
@@ -105,6 +106,25 @@ const TEMPLATE = `
           <button type="button" class="sfw-hist-btn" data-act="redo" aria-label="Redo" title="Nothing to redo" aria-disabled="true">${ICONS.redo}</button>
         </div>
       </div>
+      <section class="sfw-group sfw-blockcard" id="sfw-blockcard" aria-label="Block" hidden>
+        <h3>Block<button type="button" class="sfw-icon-btn" data-block-close aria-label="Close the Block tool" title="Back to Select (Esc)">${ICONS.close}</button></h3>
+        <div class="sfw-grid2">
+          <label>Width<span class="sfw-u"><input type="number" data-block="widthFt" min="0.5" step="any"><i>ft</i></span></label>
+          <label>Depth<span class="sfw-u"><input type="number" data-block="depthFt" min="0.5" step="any"><i>ft</i></span></label>
+          <label>Height<span class="sfw-u"><input type="number" data-block="heightFt" min="0.5" step="any" title="Height of the top working deck"><i>ft</i></span></label>
+          <label>Planked levels<input type="number" data-block="plankedLevelsCount" min="0" max="20" step="1"></label>
+        </div>
+        <label class="sfw-check"><input type="checkbox" data-block="includeBaseDeck"><span>Include base deck (lift 0)</span></label>
+        <div class="sfw-grid2 sfw-mt">
+          <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
+          <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
+        </div>
+        <p class="sfw-note" id="sfw-block-summary"></p>
+        <div class="sfw-blockcard-foot">
+          <button type="button" class="sfw-btn ghost" data-block-reset>Reset</button>
+          <span>Click to place · <kbd>R</kbd> rotates</span>
+        </div>
+      </section>
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
     <aside class="sfw-side">
@@ -116,8 +136,7 @@ const TEMPLATE = `
       </div>
       <div class="sfw-group">
         <h3>Base</h3>
-        <label>Block height<span class="sfw-u"><input type="number" id="sfw-blockh" min="2" step="any" value="19.7"><i>ft</i></span></label>
-        <label class="sfw-mt">Standard target height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = single segment"><i>ft</i></span></label>
+        <label>Standard target height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = single segment"><i>ft</i></span></label>
         <p class="sfw-note" id="sfw-stdh-note">0 uses the catalog size above. Any other height plans the stack for you.</p>
         <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
@@ -315,10 +334,42 @@ class Workspace {
     }
     this.root.hidden = false;
     document.body.style.overflow = 'hidden';
+    this._guardBackNavigation(true);
     if (!this.engine) this._init();
     requestAnimationFrame(() => { this.engine.resize(); this._frame(); });
   }
-  close() { this.root.hidden = true; document.body.style.overflow = ''; }
+  close() {
+    this.root.hidden = true;
+    document.body.style.overflow = '';
+    this._guardBackNavigation(false);
+  }
+
+  /**
+   * Keep a stray Back from leaving the page while the builder is open, as
+   * ScaffoldPro's useBlockBrowserBackNavigation does.
+   *
+   * A mouse wheel pressed sideways reports as the Back button, and browsers act
+   * on Back/Forward buttons below the page: preventDefault on mousedown,
+   * pointerdown, mouseup or auxclick is not honoured for them
+   * (w3c/pointerevents#191). So the navigation is undone rather than
+   * prevented: a duplicate history entry for this same page is pushed on open,
+   * a Back lands on it (same document, nothing unloads) and the duplicate is
+   * pushed again for next time. Closing the builder takes the duplicate back
+   * out, so Back works normally on the beam page.
+   */
+  _guardBackNavigation(on) {
+    if (on) {
+      if (this._onPopState) return;
+      history.pushState({ sfwBackGuard: true }, '', location.href);
+      this._onPopState = () => history.pushState({ sfwBackGuard: true }, '', location.href);
+      window.addEventListener('popstate', this._onPopState);
+      return;
+    }
+    if (!this._onPopState) return;
+    window.removeEventListener('popstate', this._onPopState);
+    this._onPopState = null;
+    if (history.state?.sfwBackGuard) history.back();
+  }
 
   _init() {
     const stage = this.$('sfw-stage');
@@ -363,8 +414,8 @@ class Workspace {
       onBulkFill: (n, tool) => {
         if (tool === 'block') {
           this.$('sfw-hint').textContent = n
-            ? `Block placed: ${n} standards with ledgers, bracing and a deck.`
-            : 'Drag a larger rectangle to lay out a block.';
+            ? `Block placed: ${n} new standard${n === 1 ? '' : 's'}, with its ledgers, decks and bracing. Ctrl+Z takes it back.`
+            : 'Block placed onto the standards already there, with its ledgers, decks and bracing.';
         } else {
           this.$('sfw-hint').textContent = n
             ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
@@ -373,7 +424,6 @@ class Workspace {
       },
     });
 
-    this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
     this.tools.liveLoadPsf = Math.max(0, Number(this.$('sfw-bay-psf').value) || DEFAULT_BAY_LIVE_LOAD_PSF);
     this.tools.standardTargetHeightFt = Math.max(0, Number(this.$('sfw-stdh').value) || 0);
     this.tools.braceDirection = this.$('sfw-brace-dir').value;
@@ -506,11 +556,79 @@ class Workspace {
   _applyToolUi(name) {
     for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
     this.$('sfw-hint').textContent = TOOL_META[name]?.hint || '';
+    // The block card comes up with the Block tool, as ScaffoldPro's does.
+    const card = this.$('sfw-blockcard');
+    if (card) {
+      card.hidden = name !== 'block';
+      if (!card.hidden) this._fillBlockCard();
+    }
     this._rebuildNodes();
   }
 
+  // --- the block card ---------------------------------------------------------
+  // ScaffoldPro's block settings: dimensions, the top deck height, planked
+  // levels, a base deck, and full-height bracing per pair of faces.
+
+  _bindBlockCard() {
+    const card = this.$('sfw-blockcard');
+    if (!card) return;
+    for (const el of card.querySelectorAll('[data-block]')) {
+      const key = el.dataset.block;
+      const read = () => {
+        if (el.type === 'checkbox') return el.checked;
+        if (el.tagName === 'SELECT') return el.value;
+        const v = Number(el.value);
+        if (!Number.isFinite(v)) return null;
+        if (key === 'plankedLevelsCount') return Math.min(20, Math.max(0, Math.round(v)));
+        return v >= 0.5 ? v : null;
+      };
+      const apply = () => {
+        const v = read();
+        if (v === null) return;
+        this.tools.setBlockSettings({ [key]: v });
+        this._updateBlockSummary();
+      };
+      el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', apply);
+      // On leaving a field, put back the value actually in force.
+      if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.addEventListener('change', () => this._fillBlockCard());
+    }
+    card.querySelector('[data-block-reset]').addEventListener('click', () => {
+      this.tools.setBlockSettings({ ...BLOCK_DEFAULTS });
+      this._fillBlockCard();
+    });
+    card.querySelector('[data-block-close]').addEventListener('click', () => this.tools.setTool('select'));
+    // Typing in the card must not reach the canvas shortcuts (R, Delete...).
+    card.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
+  }
+
+  _fillBlockCard() {
+    const card = this.$('sfw-blockcard');
+    const s = this.tools.blockSettings;
+    for (const el of card.querySelectorAll('[data-block]')) {
+      const v = s[el.dataset.block];
+      if (el.type === 'checkbox') el.checked = !!v;
+      else el.value = String(v);
+    }
+    this._updateBlockSummary();
+  }
+
+  /** What the recipe works out to, so Height reads as the deck it is. */
+  _updateBlockSummary() {
+    const el = this.$('sfw-block-summary');
+    if (!el) return;
+    const plan = this.tools._blockPlan();
+    const ft = v => `${round(v, 2)} ft`;
+    const decks = plan.deckLifts.map(l => ft(this.state.liftZ(l)));
+    const standardFt = plan.segments.reduce((a, b) => a + b, 0);
+    const brace = v => ({ off: 'off', slash: '/', backslash: '\\' }[v] || 'off');
+    el.innerHTML =
+      `${ft(plan.widthFt)} × ${ft(plan.depthFt)} · ${plan.layoutX.bays} × ${plan.layoutY.bays} bay${plan.layoutX.bays * plan.layoutY.bays === 1 ? '' : 's'}<br>` +
+      (decks.length ? `Deck${decks.length === 1 ? '' : 's'} at <strong>${decks.join(', ')}</strong>` : '<strong>No deck fits under that height</strong>') +
+      ` · standards ${ft(standardFt)}<br>Braces: front/back ${brace(this.tools.blockSettings.braceFrontBack)} · left/right ${brace(this.tools.blockSettings.braceLeftRight)}`;
+  }
+
   _bindInputs() {
-    this.$('sfw-blockh').addEventListener('input', e => { this.tools.blockHeightFt = Math.max(2, Number(e.target.value) || 19.7); });
+    this._bindBlockCard();
     this.$('sfw-jack').addEventListener('input', e => this.state.setBase({ jackExtensionIn: Math.max(0, Number(e.target.value) || 0) }));
     this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
     this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
@@ -602,7 +720,20 @@ class Workspace {
       if (!count) return;
       hint.textContent = info.batch
         ? `SHIFT: deck ${count} bay${count === 1 ? '' : 's'} along this run — click or press Enter.`
-        : `Click to deck this bay${info.flipped ? ' (side flipped with R)' : ''}. SHIFT decks the whole run.`;
+        : `Click to deck this bay${info.crossed ? ', boards turned with R' : ''}. R turns the boards; SHIFT decks the whole run.`;
+      return;
+    }
+    if (tool === 'block') {
+      const deck = info.deckZ === null ? 'no deck fits under that height' : `deck at ${round(info.deckZ, 2)} ft`;
+      hint.textContent = `Click to place the ${round(info.widthFt, 2)} × ${round(info.depthFt, 2)} ft block, ${deck}` +
+        `${info.rotation ? `, turned ${info.rotation}°` : ''}.` +
+        (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
+      return;
+    }
+    if (tool === 'bracket') {
+      hint.textContent = info.dir
+        ? `Click to hang the bracket pointing ${compassOf(info.dir)}. R turns it to the next free direction.`
+        : 'Every direction on this rosette is taken by a ledger or another bracket.';
       return;
     }
     if (tool === 'liveload') {
@@ -632,14 +763,26 @@ class Workspace {
   _onToolRotate(tool, value) {
     const hint = this.$('sfw-hint');
     if (!hint) return;
-    if (tool === 'block') { hint.textContent = `Block preview rotated to ${value * 90} degrees.`; return; }
+    // The refreshed preview usually writes its own hint; these are for when it
+    // has nothing to show.
+    if (tool === 'block') return;
     if (tool === 'brace') {
       const sel = this.$('sfw-brace-dir');
       if (sel) sel.value = value;
       hint.textContent = `Bracing direction: ${value}.`;
       return;
     }
-    if (tool === 'plank' || tool === 'liveload') {
+    if (tool === 'bracket') {
+      if (!value) hint.textContent = 'Bracket turn stepped on. Hover a rosette to see where it points.';
+      return;
+    }
+    if (tool === 'plank') {
+      if (value === undefined) hint.textContent = 'Hover a bay, then press R to turn its boards.';
+      else if (value === null) hint.textContent = 'This bay has ledgers on two sides only, so its boards can run one way only.';
+      else hint.textContent = `Boards now run ${compassAxis(value)} on this lift. R turns them back.`;
+      return;
+    }
+    if (tool === 'liveload') {
       hint.textContent = value === 'flipped'
         ? 'Side flipped — the bay on the other side of the ledger is targeted.'
         : 'Side follows the cursor again.';
@@ -940,8 +1083,9 @@ class Workspace {
   _nodeValidator(tool) {
     if (tool === 'ledger') return n => this.tools.ledgerTargetFor(n) !== null;
     if (tool === 'truss') return () => true;
-    // Brackets hang on a standard's rosettes, not off another bracket's tip.
-    if (tool === 'bracket') return n => !n.bracketId;
+    // A rosette takes a bracket when it is on a standard (not another bracket's
+    // tip) and has a direction no ledger or bracket already takes.
+    if (tool === 'bracket') return n => this.tools._bracketDir(n) !== null;
     return () => false;
   }
 
@@ -1137,6 +1281,21 @@ const BRACE_MISS_HINT = {
 };
 
 function round(v, d) { const f = 10 ** d; return Math.round(v * f) / f; }
+
+// Plan directions in words, for the hints. +Y is back, -Y front, as the
+// ViewCube labels them.
+function compassOf([dx, dy]) {
+  const a = (Math.atan2(dy, dx) * 180) / Math.PI;
+  const names = [[0, 'right (+X)'], [90, 'back (+Y)'], [180, 'left (−X)'], [-180, 'left (−X)'], [-90, 'front (−Y)']];
+  const hit = names.find(([deg]) => Math.abs(a - deg) < 1);
+  return hit ? hit[1] : `${Math.round(a)}°`;
+}
+function compassAxis(angle) {
+  const deg = Math.round((angle * 180) / Math.PI) % 180;
+  if (deg === 0) return 'left to right (along X)';
+  if (deg === 90) return 'front to back (along Y)';
+  return `at ${deg}°`;
+}
 
 const root = document.getElementById('scaffold-modal');
 if (root) {

@@ -536,28 +536,70 @@ window.__sv = (() => {
     },
 
     // R rotates the block preview in 90 degree steps.
-    async blockRotate() {
+    // The Block tool brings up ScaffoldPro's block card; its fields drive the
+    // ghost, and R turns the ghost at once, without moving the mouse.
+    async blockCard() {
       tool('block');
-      await hover([3 * BAY, 0, 0]);
+      const card = ws().$('sfw-blockcard');
+      const shown = !!card && !card.hidden;
+      const field = k => card.querySelector(`[data-block="${k}"]`);
+      const defaults = ['widthFt', 'depthFt', 'heightFt', 'plankedLevelsCount'].map(k => field(k).value).join(',');
+      const set = (k, v) => {
+        const el = field(k);
+        if (el.type === 'checkbox') el.checked = v; else el.value = String(v);
+        el.dispatchEvent(new Event(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', { bubbles: true }));
+      };
+      set('widthFt', 8); set('depthFt', 6); set('heightFt', 13); set('braceFrontBack', 'slash');
+      const summary = ws().$('sfw-block-summary').textContent;
+      await hover([-11, 3, 0]);
+      const ghosts = ws().tools.ghostGroup.children.length;
       const before = ws().tools.rotationSteps;
+      const f0 = ws().engine.framesRendered;
       key('r');
-      await raf(4);
-      return { before, after: ws().tools.rotationSteps, hint: hint() };
+      await raf(2);
+      const turned = { steps: ws().tools.rotationSteps, drew: ws().engine.framesRendered - f0, hint: hint() };
+      for (let i = 0; i < 3; i++) key('r'); // back round to square, for the placement below
+      await raf(2);
+      return { shown, defaults, settings: { ...ws().tools.blockSettings }, summary, ghosts, before, turned, after: ws().tools.rotationSteps };
     },
 
-    // Drag out a block: standards, ledgers, bracing and a deck in one gesture.
-    async blockDrag() {
+    // A click places the block the ghost shows: standards, ledgers, bracing and a deck.
+    async blockPlace() {
       const before = counts();
-      setField('sfw-blockh', 13);
-      await drag([-14, 0, 0], [-7, BAY, 0]);
+      const steps0 = ws().state._history.length;
+      await click([-11, 3, 0]);
       ws()._frame();
       await raf(8);
       const after = counts();
+      const xs = [...new Set([...ws().state.standards.values()].filter(s => s.x < -1).map(s => s.x))].sort((a, b) => a - b);
       return {
         addedColumns: after.columns - before.columns,
         addedLedgers: after.ledgers - before.ledgers,
         addedBraces: after.braces - before.braces,
-        counts: after, hint: hint(),
+        addedDecks: after.decks - before.decks,
+        undoSteps: ws().state._history.length - steps0,
+        xs, counts: after, hint: hint(),
+      };
+    },
+
+    // A second block near the first snaps onto its face and shares those
+    // standards instead of standing a second set beside (or on) them.
+    async blockSnap() {
+      const s = ws().state;
+      const before = counts();
+      const shared = [...s.standards.values()].filter(p => p.x === -15).map(p => p.segments.length).join();
+      await hover([-18.2, 3.2, 0]);
+      const snappedHint = hint();
+      await click([-18.2, 3.2, 0]);
+      ws()._frame();
+      await raf(8);
+      const after = counts();
+      return {
+        snappedHint,
+        addedColumns: after.columns - before.columns,
+        sharedUnchanged: [...s.standards.values()].filter(p => p.x === -15).map(p => p.segments.length).join() === shared,
+        newXs: [...new Set([...s.standards.values()].map(p => p.x))].filter(x => x < -15),
+        counts: after,
       };
     },
 
@@ -820,10 +862,15 @@ window.__sv = (() => {
 
       tool('bracket');
       const hosts = [[BAY, 0], [BAY, BAY]].map(([x, y]) => s.nodes().find(n => !n.bracketId && n.x === x && n.y === y && n.level === 3));
-      const dirs = hosts.map(n => ws().tools._outwardDir(n).join(','));
-      if (dirs[0] !== dirs[1]) throw new Error(`expected both brackets to face the same way, got ${dirs.join(' / ')}`);
       const bracketsBefore = s.brackets.size, nodesBefore = s.nodes().length;
-      for (const n of hosts) await click([n.x, n.y, n.z]);
+      // Both out along +X, so their tips make a row: R turns each one there.
+      for (const n of hosts) {
+        await hover([n.x, n.y, n.z]);
+        for (let i = 0; i < 4 && (ws().tools._bracketDir(n) || []).join() !== '1,0'; i++) { key('r'); await raf(1); }
+        if ((ws().tools._bracketDir(n) || []).join() !== '1,0') throw new Error(`R never turned the bracket at ${n.x},${n.y} to +X`);
+        await click([n.x, n.y, n.z]);
+      }
+      ws().tools.bracketTurn = 0;
       const added = [...s.brackets.values()].slice(bracketsBefore);
       let members = 0;
       for (const o of ws().contentGroup.children) for (const d of o.userData.items || []) if (d.kind === 'bracket' && added.some(k => k.id === d.id)) members++;
@@ -842,6 +889,59 @@ window.__sv = (() => {
         bracketsAdded: added.length, members, tipNodes: tips.length, nodesAdded: s.nodes().length - nodesBefore,
         tipLedger: l ? { a: onTip(l.a), b: onTip(l.b) } : null,
         counts: counts(), hint: hint(),
+      };
+    },
+
+    // R with the Bracket tool turns the previewed bracket to the next free
+    // direction at once, and the click hangs it that way (ScaffoldPro).
+    async bracketTurnR() {
+      tool('bracket');
+      const s = ws().state, t = ws().tools;
+      const node = s.nodes().find(n => !n.bracketId && n.x === 0 && n.y === BAY && n.level === 3);
+      await hover([node.x, node.y, node.z]);
+      const before = t._bracketDir(node);
+      const ghostsBefore = t.ghostGroup.children.length;
+      const f0 = ws().engine.framesRendered;
+      key('r');
+      await raf(2);
+      const after = t._bracketDir(node);
+      const drew = ws().engine.framesRendered - f0;
+      const turnedHint = hint();
+      const count = s.brackets.size;
+      await click([node.x, node.y, node.z]);
+      const placed = [...s.brackets.values()].pop();
+      t.bracketTurn = 0;
+      return {
+        before, after, ghostsBefore, ghostsAfter: t.ghostGroup.children.length, drew, turnedHint,
+        added: s.brackets.size - count, placedDir: placed ? placed.dir : null,
+      };
+    },
+
+    // R with the Plank tool turns the boards across the hovered opening, decking
+    // off the other pair of ledgers (ScaffoldPro), and the click lays them so.
+    async plankTurnR() {
+      ws().engine.setView('home');
+      ws()._frame();
+      await raf(4);
+      tool('plank');
+      const s = ws().state, t = ws().tools;
+      const z0 = s.liftZ(0);
+      const l = s.ledgerList().find(q => q.a[1] === 0 && q.b[1] === 0 && Math.max(q.a[0], q.b[0]) <= -7 && Math.abs(q.a[2] - z0) < 1e-6);
+      if (!l) throw new Error('no collar-level front ledger on the block');
+      await hover(besideLedger(l));
+      const rot = () => (t.ghostGroup.children[0] ? +t.ghostGroup.children[0].rotation.z.toFixed(4) : null);
+      const before = rot();
+      key('r');
+      await raf(2);
+      const after = rot();
+      const turnedHint = hint();
+      const decks = s.plankBays().length;
+      await click(besideLedger(l));
+      const placed = s.plankBays().find(d => Math.abs(d.z - z0) < 0.1 && d.x0 >= -15.01 && d.x1 <= -6.99);
+      return {
+        before, after, turnedHint,
+        added: s.plankBays().length - decks,
+        placedRotation: placed && placed.boards[0] ? +placed.boards[0].rotationZ.toFixed(4) : null,
       };
     },
 
@@ -868,6 +968,24 @@ window.__sv = (() => {
         bomWeightLb: bom && bom.summary ? bom.summary.totalWeightLb : null,
         counts: counts(),
       };
+    },
+
+    // A sideways wheel press arrives as the browser's Back, which the page
+    // cannot cancel. While the builder is open, Back is undone (ScaffoldPro's
+    // guard): same page, builder still open. Closing it removes the guard.
+    async backGuard() {
+      const settle = () => new Promise(r => setTimeout(r, 300));
+      const guarded = !!(history.state && history.state.sfwBackGuard);
+      const url = location.href;
+      history.back();
+      await settle();
+      const out = { guarded, stillOpen: !ws().root.hidden, sameUrl: location.href === url, reArmed: !!(history.state && history.state.sfwBackGuard) };
+      ws().close();
+      await settle();
+      out.releasedOnClose = !(history.state && history.state.sfwBackGuard);
+      ws().open();
+      await raf(6);
+      return out;
     },
   };
 
