@@ -144,7 +144,7 @@ export function planGuardrails(rects, deckZ, opts = {}) {
 /** Deck rectangles from scaffold state, grouped by deck height. */
 export function deckRectsByHeight(state) {
   const byZ = new Map();
-  for (const p of state.planks.values()) {
+  for (const p of state.plankBays()) {
     const z = roundTo(p.z);
     if (!byZ.has(z)) byZ.set(z, []);
     byZ.get(z).push({ xMin: p.x0, xMax: p.x1, yMin: p.y0, yMax: p.y1 });

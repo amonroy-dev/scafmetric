@@ -5,10 +5,11 @@ import { Engine } from './engine.js';
 import { ViewCube } from './viewcube.js';
 import { Tools, TOOLS } from './tools.js';
 import { DEFAULT_BAY_LIVE_LOAD_PSF } from './liveloads.js';
+import { workspaceSupported } from './viewport.js';
 import { ScaffoldState, stateBounds } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
-  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch } from './parts.js';
+  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
@@ -19,17 +20,34 @@ import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 
 const TOOL_META = {
   select: { label: 'Select', icon: '⬚', hint: 'Click to select (shift to add). Drag L-to-R = window, R-to-L = crossing; Ctrl+drag adds. Delete removes.' },
-  block: { label: 'Block', icon: '▦', hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck.' },
-  standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard on its base. Click an existing leg to stack another segment.' },
+  block: { label: 'Block', icon: '▦', hint: 'Drag a rectangle on the ground to lay out a whole block: bays, standards, ledgers, perimeter bracing and a deck. R rotates it 90 degrees.' },
+  standard: { label: 'Standard', icon: '│', hint: 'Click the ground to set a standard. Type a target height below and one click builds the whole planned stack.' },
   ledger: { label: 'Ledger', icon: '─', hint: 'ONE click on a rosette node runs a ledger to the nearest open standard. SHIFT+click fills every bay at that level.' },
-  brace: { label: 'Brace', icon: '╱', hint: 'ONE click places a diagonal to the next standard, 4 rosette levels up. SHIFT+click braces every bay at that level.' },
+  brace: { label: 'Brace', icon: '╱', hint: 'Hover a bay FACE — height under the cursor picks the lift. R flips ascending/descending. SHIFT+click braces every perimeter face at that height.' },
   truss: { label: 'Truss', icon: '⬟', hint: 'Click two rosette nodes to span a truss between them.' },
   bracket: { label: 'Bracket', icon: '⊢', hint: 'Click a rosette node to hang a side bracket, drawn from generic tubing. The arm points away from the scaffold.' },
-  plank: { label: 'Plank', icon: '▭', hint: 'Click two rosette nodes on opposite corners to deck a bay with best-fit 9 in / 6 in boards.' },
-  liveload: { label: 'Live load', icon: '▨', hint: 'Click a ledger to load the bay on that side at the psf below. SHIFT+click loads every bay along that run. Each patch keeps its own psf.' },
+  plank: { label: 'Plank', icon: '▭', hint: 'Click a LEDGER to deck the bay on that side with best-fit 9 in / 6 in boards. R flips the side. SHIFT+click decks the whole run.' },
+  liveload: { label: 'Live load', icon: '▨', hint: 'Click a LEDGER to load the bay on that side at the psf below. R flips the side. SHIFT+click loads every bay along the run. Each patch keeps its own psf.' },
   erase: { label: 'Erase', icon: '⌫', hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
+
+const UNSUPPORTED_TEMPLATE = `
+<div class="sfw-backdrop" data-sfw-close></div>
+<div class="sfw-dialog sfw-dialog--notice" role="dialog" aria-modal="true" aria-label="Scaffold builder unavailable">
+  <header class="sfw-head">
+    <div><span class="sfw-kicker">SCAFFOLD &rarr; BEAM</span><h2>Scaffold builder</h2></div>
+    <button type="button" class="sfw-x" data-sfw-close aria-label="Close">&times;</button>
+  </header>
+  <div class="sfw-notice-body">
+    <div class="sfw-notice-ico" aria-hidden="true">&#128421;</div>
+    <h3>Open this on a desktop browser</h3>
+    <p>The scaffold builder is a 3D modelling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, right-drag to orbit, and SHIFT and R while placing.</p>
+    <p class="sfw-notice-sub">For the best experience and accurate results, open Scafmetric on a laptop or desktop. Beam analysis itself works fine on this device &mdash; you can keep entering loads by hand, and your work is saved for 30 days either way.</p>
+    <button type="button" class="sfw-btn primary" data-sfw-close>Back to beam analysis</button>
+  </div>
+</div>`;
+
 
 const TEMPLATE = `
 <div class="sfw-backdrop" data-sfw-close></div>
@@ -51,6 +69,8 @@ const TEMPLATE = `
       <div class="sfw-group">
         <h3>Base</h3>
         <label>Block height<span class="sfw-u"><input type="number" id="sfw-blockh" min="2" step="any" value="19.7"><i>ft</i></span></label>
+        <label class="sfw-mt">Standard target height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = single segment"><i>ft</i></span></label>
+        <p class="sfw-note" id="sfw-stdh-note">0 uses the catalog size above. Any other height plans the stack for you.</p>
         <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
         <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
@@ -77,6 +97,15 @@ const TEMPLATE = `
           <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
           <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
         </div>
+      </div>
+      <div class="sfw-group">
+        <h3>Bracing</h3>
+        <div class="sfw-grid2">
+          <label>Direction<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
+          <label>Faces<select id="sfw-brace-filter"><option value="all">All</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option></select></label>
+        </div>
+        <label class="sfw-mt">Every nth bay<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
+        <p class="sfw-note">Hover a bay face with the Brace tool; <strong>R</strong> flips direction, <strong>SHIFT</strong>+click fills the perimeter.</p>
       </div>
       <div class="sfw-group">
         <h3>Guardrails</h3>
@@ -110,7 +139,9 @@ const TEMPLATE = `
     </aside>
   </div>
   <footer class="sfw-foot">
-    <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br><span class="sfw-retain" id="sfw-retain"></span></p>
+    <p class="sfw-disclaimer">Preliminary tributary takeoff · dead and live kept separate · generic tubes.<br>
+      <span class="sfw-keys"><kbd>SHIFT</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates/flips · <kbd>Esc</kbd> cancels · middle-drag pans · right-drag orbits</span><br>
+      <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
       <button type="button" class="sfw-btn primary" id="sfw-import" disabled>Import to beam</button>
@@ -146,7 +177,7 @@ class Workspace {
     this.selection = [];
     this.showLegLoads = true;
     this._importable = [];
-    for (const el of root.querySelectorAll('[data-sfw-close]')) el.addEventListener('click', () => this.close());
+    this._bindClose();
     document.addEventListener('keydown', e => {
       if (this.root.hidden) return;
       if (e.key === 'Escape') {
@@ -173,7 +204,29 @@ class Workspace {
     });
   }
 
+  _bindClose() {
+    for (const el of this.root.querySelectorAll('[data-sfw-close]')) {
+      el.addEventListener('click', () => this.close());
+    }
+  }
+
   open() {
+    // Never build the 3D workspace on a screen that cannot drive it.
+    if (!workspaceSupported()) {
+      this.root.innerHTML = UNSUPPORTED_TEMPLATE;
+      this.root.hidden = false;
+      document.body.style.overflow = 'hidden';
+      this._unsupported = true;
+      this._bindClose();
+      return;
+    }
+    // Coming back from the small-screen notice (rotated to landscape, or a
+    // resized window): put the real workspace markup back and re-bind it.
+    if (this._unsupported) {
+      this.root.innerHTML = TEMPLATE;
+      this._unsupported = false;
+      this._bindClose();
+    }
     this.root.hidden = false;
     document.body.style.overflow = 'hidden';
     if (!this.engine) this._init();
@@ -213,12 +266,8 @@ class Workspace {
       getContentMeshes: () => this.contentGroup.children,
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); this._refreshProps(); },
       onToolChange: name => this._applyToolUi(name),
-      onLiveLoadPreview: (count, psf, batch) => {
-        if (!count) return;
-        this.$('sfw-hint').textContent = batch
-          ? `SHIFT: load ${count} bay${count === 1 ? '' : 's'} along this run at ${psf} psf — click to place.`
-          : `Click to load this bay at ${psf} psf. Hold SHIFT to fill the whole run.`;
-      },
+      onPreview: (tool, count, info) => this._onToolPreview(tool, count, info),
+      onRotate: (tool, value) => this._onToolRotate(tool, value),
       onBulkFill: (n, tool) => {
         if (tool === 'block') {
           this.$('sfw-hint').textContent = n
@@ -234,6 +283,10 @@ class Workspace {
 
     this.tools.blockHeightFt = Math.max(2, Number(this.$('sfw-blockh').value) || 19.7);
     this.tools.liveLoadPsf = Math.max(0, Number(this.$('sfw-bay-psf').value) || DEFAULT_BAY_LIVE_LOAD_PSF);
+    this.tools.standardTargetHeightFt = Math.max(0, Number(this.$('sfw-stdh').value) || 0);
+    this.tools.braceDirection = this.$('sfw-brace-dir').value;
+    this.tools.braceFaceFilter = this.$('sfw-brace-filter').value;
+    this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(this.$('sfw-brace-nth').value) || 1)));
     this._persist = debounce(() => {
       const snapshot = this.state.snapshot();
       saveWip(KEYS.scaffold, snapshot);
@@ -408,6 +461,16 @@ class Workspace {
     this.$('sfw-copy').addEventListener('click', () => this._beginTransform(true));
     this.$('sfw-dxf').addEventListener('click', () => this._downloadDxf());
     this.$('sfw-view-save').addEventListener('click', () => this._saveView());
+    this.$('sfw-stdh').addEventListener('input', e => {
+      this.tools.standardTargetHeightFt = Math.max(0, Number(e.target.value) || 0);
+      this._updateStandardPlanNote();
+    });
+    this.$('sfw-brace-dir').addEventListener('change', e => { this.tools.braceDirection = e.target.value; });
+    this.$('sfw-brace-filter').addEventListener('change', e => { this.tools.braceFaceFilter = e.target.value; });
+    this.$('sfw-brace-nth').addEventListener('change', e => {
+      // The source offers 1, 2 or 3 only.
+      this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(e.target.value) || 1)));
+    });
     this.$('sfw-bay-psf').addEventListener('input', e => {
       this.tools.liveLoadPsf = Math.max(0, Number(e.target.value) || 0);
       // Retag any selected patches so the field doubles as an editor.
@@ -426,6 +489,82 @@ class Workspace {
       this.state.clearLiveLoads();
       this.$('sfw-hint').textContent = 'Bay live loads cleared; back to the uniform psf over every deck.';
     });
+  }
+
+  /** Spell out the stack a typed target height will build. */
+  _updateStandardPlanNote() {
+    const el = this.$('sfw-stdh-note');
+    if (!el) return;
+    const target = this.tools.standardTargetHeightFt || 0;
+    if (!target) {
+      el.textContent = '0 uses the catalog size above. Any other height plans the stack for you.';
+      return;
+    }
+    const plan = this.tools.standardStackPlan();
+    if (!plan.length) { el.textContent = 'No catalog segments available to plan a stack.'; return; }
+    const total = plan.reduce((a, b) => a + b, 0);
+    const counts = new Map();
+    for (const len of plan) counts.set(len, (counts.get(len) || 0) + 1);
+    const parts = [...counts].sort((a, b) => b[0] - a[0]).map(([len, n]) => `${n} x ${round(len, 3)} ft`);
+    const shortBy = target - total;
+    el.textContent = `${parts.join(' + ')} = ${round(total, 3)} ft` +
+      (Math.abs(shortBy) > 1e-6 ? ` (${shortBy > 0 ? 'short of' : 'over'} ${round(Math.abs(shortBy), 3)} ft — catalog sizes do not sum exactly)` : ' (exact)');
+  }
+
+  /** Live readout for whatever the hovered tool is about to place. */
+  _onToolPreview(tool, count, info = {}) {
+    const hint = this.$('sfw-hint');
+    if (!hint) return;
+    if (tool === 'brace') {
+      if (!count) { hint.textContent = 'No braceable face under the cursor — hover the side of a bay, between two standards.'; return; }
+      const dir = info.direction === 'descending' ? 'descending' : 'ascending';
+      hint.textContent = info.batch
+        ? `SHIFT: brace ${count} perimeter face${count === 1 ? '' : 's'} (${dir}, ${info.filter}, every ${info.nthBay} bay) — click or press Enter.`
+        : `Click to brace this face, ${dir}. R flips direction. SHIFT fills the perimeter.`;
+      return;
+    }
+    if (tool === 'plank') {
+      if (!count) return;
+      hint.textContent = info.batch
+        ? `SHIFT: deck ${count} bay${count === 1 ? '' : 's'} along this run — click or press Enter.`
+        : `Click to deck this bay${info.flipped ? ' (side flipped with R)' : ''}. SHIFT decks the whole run.`;
+      return;
+    }
+    if (tool === 'liveload') {
+      if (!count) return;
+      hint.textContent = info.batch
+        ? `SHIFT: load ${count} bay${count === 1 ? '' : 's'} along this run at ${info.psf} psf — click or press Enter.`
+        : `Click to load this bay at ${info.psf} psf${info.flipped ? ' (side flipped with R)' : ''}. SHIFT fills the run.`;
+      return;
+    }
+    if (tool === 'ledger') {
+      if (!count) { hint.textContent = 'Every bay at this level already has its ledgers.'; return; }
+      hint.textContent = `SHIFT: ${count} ledger${count === 1 ? '' : 's'} to fill this level — click or press Enter.`;
+      return;
+    }
+    if (tool === 'standard' && count > 1) {
+      hint.textContent = `Click to build a ${round(info.totalFt, 2)} ft stack from ${count} segments.`;
+    }
+  }
+
+  /** Feedback for R. */
+  _onToolRotate(tool, value) {
+    const hint = this.$('sfw-hint');
+    if (!hint) return;
+    if (tool === 'block') { hint.textContent = `Block preview rotated to ${value * 90} degrees.`; return; }
+    if (tool === 'brace') {
+      const sel = this.$('sfw-brace-dir');
+      if (sel) sel.value = value;
+      hint.textContent = `Bracing direction: ${value}.`;
+      return;
+    }
+    if (tool === 'plank' || tool === 'liveload') {
+      hint.textContent = value === 'flipped'
+        ? 'Side flipped — the bay on the other side of the ledger is targeted.'
+        : 'Side follows the cursor again.';
+      return;
+    }
+    hint.textContent = 'Nothing to rotate with this tool.';
   }
 
   /** Explain which live load model is in force, and what it adds up to. */
@@ -683,19 +822,36 @@ class Workspace {
   // horizontals and braces always have real points to connect to.
   _rebuildNodes() {
     this.nodeGroup.clear();
-    const connectTool = ['ledger', 'brace', 'plank'].includes(this.tools?.tool);
+    const tool = this.tools?.tool;
+    // Only the tools that start from a node light them up. Decks, braces and
+    // load patches work off ledgers and faces, so they leave nodes neutral.
+    const nodeTool = tool === 'ledger' || tool === 'truss' || tool === 'bracket';
+    const validFor = this._nodeValidator(tool);
     for (const n of this.state.nodes()) {
-      const m = rosetteDisk(n.x, n.y, n.z, connectTool ? this.nodeActiveMat : MATERIALS.hardware);
-      m.userData = { node: n };
-      this.nodeGroup.add(m);
+      const ok = nodeTool ? validFor(n) : false;
+      const mat = nodeTool ? (ok ? NODE_MATERIALS.valid : NODE_MATERIALS.invalid) : MATERIALS.hardware;
+      const disc = rosetteDisk(n.x, n.y, n.z, mat);
+      disc.userData = { node: n };
+      this.nodeGroup.add(disc);
+      // Forgiving hit target: a thin disc seen edge on is nearly unclickable.
+      const proxy = nodePickProxy(n.x, n.y, n.z);
+      proxy.userData = { node: n };
+      this.nodeGroup.add(proxy);
     }
+  }
+
+  /** Can the active tool start a placement from this node? */
+  _nodeValidator(tool) {
+    if (tool === 'ledger') return n => this.tools.ledgerTargetFor(n) !== null;
+    if (tool === 'truss' || tool === 'bracket') return () => true;
+    return () => false;
   }
 
   _updateCounts() {
     const s = this.state;
     this.$('sfw-counts').innerHTML =
       `<span>${s.standards.size} std</span><span>${s.ledgers.size} ldg</span><span>${s.braces.size} brc</span>` +
-      `<span>${s.planks.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>` +
+      `<span>${s.planks.size + s.plankPlacements.size} plk</span><span>${s.trusses.size} trs</span><span>${s.guardrails.size} rail</span>` +
       (s.liveLoads.size ? `<span>${s.liveLoads.size} load</span>` : '');
   }
 

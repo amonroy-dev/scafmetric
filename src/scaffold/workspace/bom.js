@@ -134,8 +134,8 @@ export function deriveBom(state) {
     }
   }
 
-  for (const p of state.planks.values()) {
-    for (const board of state.plankBoards(p)) {
+  for (const p of state.plankBays()) {
+    for (const board of p.boards) {
       add('Planks', `w${board.widthIn}l${sizeKey(board.lengthFt)}`,
         `Deck plank · ${board.widthIn} in x ${formatFeetInches(board.lengthFt)}`,
         1, plankBoardWeightLb(board.widthIn, board.lengthFt, plankPsf));

@@ -10,6 +10,7 @@ import {
   buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
   distributeLedgerPointLoad, DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
+import { buildPlankDecks, resolvePlankPlacement } from './planks.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -32,7 +33,10 @@ export class ScaffoldState {
     this.standards = new Map(); // id -> { id, x, y, segments:[lengthFt] }
     this.ledgers = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.braces = new Map();    // id -> { id, a:[x,y,z], b:[x,y,z] }
-    this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }
+    this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }  (rect decks, e.g. from the block tool)
+    // Ledger-anchored decks, as the source app places them: a supporting ledger
+    // plus the side the boards run to. Resolved against the ledgers on read.
+    this.plankPlacements = new Map(); // id -> { id, ledgerId, sideSign }
     this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
     this.trusses = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.guardrails = new Map();// id -> { id, a:[x,y,z], b:[x,y,z], kind }
@@ -55,6 +59,7 @@ export class ScaffoldState {
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       trusses: [...this.trusses], guardrails: [...this.guardrails],
       liveLoads: [...this.liveLoads], liveLoadMode: this.liveLoadMode,
+      plankPlacements: [...this.plankPlacements],
       seq: this._seq, base: { ...this.base },
     });
   }
@@ -68,6 +73,7 @@ export class ScaffoldState {
     this.trusses = new Map(d.trusses || []);
     this.guardrails = new Map(d.guardrails || []);
     this.liveLoads = new Map(d.liveLoads || []);
+    this.plankPlacements = new Map(d.plankPlacements || []);
     this.liveLoadMode = d.liveLoadMode || 'uniform';
     this._seq = d.seq;
     Object.assign(this.base, d.base);
@@ -222,6 +228,54 @@ export class ScaffoldState {
   /** True when per-bay patches are driving the live load. */
   usingBayLiveLoads() { return this.liveLoadMode === 'bays' && this.liveLoads.size > 0; }
 
+  // --- ledger-anchored decks ----------------------------------------------
+  // As in the source app: a deck is anchored to a supporting ledger and a side,
+  // and the boards span to the opposite ledger of that bay.
+
+  /** Deck the bay on one side of a ledger. Returns the placement, or null. */
+  addPlankOnLedger(ledgerId, sideSign) {
+    if (!this.ledgers.has(ledgerId)) return null;
+    const side = sideSign >= 0 ? 1 : -1;
+    for (const p of this.plankPlacements.values()) {
+      if (p.ledgerId === ledgerId && p.sideSign === side) return null; // already decked
+    }
+    const probe = { id: 'probe', ledgerId, sideSign: side };
+    if (!resolvePlankPlacement(probe, this.ledgerList())) return null; // no bay on that side
+    this._pushHistory();
+    const p = { id: this._id('D'), ledgerId, sideSign: side };
+    this.plankPlacements.set(p.id, p);
+    this._emit();
+    return p;
+  }
+
+  /**
+   * Every deck in the model as a footprint rectangle plus its boards, from both
+   * the ledger-anchored placements and the rectangle decks the block tool lays.
+   * This is the single accessor the renderer, BOM, guardrails and takeoff use.
+   */
+  plankBays() {
+    const out = buildPlankDecks([...this.plankPlacements.values()], this.ledgerList());
+    for (const p of this.planks.values()) {
+      out.push({
+        id: p.id,
+        x0: p.x0, x1: p.x1, y0: p.y0, y1: p.y1, z: p.z,
+        boards: this.plankBoards(p),
+        widthFt: Math.abs(p.x1 - p.x0),
+        lengthFt: Math.abs(p.y1 - p.y0),
+        areaSqFt: Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0),
+      });
+    }
+    return out;
+  }
+
+  /** Drop placements whose anchor ledger is gone. */
+  _pruneOrphans() {
+    this._pruneOrphanLiveLoads();
+    for (const [id, p] of [...this.plankPlacements]) {
+      if (!this.ledgers.has(p.ledgerId)) this.plankPlacements.delete(id);
+    }
+  }
+
   /** Move or copy whole standard stacks by a delta. Returns the new/moved ids. */
   transformStacks(ids, dx, dy, copy = false) {
     this._pushHistory();
@@ -259,22 +313,22 @@ export class ScaffoldState {
   }
 
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads]) {
-      if (m.delete(id)) { this._pruneOrphanLiveLoads(); this._emit(); return true; }
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads, this.plankPlacements]) {
+      if (m.delete(id)) { this._pruneOrphans(); this._emit(); return true; }
     }
     return false;
   }
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads, this.plankPlacements]) {
         if (m.delete(id)) { n++; break; }
       }
     }
-    if (n) { this._pruneOrphanLiveLoads(); this._emit(); }
+    if (n) { this._pruneOrphans(); this._emit(); }
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.liveLoads.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
 
   // Connection nodes along each standard, at the real connection spacing.
   nodes() {
@@ -327,7 +381,7 @@ export class ScaffoldState {
     const bases = [...this.standards.values()].map(s => ({ id: s.id, x: s.x, y: s.y }));
     const ledgers = [...this.ledgers.values()].map(l => ({ id: l.id, a: l.a, b: l.b }));
     const braces = [...this.braces.values()].map(b => ({ id: b.id, a: b.a, b: b.b }));
-    const planks = [...this.planks.values()].map(p => ({ ...p, boards: this.plankBoards(p) }));
+    const planks = this.plankBays();
     const brackets = [...this.brackets.values()].map(b => ({ ...b }));
     const trusses = [...this.trusses.values()].map(t => ({ ...t }));
     const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
@@ -382,8 +436,8 @@ export class ScaffoldState {
     }
     // Deck self weight, and - in uniform mode - the blanket live load with it.
     const bayLive = this.usingBayLiveLoads();
-    for (const p of this.planks.values()) {
-      const area = Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0);
+    for (const p of this.plankBays()) {
+      const area = p.areaSqFt;
       const dead = area * plankPsf;
       const live = bayLive ? 0 : area * this.liveLoadPsf;
       const inside = [...legs.values()].filter(l =>

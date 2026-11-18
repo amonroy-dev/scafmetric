@@ -9,16 +9,19 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, plankDeck, buildBaseAssembly, buildSideBracket, buildTruss, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
-  findClosestUnoccupiedTarget, computeBatchPlan, computeAdjacencyScaleFt,
-  computeLiftAxes, getAdjacentCandidates, maxProjFor, planBlock, BRACE_DELTA_LIFT,
+  findClosestUnoccupiedTarget, computeBatchPlan, planBlock, planStandardSegmentsForHeight,
 } from './planning.js';
 import {
   getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
   DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
+import { buildPlankPreviewForLedger, computePlankBatchPreview } from './planks.js';
+import {
+  buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
+} from './braces.js';
 
 const DRAG_PX = 4;
 export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
@@ -46,6 +49,17 @@ export class Tools {
     this.partId = null;
     this.pending = null;
     this.liveLoadPsf = DEFAULT_BAY_LIVE_LOAD_PSF;
+    // Brace options, mirroring the source app's catalog controls, including its
+    // default of descending diagonals.
+    this.braceDirection = 'descending';
+    this.braceFaceFilter = 'all';
+    this.braceNthBay = 1;
+    // Standard tool: when set, placing a standard builds a planned stack that
+    // reaches this height instead of dropping a single catalog segment.
+    this.standardTargetHeightFt = 0;
+    // Block tool preview rotation, in 90 degree steps (R).
+    this.rotationSteps = 0;
+    this.sideFlipped = false;
     this.selection = new Set();
     this._down = null;
     this._marquee = null;
@@ -67,6 +81,7 @@ export class Tools {
   setTool(name) {
     this.tool = name;
     this.pending = null;
+    this.sideFlipped = false;
     this._clearGhost();
     this.hooks.onToolChange?.(name);
   }
@@ -144,7 +159,9 @@ export class Tools {
   _drawMarquee() {
     this._clearOverlay();
     const m = this._marquee;
-    const r = normalizeRect(m.start, m.current);
+    const r = this.tool === 'block'
+      ? this.orientRect(normalizeRect(m.start, m.current))
+      : normalizeRect(m.start, m.current);
     const w = Math.max(r.xMax - r.xMin, 1e-4);
     const d = Math.max(r.yMax - r.yMin, 1e-4);
     const crossing = m.currentClientX < m.startClientX;
@@ -185,8 +202,11 @@ export class Tools {
     }
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
-      const part = this.currentPart();
-      if (g && part) s.addStandard(g.x, g.y, part.lengthFt);
+      if (!g) return;
+      const plan = this.standardStackPlan();
+      if (!plan.length) return;
+      for (const len of plan) s.addStandard(g.x, g.y, len);
+      if (plan.length > 1) this.hooks.onBulkFill?.(plan.length, 'standard segment');
       return;
     }
     if (this.tool === 'select' || this.tool === 'erase') {
@@ -199,12 +219,31 @@ export class Tools {
       this.hooks.onSelectionChange?.([...this.selection]);
       return;
     }
+    // Braces attach to a bay FACE, not a node: the face under the cursor and the
+    // cursor height together choose which lift pair gets the diagonal.
+    if (this.tool === 'brace') {
+      const target = this.braceTargetUnderCursor(e);
+      if (!target) return;
+      if (e.shiftKey) { this._batchFillBraces(target); return; }
+      s.addBrace(target.a, target.b);
+      return;
+    }
+    // Decks attach to a ledger and a side; the boards span to the opposite
+    // ledger of that bay.
+    if (this.tool === 'plank') {
+      const hit = this._pickLedger(e);
+      if (!hit) return;
+      const side = this._sideFor(hit.ledger, hit.point);
+      if (e.shiftKey) { this._batchFillPlanks(hit.ledger, side); return; }
+      s.addPlankOnLedger(hit.ledger.id, side);
+      return;
+    }
     // Live load patches attach to a ledger, not a node: pick the ledger and the
     // side of it the pointer landed on.
     if (this.tool === 'liveload') {
       const hit = this._pickLedger(e);
       if (!hit) return;
-      const side = getLedgerSideSign(hit.ledger, hit.point);
+      const side = this._sideFor(hit.ledger, hit.point);
       if (e.shiftKey) { this._batchFillLiveLoads(hit.ledger, side); return; }
       s.addLiveLoad(hit.ledger.id, side, this.liveLoadPsf);
       return;
@@ -225,19 +264,15 @@ export class Tools {
       if (part) s.addBracket(node, this._outwardDir(node), part.lengthFt);
       return;
     }
-    if (this.tool === 'brace') {
-      if (e.shiftKey) { this._batchFillBraces(node.level); return; }
-      const target = this.braceTargetFor(node);
-      if (target) s.addBrace([node.x, node.y, node.z], [target.x, target.y, target.z]);
-      return;
+
+    // Trusses still take two nodes.
+    if (this.tool === 'truss') {
+      if (!this.pending) { this.pending = node; return; }
+      const a = this.pending;
+      this.pending = null;
+      if (a.x === node.x && a.y === node.y) return;
+      s.addTruss([a.x, a.y, a.z], [node.x, node.y, node.z]);
     }
-    // Planks and trusses take two nodes.
-    if (!this.pending) { this.pending = node; return; }
-    const a = this.pending;
-    this.pending = null;
-    if (a.x === node.x && a.y === node.y) return;
-    if (this.tool === 'truss') s.addTruss([a.x, a.y, a.z], [node.x, node.y, node.z]);
-    else s.addPlank([a.x, a.y, a.z], [node.x, node.y, node.z]);
   }
 
   // Direction pointing away from the scaffold footprint centre.
@@ -294,22 +329,115 @@ export class Tools {
     return findClosestUnoccupiedTarget(node, nodes, c => !this._ledgerExists(node, c));
   }
 
-  /** Diagonal target: nearest adjacent standard, 4 rosette levels up. */
-  braceTargetFor(node) {
-    const nodes = this._nodesAtLevel(node.level);
-    const scale = computeAdjacencyScaleFt(nodes);
-    const axes = computeLiftAxes(nodes, scale);
-    if (!axes) return null;
-    const adj = getAdjacentCandidates(node, nodes, axes, maxProjFor(scale), null);
-    let best = null, bestD = Infinity;
-    for (const c of adj) {
-      const d = Math.hypot(c.x - node.x, c.y - node.y);
-      if (d < bestD) { bestD = d; best = c; }
+  // --- standards -----------------------------------------------------------
+
+  /**
+   * Segment lengths for one click of the Standard tool. With a target height
+   * typed in, this is the planned stack that reaches it; otherwise it is the
+   * single selected catalog segment.
+   */
+  standardStackPlan() {
+    const target = Number(this.standardTargetHeightFt) || 0;
+    if (target > 0) {
+      const plan = planStandardSegmentsForHeight(target, CATALOG.standards.parts.map(p => p.lengthFt));
+      if (plan.length) return plan;
     }
-    if (!best) return null;
-    const up = this.state.nodes().find(n =>
-      n.columnId === best.columnId && n.level === node.level + BRACE_DELTA_LIFT);
-    return up || null;
+    const part = this.currentPart();
+    return part ? [part.lengthFt] : [];
+  }
+
+  // --- braces --------------------------------------------------------------
+
+  /** Face graph for the current standards, rebuilt per interaction. */
+  _faces() { return buildFaceGraph([...this.state.standards.values()]); }
+
+  /** True when a diagonal already runs between these two points. */
+  _braceExistsBetween(a, b) {
+    const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 0.35;
+    for (const v of this.state.braces.values()) {
+      if ((near(v.a, a) && near(v.b, b)) || (near(v.a, b) && near(v.b, a))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The diagonal the cursor is pointing at: the face whose vertical plane the
+   * ray hits first, then the lift pair whose midpoint is nearest the cursor.
+   */
+  braceTargetUnderCursor(e) {
+    this.engine.setPointerFromEvent(e);
+    this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
+    const r = this.engine.raycaster.ray;
+    const faces = this._faces();
+    if (!faces.length) return null;
+    const standards = [...this.state.standards.values()];
+    const picked = pickFace(
+      { origin: [r.origin.x, r.origin.y, r.origin.z], direction: [r.direction.x, r.direction.y, r.direction.z] },
+      faces,
+      { filter: this.braceFaceFilter, standards },
+    );
+    if (!picked) return null;
+    const byColumn = nodesByColumn(this.state.nodes());
+    const taken = (face, levelA, levelB) => {
+      const t = this._faceEndpoints(face, byColumn, levelA, levelB);
+      return t ? this._braceExistsBetween(t.a, t.b) : true;
+    };
+    return faceBraceTarget(picked.face, byColumn, picked.cursorZ, this.braceDirection, taken, picked.side);
+  }
+
+  _faceEndpoints(face, byColumn, levelA, levelB) {
+    const a = byColumn.get(face.columnIdA)?.get(levelA);
+    const b = byColumn.get(face.columnIdB)?.get(levelB);
+    if (!a || !b) return null;
+    return { a: [a.x, a.y, a.z], b: [b.x, b.y, b.z] };
+  }
+
+  /** Every brace that the current hover would place, for the ghost preview. */
+  bracePreview(e, shiftKey) {
+    const target = this.braceTargetUnderCursor(e);
+    if (!target) return [];
+    if (!shiftKey) return [target];
+    return this._perimeterBracePlan(target.midZ);
+  }
+
+  _perimeterBracePlan(targetZ) {
+    const byColumn = nodesByColumn(this.state.nodes());
+    return planPerimeterBraces(this._faces(), this.state.nodes(), {
+      standards: [...this.state.standards.values()],
+      filter: this.braceFaceFilter,
+      nthBay: this.braceNthBay,
+      direction: this.braceDirection,
+      targetZ,
+      isTaken: (face, levelA, levelB) => {
+        const t = this._faceEndpoints(face, byColumn, levelA, levelB);
+        return t ? this._braceExistsBetween(t.a, t.b) : true;
+      },
+    });
+  }
+
+  /** SHIFT: brace every selected perimeter face at this height. */
+  _batchFillBraces(target) {
+    const plan = this._perimeterBracePlan(target.midZ);
+    let added = 0;
+    for (const t of plan) {
+      if (this._braceExistsBetween(t.a, t.b)) continue;
+      this.state.addBrace(t.a, t.b);
+      added++;
+    }
+    this.hooks.onBulkFill?.(added, 'brace');
+    return added;
+  }
+
+  /** SHIFT: deck every bay along the connected run of ledgers at this lift. */
+  _batchFillPlanks(ledger, sideSign) {
+    const existing = [...this.state.plankPlacements.values()];
+    const previews = computePlankBatchPreview(ledger, this.state.ledgerList(), sideSign, existing);
+    let added = 0;
+    for (const p of previews) {
+      if (this.state.addPlankOnLedger(p.placement.ledgerId, p.placement.sideSign)) added++;
+    }
+    this.hooks.onBulkFill?.(added, 'deck');
+    return added;
   }
 
   _batchFillLedgers(level) {
@@ -346,22 +474,23 @@ export class Tools {
     return added;
   }
 
-  _batchFillBraces(level) {
-    const nodes = this._nodesAtLevel(level);
-    const plan = computeBatchPlan(nodes, null);
-    let added = 0;
-    const all = this.state.nodes();
-    for (const { a, b } of plan) {
-      const up = all.find(n => n.columnId === b.columnId && n.level === level + BRACE_DELTA_LIFT);
-      if (!up) continue;
-      this.state.addBrace([a.x, a.y, a.z], [up.x, up.y, up.z]);
-      added++;
-    }
-    this.hooks.onBulkFill?.(added, 'brace');
+  /**
+   * Turn the dragged rectangle a quarter turn about its centre for each press
+   * of R, which is what rotates the block: the footprint swaps width for depth,
+   * so the bay subdivision runs the other way.
+   */
+  orientRect(rect) {
+    if ((this.rotationSteps % 2) === 0) return rect;
+    const cx = (rect.xMin + rect.xMax) / 2;
+    const cy = (rect.yMin + rect.yMax) / 2;
+    const halfW = (rect.xMax - rect.xMin) / 2;
+    const halfD = (rect.yMax - rect.yMin) / 2;
+    return { xMin: cx - halfD, xMax: cx + halfD, yMin: cy - halfW, yMax: cy + halfW };
   }
 
   /** Block tool: lay out a full scaffold block over the dragged ground rect. */
-  placeBlock(rect) {
+  placeBlock(rawRect) {
+    const rect = this.orientRect(rawRect);
     const s = this.state;
     const plan = planBlock({
       x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
@@ -405,7 +534,28 @@ export class Tools {
   }
 
   _key(e) {
-    if (e.key === 'Escape') { this.pending = null; this._clearGhost(); }
+    const t = e.target;
+    const inField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    // R rotates, as in the source app. What it rotates depends on the tool:
+    // the block preview turns 90 degrees, a brace flips ascending/descending,
+    // and a deck or load patch flips to the other side of the ledger.
+    if ((e.key === 'r' || e.key === 'R') && !inField && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      this.rotate();
+      return;
+    }
+    // Enter confirms a SHIFT batch preview without a second click, which is how
+    // the source app commits a run.
+    if (e.key === 'Enter' && this._pendingBatch && !inField) {
+      e.preventDefault();
+      const batch = this._pendingBatch;
+      this._pendingBatch = null;
+      const n = batch.apply();
+      this.hooks.onBulkFill?.(typeof n === 'number' ? n : batch.count, batch.label);
+      this._clearGhost();
+      return;
+    }
+    if (e.key === 'Escape') { this.pending = null; this.sideFlipped = false; this._pendingBatch = null; this._clearGhost(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection.size) {
       const target = e.target;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.isContentEditable)) return;
@@ -415,13 +565,46 @@ export class Tools {
     }
   }
 
+  /** R: rotate / flip whatever the active tool is about to place. */
+  rotate() {
+    if (this.tool === 'block') {
+      this.rotationSteps = (this.rotationSteps + 1) % 4;
+      this.hooks.onRotate?.('block', this.rotationSteps);
+      return this.rotationSteps;
+    }
+    if (this.tool === 'brace') {
+      this.braceDirection = this.braceDirection === 'ascending' ? 'descending' : 'ascending';
+      this.hooks.onRotate?.('brace', this.braceDirection);
+      return this.braceDirection;
+    }
+    if (this.tool === 'plank' || this.tool === 'liveload') {
+      // Flip to the other side of the hovered ledger, and stay flipped until
+      // R is pressed again or the tool changes.
+      this.sideFlipped = !this.sideFlipped;
+      this.hooks.onRotate?.(this.tool, this.sideFlipped ? 'flipped' : 'cursor');
+      return this.sideFlipped;
+    }
+    if (this.tool === 'truss' || this.tool === 'ledger') {
+      // Nothing to rotate; report so the UI can say so rather than go silent.
+      this.hooks.onRotate?.(this.tool, null);
+    }
+    return null;
+  }
+
+  /** Side of a ledger to use, honouring an R flip. */
+  _sideFor(ledger, point) {
+    const natural = getLedgerSideSign(ledger, point);
+    return this.sideFlipped ? (natural === 1 ? -1 : 1) : natural;
+  }
+
   _updateGhost(e) {
     this._clearGhost();
+    this._pendingBatch = null;
     if (this.tool === 'select' || this.tool === 'erase' || this.tool === 'block') return;
     if (this.tool === 'liveload') {
       const hit = this._pickLedger(e);
       if (!hit) return;
-      const side = getLedgerSideSign(hit.ledger, hit.point);
+      const side = this._sideFor(hit.ledger, hit.point);
       const existing = [...this.state.liveLoads.values()];
       const ledgers = this.state.ledgerList();
       const previews = e.shiftKey
@@ -429,14 +612,51 @@ export class Tools {
         : [buildLiveLoadPreviewForLedger(hit.ledger, ledgers, side, existing, this.liveLoadPsf)].filter(Boolean);
       const ghostMat = liveLoadGhostMaterial();
       for (const p of previews) this.ghostGroup.add(liveLoadPatch(p.liveLoad, ghostMat));
-      this.hooks.onLiveLoadPreview?.(previews.length, this.liveLoadPsf, e.shiftKey);
+      this._pendingBatch = e.shiftKey && previews.length
+        ? { count: previews.length, label: 'live load', apply: () => this._batchFillLiveLoads(hit.ledger, side) }
+        : null;
+      this.hooks.onPreview?.('liveload', previews.length, { psf: this.liveLoadPsf, batch: e.shiftKey, flipped: this.sideFlipped });
+      return;
+    }
+    // Decks: ghost the boards that would be laid in the hovered bay.
+    if (this.tool === 'plank') {
+      const hit = this._pickLedger(e);
+      if (!hit) return;
+      const side = this._sideFor(hit.ledger, hit.point);
+      const existing = [...this.state.plankPlacements.values()];
+      const ledgers = this.state.ledgerList();
+      const previews = e.shiftKey
+        ? computePlankBatchPreview(hit.ledger, ledgers, side, existing)
+        : [buildPlankPreviewForLedger(hit.ledger, ledgers, side, existing)].filter(Boolean);
+      for (const p of previews) {
+        for (const b of p.deck.boards) {
+          this.ghostGroup.add(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, MATERIALS.ghost));
+        }
+      }
+      this._pendingBatch = e.shiftKey && previews.length
+        ? { count: previews.length, label: 'deck', apply: () => this._batchFillPlanks(hit.ledger, side) }
+        : null;
+      this.hooks.onPreview?.('plank', previews.length, { batch: e.shiftKey, flipped: this.sideFlipped });
+      return;
+    }
+    // Braces: ghost the diagonal on the hovered face, or the whole perimeter run.
+    if (this.tool === 'brace') {
+      const plan = this.bracePreview(e, e.shiftKey);
+      for (const t of plan) this.ghostGroup.add(tubeBetween(t.a, t.b, 1.69, MATERIALS.ghost));
+      this._pendingBatch = e.shiftKey && plan.length
+        ? { count: plan.length, label: 'brace', apply: () => { for (const t of plan) if (!this._braceExistsBetween(t.a, t.b)) this.state.addBrace(t.a, t.b); return plan.length; } }
+        : null;
+      this.hooks.onPreview?.('brace', plan.length, {
+        batch: e.shiftKey, direction: this.braceDirection,
+        filter: this.braceFaceFilter, nthBay: this.braceNthBay,
+      });
       return;
     }
     const mat = MATERIALS.ghost;
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
-      const part = this.currentPart();
-      if (!g || !part) return;
+      const plan = this.standardStackPlan();
+      if (!g || !plan.length) return;
       const base = this.state.baseOffsetFt();
       const { meshes } = buildBaseAssembly({
         x: g.x, y: g.y, groundZ: 0,
@@ -446,7 +666,14 @@ export class Tools {
         material: mat,
       });
       for (const m of meshes) this.ghostGroup.add(m);
-      this.ghostGroup.add(verticalTube(g.x, g.y, base, base + part.lengthFt, STANDARD_TUBE_OD_IN, mat));
+      let z = base;
+      for (const len of plan) {
+        this.ghostGroup.add(verticalTube(g.x, g.y, z, z + len, STANDARD_TUBE_OD_IN, mat));
+        z += len;
+      }
+      if (plan.length > 1) {
+        this.hooks.onPreview?.('standard', plan.length, { totalFt: z - base, segments: plan });
+      }
       return;
     }
     const node = this._nearestNode(e);
@@ -458,6 +685,16 @@ export class Tools {
     if (!node) return;
     // Ledger/brace preview the auto-chosen target, so one click is predictable.
     if (this.tool === 'ledger') {
+      if (e.shiftKey) {
+        const plan = computeBatchPlan(this._nodesAtLevel(node.level), (a, b) => !this._ledgerExists(a, b));
+        for (const { a, b } of plan) this.ghostGroup.add(tubeBetween([a.x, a.y, a.z], [b.x, b.y, b.z], 1.9, mat));
+        this._pendingBatch = plan.length
+          ? { count: plan.length, label: 'ledger', apply: () => this._batchFillLedgers(node.level) }
+          : null;
+        this.hooks.onPreview?.('ledger', plan.length, { batch: true, level: node.level });
+        return;
+      }
+      this._pendingBatch = null;
       const t = this.ledgerTargetFor(node);
       if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.9, mat));
       return;
@@ -467,18 +704,9 @@ export class Tools {
       if (part) for (const m of buildSideBracket(node, this._outwardDir(node), part.lengthFt, mat)) this.ghostGroup.add(m);
       return;
     }
-    if (this.tool === 'brace') {
-      const t = this.braceTargetFor(node);
-      if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.69, mat));
-      return;
-    }
-    if (this.pending) {
+    if (this.pending && this.tool === 'truss') {
       const a = this.pending;
-      if (this.tool === 'truss') {
-        for (const m of buildTruss([a.x, a.y, a.z], [node.x, node.y, node.z], mat)) this.ghostGroup.add(m);
-      } else {
-        this.ghostGroup.add(plankDeck(a.x, a.y, node.x, node.y, Math.min(a.z, node.z), mat));
-      }
+      for (const m of buildTruss([a.x, a.y, a.z], [node.x, node.y, node.z], mat)) this.ghostGroup.add(m);
     }
   }
 

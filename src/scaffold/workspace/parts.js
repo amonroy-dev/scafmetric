@@ -487,3 +487,33 @@ export function liveLoadPatch(patch, material) {
   m.scale.set(patch.widthFt, patch.lengthFt, LIVE_LOAD_VISUAL_THICKNESS_FT);
   return m;
 }
+
+// --- connection node markers -------------------------------------------------
+// The visual rosette is a thin disc, which is almost impossible to click when
+// seen edge on. The source app draws its markers as spheres, so each node also
+// gets an invisible spherical pick proxy that is forgiving to aim at.
+
+export const NODE_PICK_DIAMETER_IN = 7;
+const NODE_PICK_GEO = new THREE.SphereGeometry(inchesToFeet(NODE_PICK_DIAMETER_IN) / 2, 12, 8);
+const NODE_PICK_MAT = new THREE.MeshBasicMaterial({
+  transparent: true, opacity: 0, depthWrite: false, colorWrite: false,
+});
+
+/** Invisible, generously sized hit target for a connection node. */
+export function nodePickProxy(x, y, z) {
+  const m = new THREE.Mesh(NODE_PICK_GEO, NODE_PICK_MAT);
+  m.position.set(x, y, z);
+  return m;
+}
+
+export const NODE_MATERIALS = {
+  // Node can start a placement with the active tool.
+  valid: new THREE.MeshStandardMaterial({
+    color: 0x3dd9c9, emissive: 0x135f57, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.4,
+  }),
+  // Node exists but the active tool cannot use it (nothing to connect to).
+  invalid: new THREE.MeshStandardMaterial({
+    color: 0x5b6577, emissive: 0x000000, metalness: 0.2, roughness: 0.6,
+    transparent: true, opacity: 0.55,
+  }),
+};
