@@ -7,7 +7,7 @@
 import { tubeWeightPerFoot, STEEL_DENSITY_LB_FT3 } from '../catalog.js';
 import {
   WOOD_SILL, JACK_PLATE, JACK_STEM, HANDLE_NUT, BASE_COLLAR,
-  STANDARD_TUBE_OD_IN, PLANK, inchesToFeet, trussMemberLengthFt, bracketStrutDropFt,
+  STANDARD_TUBE_OD_IN, PLANK, inchesToFeet, trussMemberLengthFt, sideBracketTubeLengthFt,
 } from './parts.js';
 
 export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Trusses', 'Diagonals', 'Brackets', 'Guardrails', 'Planks'];
@@ -43,11 +43,12 @@ export function screwJackWeightLb(jackExtensionIn = 0) {
   return (plate + rod + nut + wings) * STEEL_LB_PER_IN3;
 }
 
+// The collar's two tubes: the one over the jack and the sleeve around the
+// standard's foot.
 export function baseCollarWeightLb() {
-  const od = BASE_COLLAR.outerDiameterIn;
-  const wall = 0.2;
-  const id = Math.max(0.1, od - 2 * wall);
-  const volIn3 = (Math.PI / 4) * (od ** 2 - id ** 2) * BASE_COLLAR.heightIn;
+  const ring = (od, lengthIn) => (Math.PI / 4) * (od ** 2 - (od - 2 * BASE_COLLAR.wallIn) ** 2) * lengthIn;
+  const sleeveIn = BASE_COLLAR.sleeveBelowBaseIn + BASE_COLLAR.sleeveAboveBaseIn;
+  const volIn3 = ring(BASE_COLLAR.tubeOdIn, BASE_COLLAR.heightIn) + ring(BASE_COLLAR.sleeveOdIn, sleeveIn);
   return volIn3 * STEEL_LB_PER_IN3;
 }
 
@@ -162,11 +163,9 @@ export function deriveBom(state) {
   return { lineItems, summary };
 }
 
-// A side bracket is an arm tube plus a diagonal strut; weight follows the tubing.
+// A side bracket is a chord, post, diagonal and socket; weight follows the tubing.
 export function bracketWeightLb(lengthFt, state) {
-  const perFoot = tubeWeightPerFoot(state.components.ledger);
-  const strut = Math.hypot(lengthFt, bracketStrutDropFt(lengthFt));
-  return perFoot * (lengthFt + strut);
+  return tubeWeightPerFoot(state.components.ledger) * sideBracketTubeLengthFt(lengthFt);
 }
 
 export function trussWeightLb(spanFt, state) {

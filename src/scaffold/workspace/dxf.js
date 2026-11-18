@@ -3,9 +3,10 @@
 // member, on per-type layers. Analysis packages map POINT -> joints and
 // LINE -> members. Pure string building — unit-testable.
 
-import { trussWorldMembers, bracketStrutDropFt } from './parts.js';
+import { trussWorldMembers, sideBracketWorldMembers } from './parts.js';
 
 export const LAYERS = {
+  jack: 'SCF_JACK',
   standard: 'SCF_STANDARD',
   ledger: 'SCF_LEDGER',
   brace: 'SCF_BRACE',
@@ -41,6 +42,9 @@ export function buildCenterlineModel(state) {
 
   const base = state.baseOffsetFt();
   for (const s of state.standards.values()) {
+    // The base assembly, ground to the standard's foot, as ScaffoldPro's
+    // centerlines draw it: a ledger on the collar's rosette lands on this.
+    addSegment([s.x, s.y, 0], [s.x, s.y, base], LAYERS.jack, s.id);
     // One segment per stacked lift, so joints land at each splice.
     let z = base;
     for (const len of s.segments) {
@@ -50,10 +54,9 @@ export function buildCenterlineModel(state) {
   }
   for (const l of state.ledgers.values()) addSegment(l.a, l.b, LAYERS.ledger, l.id);
   for (const b of state.braces.values()) addSegment(b.a, b.b, LAYERS.brace, b.id);
+  // A side bracket is a frame, not a cantilever: chord, post, diagonal, socket.
   for (const k of state.brackets.values()) {
-    const tip = [k.x + k.dir[0] * k.lengthFt, k.y + k.dir[1] * k.lengthFt, k.z];
-    addSegment([k.x, k.y, k.z], tip, LAYERS.bracket, k.id);
-    addSegment(tip, [k.x, k.y, k.z - bracketStrutDropFt(k.lengthFt)], LAYERS.bracket, k.id);
+    for (const m of sideBracketWorldMembers(k, k.dir, k.lengthFt)) addSegment(m.a, m.b, LAYERS.bracket, k.id);
   }
   for (const g of state.guardrails?.values?.() ?? []) addSegment(g.a, g.b, LAYERS.guardrail, g.id);
   // Trusses contribute their full member set, so the skeleton and the DXF show

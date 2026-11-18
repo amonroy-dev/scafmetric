@@ -23,6 +23,7 @@ import { buildSupportPair } from './supportspan.js';
 import { buildPlankPreviewForLedger, computePlankBatchPreview } from './planks.js';
 import {
   buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
+  bracketTipFaces, footprintCentroid,
 } from './braces.js';
 
 // How far from the tube the horizontal side-pick crossing may land before it
@@ -164,6 +165,13 @@ export class Tools {
     }
     const ledgerKeys = new Set();
     for (const l of this.state.ledgers.values()) ledgerKeys.add(segmentKey(l.a, l.b));
+    // A side bracket already spans from its rosette to its tip, so that edge is
+    // taken, as in ScaffoldPro: a ledger from the tip runs along the bracket
+    // row instead of back to the standard it hangs on.
+    for (const k of this.state.brackets.values()) {
+      const tip = this.state.bracketTipNode(k);
+      ledgerKeys.add(segmentKey([k.x, k.y, k.z], [tip.x, tip.y, tip.z]));
+    }
     this._liftCache = { version, byLevel, ledgerKeys, frames: new Map() };
     return this._liftCache;
   }
@@ -340,7 +348,8 @@ export class Tools {
     }
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      if (part) s.addBracket(node, this._outwardDir(node), part.lengthFt);
+      // Brackets hang on a standard's rosettes, never off another bracket's tip.
+      if (part && !node.bracketId) s.addBracket(node, this._outwardDir(node), part.lengthFt);
       return;
     }
 
@@ -425,8 +434,22 @@ export class Tools {
 
   // --- braces --------------------------------------------------------------
 
-  /** Face graph for the current standards, rebuilt per interaction. */
-  _faces() { return buildFaceGraph([...this.state.standards.values()]); }
+  /**
+   * Face graph for the current standards, rebuilt per interaction, plus faces
+   * along rows of bracket tips where a brace can climb between two lifts of
+   * brackets (bracketTipFaces).
+   */
+  _faces() {
+    const standards = [...this.state.standards.values()];
+    const faces = buildFaceGraph(standards);
+    if (this.state.brackets.size > 1) {
+      const nodes = this.state.nodes();
+      const tips = new Map();
+      for (const n of nodes) if (n.bracketId && !tips.has(n.columnId)) tips.set(n.columnId, { id: n.columnId, x: n.x, y: n.y, dir: n.dir });
+      faces.push(...bracketTipFaces([...tips.values()], nodesByColumn(nodes), footprintCentroid(standards)));
+    }
+    return faces;
+  }
 
   /** True when a diagonal already runs between these two points. */
   _braceExistsBetween(a, b) {
@@ -637,7 +660,7 @@ export class Tools {
       for (const len of st.segments) s.addStandard(st.x, st.y, len);
     }
     // Levels available now that the standards exist.
-    const all = s.nodes();
+    const all = s.nodes().filter(n => !n.bracketId);
     const maxLevel = all.reduce((m, n) => Math.max(m, n.level), 0);
     const replan = planBlock({
       x0: rect.xMin, y0: rect.yMin, x1: rect.xMax, y1: rect.yMax,
@@ -645,6 +668,8 @@ export class Tools {
       standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
       ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
       maxLevel,
+      // ScaffoldPro starts the block at the base collar's rosette when there is one.
+      startLevel: s.base.showBaseCollar ? 0 : 1,
     });
     const nodeAt = (x, y, level) => all.find(n =>
       Math.hypot(n.x - x, n.y - y) < 1e-6 && n.level === level);
@@ -851,7 +876,7 @@ export class Tools {
     }
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      if (part) for (const m of buildSideBracket(node, this._outwardDir(node), part.lengthFt, mat)) this.ghostGroup.add(m);
+      if (part && !node.bracketId) for (const m of buildSideBracket(node, this._outwardDir(node), part.lengthFt, mat)) this.ghostGroup.add(m);
       return;
     }
     if (this.pending && this.tool === 'truss') {

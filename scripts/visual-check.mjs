@@ -180,6 +180,14 @@ const CHECKS = {
     r.afterUndo !== r.before && `one Ctrl+Z should take back the whole run: ${r.before} braces before, ${r.afterUndo} after undo`,
     r.afterRedo !== r.added && `Ctrl+Y should restore all ${r.added} braces, restored ${r.afterRedo}`,
   ],
+  bracketsAndCollar: r => [
+    r.collarZ === null && 'the base collar has no rosette node (lift 0)',
+    r.collarLedgers !== 1 && `clicking the collar rosette with the Ledger tool should add 1 ledger at collar height, added ${r.collarLedgers}`,
+    r.bracketsAdded !== 2 && `two clicks with the Bracket tool should hang 2 brackets, hung ${r.bracketsAdded}`,
+    r.members !== 14 && `each bracket should draw as its 7-member frame (14 for two), drew ${r.members}`,
+    (r.tipNodes !== 2 || r.nodesAdded !== 2) && `each bracket should add a tip rosette node (tips ${r.tipNodes}, nodes +${r.nodesAdded})`,
+    !(r.tipLedger && r.tipLedger.a && r.tipLedger.b) && `a ledger from a bracket tip should run to the next tip, got ${JSON.stringify(r.tipLedger)}`,
+  ],
   renderOnDemand: r => [
     r.idleFrames !== 0 && `the canvas drew ${r.idleFrames} frames in 20 with nothing changing`,
     r.idleAgain !== 0 && `the canvas kept drawing after the pan ended (${r.idleAgain} frames in 20)`,
@@ -207,7 +215,8 @@ const CHECKS = {
     r.addedLedgers < 4 && `a block drag should add ledgers, got ${r.addedLedgers}`,
   ],
   braceShortStackMessage: r => [
-    r.miss !== 'too-short' && `a short pair should report 'too-short', reported '${r.miss}'`,
+    r.miss !== 'too-short' && `a short pair (no base collar) should report 'too-short', reported '${r.miss}'`,
+    r.withCollar !== null && `with its base collar the same pair carries a diagonal from the collar rosette, but reported '${r.withCollar}'`,
     !/rosette levels/.test(r.hint || '') && `the hint should explain the 4-level climb, said: ${r.hint}`,
   ],
   panTopView: r => [

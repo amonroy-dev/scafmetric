@@ -5,7 +5,7 @@
 import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
 import { planGuardrails, deckRectsByHeight } from './guardrails.js';
-import { trussMemberLengthFt, bracketStrutDropFt } from './parts.js';
+import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip } from './parts.js';
 import {
   buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
   distributeLedgerPointLoad, DEFAULT_BAY_LIVE_LOAD_PSF,
@@ -368,7 +368,17 @@ export class ScaffoldState {
   }
   clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
 
-  // Connection nodes along each standard, at the real connection spacing.
+  /**
+   * Every connection node, numbered by lift as ScaffoldPro numbers them:
+   *
+   *   lift 0   the base collar's rosette, one spacing below the standard's
+   *            first, present only while the collar is shown
+   *   lift 1+  the rosettes up the standard, from 15.75 in above its base
+   *
+   * plus the rosette at the tip of each side bracket, at the lift of the
+   * rosette the bracket hangs on. Tips stacked at one spot share a column, so
+   * a brace can climb between them.
+   */
   nodes() {
     const out = [];
     const base = this.baseOffsetFt();
@@ -376,13 +386,27 @@ export class ScaffoldState {
     const spacing = inchesToFeet(NODE_SPACING_IN);
     for (const s of this.standards.values()) {
       const top = this.standardTopZ(s);
-      let level = 0;
+      if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: base + first - spacing, level: 0, columnId: s.id });
+      let level = 1;
       for (let z = base + first; z <= top + 1e-6; z += spacing) {
         out.push({ x: s.x, y: s.y, z, level, columnId: s.id });
         level++;
       }
     }
+    for (const k of this.brackets.values()) out.push(this.bracketTipNode(k));
     return out;
+  }
+
+  /** The lift a height sits at on the standards (the collar's is 0). */
+  liftAt(z) {
+    const base = this.baseOffsetFt();
+    return Math.round((z - base - inchesToFeet(FIRST_NODE_OFFSET_IN)) / inchesToFeet(NODE_SPACING_IN)) + 1;
+  }
+
+  /** The rosette at a side bracket's tip, as a connection node. */
+  bracketTipNode(k) {
+    const [x, y, z] = sideBracketTip(k, k.dir, k.lengthFt);
+    return { x, y, z, level: this.liftAt(k.z), columnId: `tip:${key(x, y)}`, bracketId: k.id, dir: [...k.dir] };
   }
 
   /**
@@ -459,8 +483,8 @@ export class ScaffoldState {
       attribute(b.a[0], b.a[1], w / 2); attribute(b.b[0], b.b[1], w / 2);
     }
     for (const b of this.brackets.values()) {
-      const perFoot = tubeWeightPerFoot(this.components.ledger);
-      attribute(b.x, b.y, perFoot * (b.lengthFt + Math.hypot(b.lengthFt, bracketStrutDropFt(b.lengthFt))));
+      // The whole frame (chord, post, diagonal, socket) hangs on its standard.
+      attribute(b.x, b.y, perFootLedger * sideBracketTubeLengthFt(b.lengthFt));
     }
     for (const t of this.trusses.values()) {
       const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);

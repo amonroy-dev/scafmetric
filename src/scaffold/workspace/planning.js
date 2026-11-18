@@ -272,6 +272,8 @@ export function planBlock(opts) {
     standardLengthsFt, ledgerLengthsFt,
     ledgerEveryNLevels = BRACE_DELTA_LIFT,
     maxLevel = Infinity,
+    // The lowest lift: 0 is the base collar's rosette, 1 the standard's first.
+    startLevel = 1,
     brace = true,
     deck = true,
   } = opts;
@@ -291,10 +293,10 @@ export function planBlock(opts) {
   const standards = [];
   for (const y of ys) for (const x of xs) standards.push({ x, y, segments: segments.slice() });
 
-  // Ledger levels: a base tie plus every N rosette levels.
+  // Ledger lifts as ScaffoldPro lays them: from the lowest rosette (the base
+  // collar's when there is one), then every N up.
   const levels = [];
-  if (maxLevel >= 1) levels.push(1);
-  for (let lv = ledgerEveryNLevels; lv <= maxLevel; lv += ledgerEveryNLevels) levels.push(lv);
+  for (let lv = startLevel; lv <= maxLevel; lv += ledgerEveryNLevels) levels.push(lv);
 
   const ledgers = [];
   for (const level of levels) {
@@ -313,7 +315,8 @@ export function planBlock(opts) {
   // Perimeter bracing: one diagonal per perimeter bay per lift.
   const braces = [];
   if (brace) {
-    for (let lv = 0; lv + ledgerEveryNLevels <= maxLevel; lv += ledgerEveryNLevels) {
+    // Between consecutive ledger lifts, so each diagonal lands on a ledgered rosette.
+    for (let lv = startLevel; lv + ledgerEveryNLevels <= maxLevel; lv += ledgerEveryNLevels) {
       for (let i = 0; i < xs.length - 1; i++) {
         for (const y of [ys[0], ys[ys.length - 1]]) {
           if (ys.length === 1 && y !== ys[0]) continue;

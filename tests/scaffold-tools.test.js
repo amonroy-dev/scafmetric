@@ -150,13 +150,24 @@ test('descending braces run the other way and never go below level 0', () => {
   assert.ok(target.b[2] < target.a[2], 'descending drops');
 });
 
-test('a single-segment standard is too short for a diagonal, and says so', () => {
+test('a single-segment standard is too short for a diagonal without its collar, and says so', () => {
   const s = bracedState(2, 2, 1);
+  s.setBase({ showBaseCollar: false });
   const byCol = nodesByColumn(s.nodes());
   const face = buildFaceGraph([...s.standards.values()])[0];
   const levels = [...byCol.values()][0].size;
   assert.ok(levels <= 4, `one 6.5625 ft segment carries ${levels} rosettes, fewer than the 5 a diagonal needs`);
   assert.equal(faceBraceTarget(face, byCol, 6, 'ascending'), null, 'no target rather than a silent wrong brace');
+});
+
+test('with its base collar, a single segment carries a diagonal from the collar rosette', () => {
+  const s = bracedState(2, 2, 1);
+  const byCol = nodesByColumn(s.nodes());
+  const face = buildFaceGraph([...s.standards.values()])[0];
+  assert.equal([...byCol.values()][0].size, 5, 'four rosettes on the tube and one on the collar');
+  const t = faceBraceTarget(face, byCol, 3, 'ascending');
+  assert.ok(t, 'a diagonal fits');
+  assert.deepEqual([t.levelA, t.levelB], [0, 4], 'from the collar (lift 0) to lift 4');
 });
 
 test('the cursor height chooses which lift pair gets braced', () => {

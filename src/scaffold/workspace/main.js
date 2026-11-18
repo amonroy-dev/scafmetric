@@ -775,6 +775,7 @@ class Workspace {
   _buildSkeleton() {
     const model = buildCenterlineModel(this.state);
     const colours = {
+      [LAYERS.jack]: 0x71717a,
       [LAYERS.standard]: 0x3f3f46,
       [LAYERS.ledger]: 0x2563eb,
       [LAYERS.brace]: 0x7c3aed,
@@ -938,7 +939,9 @@ class Workspace {
   /** Can the active tool start a placement from this node? */
   _nodeValidator(tool) {
     if (tool === 'ledger') return n => this.tools.ledgerTargetFor(n) !== null;
-    if (tool === 'truss' || tool === 'bracket') return () => true;
+    if (tool === 'truss') return () => true;
+    // Brackets hang on a standard's rosettes, not off another bracket's tip.
+    if (tool === 'bracket') return n => !n.bracketId;
     return () => false;
   }
 
@@ -1129,7 +1132,7 @@ class Workspace {
 // standards need one more level than that.
 const BRACE_MISS_HINT = {
   'no-face': 'No braceable face under the cursor — hover the side of a bay, between two standards.',
-  'too-short': `No diagonal fits there — a brace climbs ${BRACE_DELTA_LIFT} rosette levels, so both standards need ${BRACE_DELTA_LIFT + 1}. A single-segment standard has fewer: set a standard target height and click the stack again to build it taller.`,
+  'too-short': `No diagonal fits there — a brace climbs ${BRACE_DELTA_LIFT} rosette levels, so both standards need ${BRACE_DELTA_LIFT + 1}, counting the base collar's. These have fewer: set a standard target height and click the stack again to build it taller.`,
   'already-braced': 'Every lift on that face is already braced — hover a different bay or press R to brace the other way.',
 };
 

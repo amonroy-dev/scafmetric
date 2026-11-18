@@ -1,6 +1,7 @@
-// Procedural scaffold part geometry — no GLB/GLTF assets, no rosettes, no
-// mouthpieces, no manufacturer part numbers. Dimensions mirror the structural
-// values used by the source scaffold project so the base stack-up is correct:
+// Procedural scaffold part geometry — no GLB/GLTF assets, no mouthpieces, no
+// manufacturer part numbers. Rosettes are plain discs at the connection nodes.
+// Dimensions mirror the structural values used by the source scaffold project
+// so the base stack-up is correct:
 //
 //   wood sill (optional) -> jack plate -> jack stem + extension -> base collar
 //   (optional) -> standard tube
@@ -18,7 +19,21 @@ export const WOOD_SILL = { widthIn: 9, depthIn: 9, thicknessIn: 0.5 };
 export const JACK_PLATE = { thicknessIn: 0.375, sizeIn: 6 };
 export const JACK_STEM = { baseHeightIn: 2, rodDiameterIn: 1.25 };
 export const HANDLE_NUT = { diameterIn: 3.6, heightIn: 1.25, wingLenIn: 2.4, wingThickIn: 0.4, wingHeightIn: 0.75 };
-export const BASE_COLLAR = { heightIn: 7.0, outerDiameterIn: 2.45 };
+// Base collar, drawn the way ScaffoldPro's collar is built (measured off its
+// model, not loaded from it): a 1.9 in tube that slips over the jack, and a
+// 2.25 in sleeve the foot of the standard drops into, starting half an inch
+// below the standard's base and running 5 1/2 in up it. Its rosette is a
+// connection node (lift 0, see ScaffoldState.nodes) and is drawn with the
+// others. heightIn is the stack-up from jack top to standard base, which the
+// takeoff and node heights use; it is unchanged.
+export const BASE_COLLAR = {
+  heightIn: 7.0,
+  tubeOdIn: 1.9,
+  sleeveOdIn: 2.25,
+  sleeveBelowBaseIn: 0.5,
+  sleeveAboveBaseIn: 5.5,
+  wallIn: 0.12,
+};
 export const STANDARD_TUBE_OD_IN = 1.9;
 export const TUBE_RADIAL_SEGMENTS = 12;
 
@@ -154,10 +169,17 @@ export function buildBaseAssembly(opts) {
 
   if (showBaseCollar) {
     const h = inchesToFeet(BASE_COLLAR.heightIn);
-    const r = inchesToFeet(BASE_COLLAR.outerDiameterIn) / 2;
-    const collar = mesh(UNIT_CYL_Z, steel, [x, y, z + h / 2], [r, r, h]);
-    collar.userData.part = 'base-collar';
-    meshes.push(collar);
+    const rTube = inchesToFeet(BASE_COLLAR.tubeOdIn) / 2;
+    const tube = mesh(UNIT_CYL_Z, steel, [x, y, z + h / 2], [rTube, rTube, h]);
+    tube.userData.part = 'base-collar';
+    meshes.push(tube);
+    // The sleeve the standard sits in, straddling the standard's base.
+    const s0 = z + h - inchesToFeet(BASE_COLLAR.sleeveBelowBaseIn);
+    const s1 = z + h + inchesToFeet(BASE_COLLAR.sleeveAboveBaseIn);
+    const rSleeve = inchesToFeet(BASE_COLLAR.sleeveOdIn) / 2;
+    const sleeve = mesh(UNIT_CYL_Z, steel, [x, y, (s0 + s1) / 2], [rSleeve, rSleeve, s1 - s0]);
+    sleeve.userData.part = 'base-collar';
+    meshes.push(sleeve);
     z += h;
   }
 
@@ -265,33 +287,103 @@ export function buildBestFitPlankLayout(usableSpanIn) {
 }
 
 // ---------------------------------------------------------------------------
-// Side bracket — drawn from generic tubing (no GLB). An outward arm at the
-// rosette level plus a 45-degree strut back down to the standard.
+// Side bracket — the frame ScaffoldPro's line view draws (its bracketFrame.ts,
+// measured there off the bracket models; only the geometry is kept here, no
+// part numbers):
+//
+//   chord     level, from the rosette it hangs on out to the tip
+//   post      short vertical near the standard, chord down to the diagonal
+//   diagonal  from a fixing on the standard, below the rosette, up to the
+//             tip, landing on the socket a little below the chord
+//   socket    vertical stub at the tip, up to where a standard would seat
+//
+// The tip carries a rosette, which is a connection node (ScaffoldState.nodes).
+// Local axes: `out` from the standard's centreline, `up` from the rosette.
 // ---------------------------------------------------------------------------
-export const BRACKET = { armOdIn: 1.9, strutOdIn: 1.69 };
+export const BRACKET = {
+  chordOdIn: 1.9,
+  postOdIn: 1.625,
+  socketOdIn: 1.9,
+  // Where a standard dropped into the socket bottoms out, above the rosette.
+  socketShoulderUpFt: 0.3271,
+};
+
+// Per reach. The 3 ft and 3 ft 6 in brackets hang their diagonal from twice
+// as far down as the 2 ft one.
+const SIDE_BRACKET_FRAMES = [
+  { reachFt: 2, lowerFixingUpFt: -1.3692, diagonalTopUpFt: -0.2148, postOutFt: 0.3654, diagonalOdIn: 1.625 },
+  { reachFt: 3, lowerFixingUpFt: -2.7111, diagonalTopUpFt: -0.1926, postOutFt: 0.3826, diagonalOdIn: 1.9 },
+  { reachFt: 3.5, lowerFixingUpFt: -2.6889, diagonalTopUpFt: -0.2333, postOutFt: 0.381, diagonalOdIn: 1.9 },
+];
+
+/**
+ * The bracket frame for a reach: named points as [out, up] in feet, and the
+ * members between them. A reach between the measured ones takes the nearest
+ * one's shape at its own length.
+ */
+export function sideBracketFrame(lengthFt) {
+  const f = SIDE_BRACKET_FRAMES.reduce((best, c) =>
+    (Math.abs(c.reachFt - lengthFt) < Math.abs(best.reachFt - lengthFt) ? c : best));
+  const reach = lengthFt;
+  // The post's foot sits ON the diagonal, so the frame closes.
+  const rise = f.diagonalTopUpFt - f.lowerFixingUpFt;
+  const postFootUp = f.lowerFixingUpFt + (f.postOutFt / reach) * rise;
+  const points = {
+    mount: [0, 0],
+    tip: [reach, 0],
+    postHead: [f.postOutFt, 0],
+    postFoot: [f.postOutFt, postFootUp],
+    lowerFixing: [0, f.lowerFixingUpFt],
+    diagonalTop: [reach, f.diagonalTopUpFt],
+    socketShoulder: [reach, BRACKET.socketShoulderUpFt],
+  };
+  const members = [
+    { a: 'mount', b: 'postHead', role: 'chord', odIn: BRACKET.chordOdIn },
+    { a: 'postHead', b: 'tip', role: 'chord', odIn: BRACKET.chordOdIn },
+    { a: 'lowerFixing', b: 'postFoot', role: 'diagonal', odIn: f.diagonalOdIn },
+    { a: 'postFoot', b: 'diagonalTop', role: 'diagonal', odIn: f.diagonalOdIn },
+    { a: 'postHead', b: 'postFoot', role: 'post', odIn: BRACKET.postOdIn },
+    { a: 'diagonalTop', b: 'tip', role: 'socket', odIn: BRACKET.socketOdIn },
+    { a: 'tip', b: 'socketShoulder', role: 'socket', odIn: BRACKET.socketOdIn },
+  ];
+  return { points, members };
+}
+
+function bracketAxes(dir) {
+  const len = Math.hypot(dir[0], dir[1]) || 1;
+  return [dir[0] / len, dir[1] / len];
+}
+
+/** The bracket's members in world feet, hung at `node`, pointing along `dir`. */
+export function sideBracketWorldMembers(node, dir, lengthFt) {
+  const [ux, uy] = bracketAxes(dir);
+  const { points, members } = sideBracketFrame(lengthFt);
+  const at = ([out, up]) => [node.x + ux * out, node.y + uy * out, node.z + up];
+  return members.map(m => ({ a: at(points[m.a]), b: at(points[m.b]), role: m.role, odIn: m.odIn }));
+}
+
+/** Where the bracket's tip rosette is, in world feet. */
+export function sideBracketTip(node, dir, lengthFt) {
+  const [ux, uy] = bracketAxes(dir);
+  return [node.x + ux * lengthFt, node.y + uy * lengthFt, node.z];
+}
+
+/** Total tube in one bracket, for its self-weight. */
+export function sideBracketTubeLengthFt(lengthFt) {
+  const { points, members } = sideBracketFrame(lengthFt);
+  return members.reduce((sum, m) => {
+    const [ao, au] = points[m.a], [bo, bu] = points[m.b];
+    return sum + Math.hypot(bo - ao, bu - au);
+  }, 0);
+}
 
 /**
  * Build a side bracket at a node, projecting horizontally along `dir` ([dx,dy],
- * need not be normalised). Returns an array of meshes.
+ * need not be normalised). Returns an array of meshes, one per member.
  */
-export function bracketStrutDropFt(lengthFt) {
-  // The strut ties back to a rosette, so the drop is a whole number of rosette
-  // spacings: one for short arms, two for longer ones.
-  const spacing = inchesToFeet(19.6875);
-  return spacing * (lengthFt <= 2.5 ? 1 : 2);
-}
-
 export function buildSideBracket(node, dir, lengthFt, material) {
   const mat = material || MATERIALS.ledger;
-  const len = Math.hypot(dir[0], dir[1]) || 1;
-  const ux = dir[0] / len, uy = dir[1] / len;
-  const base = [node.x, node.y, node.z];
-  const tip = [node.x + ux * lengthFt, node.y + uy * lengthFt, node.z];
-  const anchor = [node.x, node.y, node.z - bracketStrutDropFt(lengthFt)];
-  return [
-    tubeBetween(base, tip, BRACKET.armOdIn, mat),
-    tubeBetween(tip, anchor, BRACKET.strutOdIn, mat),
-  ];
+  return sideBracketWorldMembers(node, dir, lengthFt).map(m => tubeBetween(m.a, m.b, m.odIn, mat));
 }
 
 // ---------------------------------------------------------------------------

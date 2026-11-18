@@ -28,16 +28,17 @@ export const BRACE_DIRECTIONS = ['ascending', 'descending'];
 /**
  * Faces between adjacent standards, normalised so each face normal points AWAY
  * from the footprint centroid. That keeps "ascending" visually consistent on
- * every face, however the scaffold is rotated.
+ * every face, however the scaffold is rotated. `centroid` overrides the
+ * columns' own, for faces that must face away from the whole scaffold.
  */
-export function buildFaceGraph(standards) {
+export function buildFaceGraph(standards, centroid = null) {
   const cols = [...standards];
   if (cols.length < 2) return [];
 
   let sumX = 0, sumY = 0;
   for (const s of cols) { sumX += s.x; sumY += s.y; }
-  const cx = sumX / cols.length;
-  const cy = sumY / cols.length;
+  const cx = centroid ? centroid.x : sumX / cols.length;
+  const cy = centroid ? centroid.y : sumY / cols.length;
 
   const out = [];
   const seen = new Set();
@@ -178,6 +179,39 @@ export function faceBraceTarget(face, nodesByColumn, cursorZ, direction, isTaken
   return best;
 }
 
+/**
+ * Faces along a row of side bracket tips, so a brace can climb between the
+ * tip rosettes of brackets hung at two lifts.
+ *
+ * Only tips of brackets facing the same way pair up, only along the row
+ * (square to the brackets), and only where a brace could actually go. A row of
+ * brackets at a single lift therefore adds no faces, and never stands in front
+ * of the standards' own face to swallow the cursor.
+ *
+ * `tipColumns` is [{ id, x, y, dir }]; `byColumn` comes from nodesByColumn.
+ */
+export function bracketTipFaces(tipColumns, byColumn, centroid) {
+  const groups = new Map();
+  for (const c of tipColumns) {
+    const k = Math.round(Math.atan2(c.dir[1], c.dir[0]) * 180 / Math.PI);
+    let g = groups.get(k);
+    if (!g) groups.set(k, g = []);
+    g.push(c);
+  }
+  const out = [];
+  for (const cols of groups.values()) {
+    if (cols.length < 2) continue;
+    const len = Math.hypot(cols[0].dir[0], cols[0].dir[1]) || 1;
+    const ox = cols[0].dir[0] / len, oy = cols[0].dir[1] / len;
+    for (const f of buildFaceGraph(cols, centroid)) {
+      if (Math.abs(f.dirX * ox + f.dirY * oy) > 0.2) continue; // along the row only
+      if (!faceBraceTarget(f, byColumn, 0, 'ascending') && !faceBraceTarget(f, byColumn, 0, 'descending')) continue;
+      out.push({ ...f, tipRow: true });
+    }
+  }
+  return out;
+}
+
 /** Column id -> Map(level -> node), the shape the face lookups want. */
 export function nodesByColumn(nodes) {
   const map = new Map();
@@ -204,18 +238,26 @@ export function planPerimeterBraces(faces, nodes, opts = {}) {
   const byColumn = nodesByColumn(nodes);
   const stride = Math.max(1, Math.floor(nthBay) || 1);
 
-  const eligible = perimeterFaces(faces).filter(f => faceMatchesFilter(f, filter, cx, cy));
-  const xFaces = eligible
-    .filter(f => Math.abs(f.dirX) >= Math.abs(f.dirY))
-    .sort((a, b) => (a.ax + a.bx) - (b.ax + b.bx))
-    .filter((_, i) => i % stride === 0);
-  const yFaces = eligible
-    .filter(f => Math.abs(f.dirX) < Math.abs(f.dirY))
-    .sort((a, b) => (a.ay + a.by) - (b.ay + b.by))
-    .filter((_, i) => i % stride === 0);
+  const ordered = list => {
+    const eligible = list.filter(f => faceMatchesFilter(f, filter, cx, cy));
+    const xFaces = eligible
+      .filter(f => Math.abs(f.dirX) >= Math.abs(f.dirY))
+      .sort((a, b) => (a.ax + a.bx) - (b.ax + b.bx))
+      .filter((_, i) => i % stride === 0);
+    const yFaces = eligible
+      .filter(f => Math.abs(f.dirX) < Math.abs(f.dirY))
+      .sort((a, b) => (a.ay + a.by) - (b.ay + b.by))
+      .filter((_, i) => i % stride === 0);
+    return [...xFaces, ...yFaces];
+  };
+  // The standards' perimeter is judged among the standards' faces alone, so a
+  // row of bracket tips outside does not make the face behind it "interior".
+  // Bracket rows are outside by construction and always eligible.
+  const own = faces.filter(f => !f.tipRow);
+  const tipRows = faces.filter(f => f.tipRow);
 
   const out = [];
-  for (const face of [...xFaces, ...yFaces]) {
+  for (const face of [...ordered(perimeterFaces(own)), ...ordered(tipRows)]) {
     if (out.length >= max) break;
     const target = faceBraceTarget(face, byColumn, targetZ, direction, isTaken);
     if (target) out.push(target);

@@ -606,10 +606,23 @@ window.__sv = (() => {
       await click([-14 + BAY, -14, 0]);
       ws()._frame();
       await raf(6);
+      // With its base collar a single segment has five rosettes, enough for a
+      // diagonal from the collar's. Without one it has four, which is short.
+      const collar = ws().$('sfw-collar');
+      const setCollar = on => { collar.checked = on; collar.dispatchEvent(new Event('change', { bubbles: true })); };
+      setCollar(true);
       tool('brace');
+      const zWith = levelZ(-14, -14, 2);
+      await hover([-14 + BAY / 2, -14 - 0.08, zWith + 0.5]);
+      const withCollar = ws().tools.braceMiss;
+      setCollar(false);
+      await raf(2);
       const z = levelZ(-14, -14, 2);
       await hover([-14 + BAY / 2, -14 - 0.08, z + 0.5]);
-      return { miss: ws().tools.braceMiss, hint: hint() };
+      const out = { miss: ws().tools.braceMiss, hint: hint(), withCollar };
+      setCollar(true);
+      await raf(2);
+      return out;
     },
 
     // Named views are orthographic, and a zoom-to-fit right afterwards must not
@@ -787,6 +800,49 @@ window.__sv = (() => {
       const notCancelled = navPointer('pointerdown', c, { button: 3, buttons: 8 });
       navPointer('pointerup', c, { button: 3 });
       return { backPrevented: notCancelled === false, open: !ws().root.hidden };
+    },
+
+    // The base collar's rosette is a node (lift 0) a ledger can run from, and
+    // a side bracket hangs as a frame with a rosette at its tip that a ledger
+    // can run from too, along the row of brackets.
+    async bracketsAndCollar() {
+      ws().engine.setView('home');
+      ws()._frame();
+      await raf(4);
+      const s = ws().state;
+      const ledgerAt = z => s.ledgerList().filter(l => Math.abs(l.a[2] - z) < 1e-6 && Math.abs(l.b[2] - z) < 1e-6);
+
+      tool('ledger');
+      const collarZ = levelZ(0, 0, 0);
+      const collarBefore = collarZ === null ? 0 : ledgerAt(collarZ).length;
+      if (collarZ !== null) await click([0, 0, collarZ]);
+      const collarLedgers = collarZ === null ? 0 : ledgerAt(collarZ).length - collarBefore;
+
+      tool('bracket');
+      const hosts = [[BAY, 0], [BAY, BAY]].map(([x, y]) => s.nodes().find(n => !n.bracketId && n.x === x && n.y === y && n.level === 3));
+      const dirs = hosts.map(n => ws().tools._outwardDir(n).join(','));
+      if (dirs[0] !== dirs[1]) throw new Error(`expected both brackets to face the same way, got ${dirs.join(' / ')}`);
+      const bracketsBefore = s.brackets.size, nodesBefore = s.nodes().length;
+      for (const n of hosts) await click([n.x, n.y, n.z]);
+      const added = [...s.brackets.values()].slice(bracketsBefore);
+      let members = 0;
+      for (const o of ws().contentGroup.children) for (const d of o.userData.items || []) if (d.kind === 'bracket' && added.some(k => k.id === d.id)) members++;
+      const tips = s.nodes().filter(n => added.some(k => k.id === n.bracketId));
+
+      // From one tip, the ledger tool runs to the next tip along the row.
+      tool('ledger');
+      const before = s.ledgers.size;
+      if (tips[0]) await click([tips[0].x, tips[0].y, tips[0].z]);
+      const l = s.ledgers.size > before ? s.ledgerList().pop() : null;
+      const onTip = p => tips.some(t => Math.hypot(t.x - p[0], t.y - p[1], t.z - p[2]) < 1e-6);
+      ws()._frame();
+      await raf(6);
+      return {
+        collarZ, collarLedgers,
+        bracketsAdded: added.length, members, tipNodes: tips.length, nodesAdded: s.nodes().length - nodesBefore,
+        tipLedger: l ? { a: onTip(l.a), b: onTip(l.b) } : null,
+        counts: counts(), hint: hint(),
+      };
     },
 
     async lineView() {
