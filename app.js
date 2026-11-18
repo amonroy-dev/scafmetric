@@ -309,12 +309,12 @@ function verdictHtml(check) {
   if (!strengthFailures.length) {
    // Deflection is the only failure: say so in plain words, because the strength meters look fine.
    const strong = check.status === 'evaluated' && !result.unavailable.length;
-   return `<div class="verdict-card verdict-fail verdict-deflection"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">FAIL — deflection</strong><p class="verdict-detail"><strong>${strong ? 'Strong enough, but it bends too much.' : 'It bends too much.'}</strong> ${sagText(d)} Use a deeper or heavier section, a shorter span or less load, then calculate again.</p>${meters}${notEvaluated}</div>`;
+   return `<div class="verdict-card verdict-fail verdict-deflection"><span class="verdict-label">Steel check</span><strong class="verdict-title">FAIL — deflection</strong><p class="verdict-detail"><strong>${strong ? 'Strong enough, but it bends too much.' : 'It bends too much.'}</strong> ${sagText(d)} Use a deeper or heavier section, a shorter span or less load, then calculate again.</p>${meters}${notEvaluated}</div>`;
   }
   const extra = deflectionFails ? `<br><strong>Deflection also fails.</strong> ${sagText(d)}` : '';
-  return `<div class="verdict-card verdict-fail"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong>${extra}</p>${meters}${notEvaluated}</div>`;
+  return `<div class="verdict-card verdict-fail"><span class="verdict-label">Steel check</span><strong class="verdict-title">${deflectionFails ? 'FAIL — strength and deflection' : 'FAIL — strength'}</strong><p class="verdict-detail"><strong>${escape(describeUtilization(strengthFailures[0], d))}</strong>${extra}</p>${meters}${notEvaluated}</div>`;
  }
- return `<div class="verdict-card verdict-pass"><span class="verdict-label">STEEL CHECK</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong></p>${meters}</div>`;
+ return `<div class="verdict-card verdict-pass"><span class="verdict-label">Steel check</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong></p>${meters}</div>`;
 }
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);

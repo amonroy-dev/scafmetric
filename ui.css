@@ -1,0 +1,54 @@
+/* Scafmetric product UI: shared tokens and base for the beam workspace,
+   sign-in, billing, admin and terms pages. The landing page keeps its own
+   retro theme and does not load this file.
+
+   Direction, from the reference galleries (viewport-ui.design, mobbin.com,
+   details.so, godly.website): flat and light, one sans-serif in sentence
+   case, hairline borders, black for primary actions, and colour only where it
+   carries meaning (blue = interactive/selection, orange = load, green/amber/
+   red = pass/caution/fail). */
+
+:root{
+  color-scheme:light;
+  --ui-bg:#f7f7f5;
+  --ui-surface:#ffffff;
+  --ui-subtle:#f4f4f1;
+  --ui-hover:#efefec;
+  --ui-line:#e7e6e2;
+  --ui-line-strong:#d6d5d0;
+  --ui-ink:#18181b;
+  --ui-ink-2:#3f3f46;
+  --ui-muted:#6b6b73;
+  --ui-faint:#a1a1a8;
+  --ui-accent:#2563eb;
+  --ui-accent-ink:#1d4ed8;
+  --ui-load:#ea580c;
+  --ui-load-ink:#c2410c;
+  --ui-ok:#15803d;--ui-ok-bg:#f0fdf4;--ui-ok-line:#bbf7d0;
+  --ui-warn:#b45309;--ui-warn-bg:#fffbeb;--ui-warn-line:#fde68a;
+  --ui-bad:#b91c1c;--ui-bad-bg:#fef2f2;--ui-bad-line:#fecaca;
+  --ui-radius:10px;
+  --ui-radius-sm:6px;
+  --ui-font:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--ui-bg);color:var(--ui-ink);font:14px/1.55 var(--ui-font);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--ui-ink);text-decoration:underline;text-decoration-color:var(--ui-line-strong);text-underline-offset:3px}
+a:hover{text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--ui-ink);outline-offset:2px}
+::selection{background:#dbeafe}
+
+/* Brand mark + wordmark, shared by every product page header. */
+.logo{display:inline-flex;align-items:center;gap:9px;color:var(--ui-ink);text-decoration:none;font:600 17px/1 var(--ui-font);letter-spacing:-.02em}
+.logo svg{width:24px;height:24px;flex:none}
+.logo-dot{color:var(--ui-load)}
+
+/* Buttons */
+.ui-primary,.ui-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:0 18px;border:1px solid transparent;border-radius:999px;font:500 14px/1 var(--ui-font);text-decoration:none;cursor:pointer;transition:background-color .12s,border-color .12s}
+.ui-primary{background:var(--ui-ink);color:#fff}
+.ui-primary:hover{background:#2e2e33}
+.ui-secondary{background:var(--ui-surface);border-color:var(--ui-line-strong);color:var(--ui-ink)}
+.ui-secondary:hover{background:var(--ui-subtle)}

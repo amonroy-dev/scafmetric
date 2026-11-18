@@ -82,7 +82,7 @@ function makeChart(analysis, id, key, label, symbol, unit, deflectionLimit = nul
   // always match the plotted span, whatever width the frame is given.
   $(id).innerHTML = `<div class="response-figure"><div class="response-heading"><div><span class="response-kicker">SERVICE CASE / 1.0D + 1.0L</span><h3>${label}</h3></div><span class="response-unit">${symbol} / ${unit}</span></div>
   <div class="plot-frame"><svg class="response-svg" viewBox="0 0 720 244" role="img" aria-label="${label} diagram, ${unit}. Minimum ${minDetail}; maximum ${maxDetail}. ${zeroDetail}${limit ? ` Deflection limit ${limitDetail}.` : ''} Use the shared position slider to inspect values.">
-  <defs>${limitMarks}<pattern id="hatch-${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#ffa41b" stroke-width="2" opacity=".5"/></pattern><clipPath id="negative-${id}"><rect x="0" y="${downPositive ? 0 : zero}" width="720" height="${downPositive ? zero : 125}"/></clipPath></defs>
+  <defs>${limitMarks}<pattern id="hatch-${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#ea580c" stroke-width="2" opacity=".35"/></pattern><clipPath id="negative-${id}"><rect x="0" y="${downPositive ? 0 : zero}" width="720" height="${downPositive ? zero : 125}"/></clipPath></defs>
   <path class="chart-gridline" d="M${left} 51H${right}M${left} 85H${right}M${left} 153H${right}M${left} 187H${right}"/>
   <path class="chart-support-guide" d="M${left} 40V193M${right} 40V193"/>
   <polygon class="chart-fill" points="${area}"/><polygon fill="url(#hatch-${id})" clip-path="url(#negative-${id})" points="${area}"/>

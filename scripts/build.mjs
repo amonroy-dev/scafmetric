@@ -15,7 +15,7 @@ await mkdir('dist', { recursive: true });
 // Calculator HTML and its JavaScript are served only through the authenticated
 // workspace function. Do not copy them into the public output: static files
 // take precedence over Vercel rewrites and would bypass the access check.
-for (const path of ['index.html', 'signin.html', 'terms.html', 'terms.css', 'billing.html', 'billing.css', 'billing.js', 'admin.html', 'admin.js', 'admin.css', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'capacity.css', 'auth.css', 'scaffold.css', 'public']) {
+for (const path of ['index.html', 'signin.html', 'terms.html', 'terms.css', 'billing.html', 'billing.css', 'billing.js', 'admin.html', 'admin.js', 'admin.css', 'landing.js', 'landing.css', 'styles.css', 'diagram.css', 'input-diagram.css', 'report-print.css', 'capacity.css', 'auth.css', 'ui.css', 'scaffold.css', 'public']) {
   await cp(path, `dist/${path}`, { recursive: true });
 }
 await build({ entryPoints: ['src/auth/client.js'], bundle: true, format: 'esm', platform: 'browser', target: ['es2020'], outfile: 'dist/auth.js', minify: true });
