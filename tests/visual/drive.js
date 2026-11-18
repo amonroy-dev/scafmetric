@@ -361,6 +361,35 @@ window.__sv = (() => {
       return { selected, counts: counts() };
     },
 
+    // Holding Shift over a node previews the whole level at once, without
+    // moving the mouse, as in ScaffoldPro; letting go goes back to one ledger.
+    async shiftPreviewInPlace() {
+      tool('ledger');
+      await hover([0, 0, levelZ(0, 0, 5)]);
+      const t = ws().tools;
+      const single = t.ghostGroup.children.length;
+      const singleHint = hint();
+      const f0 = ws().engine.framesRendered;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true }));
+      await raf(2);
+      const held = t.ghostGroup.children.length;
+      const drew = ws().engine.framesRendered - f0;
+      const batchPending = !!t._pendingBatch;
+      const heldHint = hint();
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+      await raf(2);
+      const released = t.ghostGroup.children.length;
+      const releasedPending = !!t._pendingBatch;
+      // Shift typed into a field (a capital letter) must leave the preview alone.
+      const field = ws().$('sfw-stdh');
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true }));
+      await raf(2);
+      const inField = t.ghostGroup.children.length;
+      field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+      await raf(1);
+      return { single, held, released, drew, batchPending, releasedPending, inField, singleHint, heldHint, counts: counts() };
+    },
+
     // SHIFT fills every bay at the level of the node under the cursor.
     async ledgersEveryLevel() {
       tool('ledger');

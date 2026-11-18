@@ -89,8 +89,27 @@ export class Tools {
     on('pointerdown', e => this._onDown(e));
     on('pointermove', e => this._onMove(e));
     on('pointerup', e => this._onUp(e));
+    // Hover ends, preview ends (ScaffoldPro clears its hover on pointer-out).
+    on('pointerleave', () => { this._hoverAt = null; this._pendingBatch = null; this._clearGhost(); });
     this._onKey = e => this._key(e);
     window.addEventListener('keydown', this._onKey);
+    // Shift is tracked as its own state, as ScaffoldPro does: pressing it over a
+    // node shows the whole run at once and letting go goes back to one member,
+    // with no need to nudge the mouse for a pointer event to carry the change.
+    this.shiftHeld = false;
+    this._hoverAt = null; // last client point hovered over the canvas
+    this._onKeyUp = e => { if (e.key === 'Shift') this._setShift(false); };
+    this._onBlur = () => this._setShift(false); // a keyup lost to another window
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('blur', this._onBlur);
+  }
+
+  /** Shift went down or up: redraw the preview where the pointer already is. */
+  _setShift(held) {
+    if (this.shiftHeld === held) return;
+    this.shiftHeld = held;
+    if (!this._hoverAt || this._marquee || this.engine.navigating) return;
+    this._updateGhost({ ...this._hoverAt, shiftKey: held, ctrlKey: false, altKey: false, buttons: 0 });
   }
 
   setTool(name) {
@@ -188,6 +207,8 @@ export class Tools {
       return;
     }
     if (this._marquee && !(e.buttons & 1)) { this._marquee = null; this._clearOverlay(); }
+    this._hoverAt = { clientX: e.clientX, clientY: e.clientY };
+    this.shiftHeld = e.shiftKey; // the pointer event is the authority when there is one
     this._updateGhost(e);
   }
 
@@ -645,6 +666,8 @@ export class Tools {
   _key(e) {
     const t = e.target;
     const inField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    // Shift for a capital letter in a field is typing, not a fill.
+    if (e.key === 'Shift') { if (!inField && !e.repeat) this._setShift(true); return; }
     // R rotates, as in the source app. What it rotates depends on the tool:
     // the block preview turns 90 degrees, a brace flips ascending/descending,
     // and a deck or load patch flips to the other side of the ledger.
@@ -823,6 +846,7 @@ export class Tools {
       this._pendingBatch = null;
       const t = this.ledgerTargetFor(node);
       if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.9, mat));
+      this.hooks.onPreview?.('ledger', t ? 1 : 0, { batch: false, level: node.level });
       return;
     }
     if (this.tool === 'bracket') {
@@ -839,6 +863,8 @@ export class Tools {
   destroy() {
     for (const [t, fn] of this._bound) this.engine.renderer.domElement.removeEventListener(t, fn);
     window.removeEventListener('keydown', this._onKey);
+    window.removeEventListener('keyup', this._onKeyUp);
+    window.removeEventListener('blur', this._onBlur);
     this.engine.scene.remove(this.ghostGroup, this.overlayGroup);
   }
 }

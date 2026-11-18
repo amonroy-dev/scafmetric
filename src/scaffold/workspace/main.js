@@ -613,6 +613,12 @@ class Workspace {
       return;
     }
     if (tool === 'ledger') {
+      if (!info.batch) {
+        hint.textContent = count
+          ? 'Click to add this ledger. Hold SHIFT to preview every bay at this level.'
+          : 'This node already has a ledger to each neighbour. Hold SHIFT to fill the level.';
+        return;
+      }
       if (!count) { hint.textContent = 'Every bay at this level already has its ledgers.'; return; }
       hint.textContent = `SHIFT: ${count} ledger${count === 1 ? '' : 's'} to fill this level — click or press Enter.`;
       return;

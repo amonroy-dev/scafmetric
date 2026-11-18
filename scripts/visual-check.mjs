@@ -154,6 +154,15 @@ const CHECKS = {
     r.plan.length < 2 && `a 19.7 ft target should plan a multi-segment stack, got ${JSON.stringify(r.plan)}`,
     r.added !== r.plan.length * 4 && `four clicks should add ${r.plan.length * 4} segments, added ${r.added}`,
   ],
+  shiftPreviewInPlace: r => [
+    !(r.held > r.single) && `pressing Shift over a node should preview the whole level at once (ghosts ${r.single} -> ${r.held})`,
+    !r.batchPending && 'pressing Shift should arm the batch (Enter or click to confirm)',
+    !(r.drew > 0) && 'pressing Shift changed the preview but drew no frame',
+    !/SHIFT/.test(r.heldHint || '') && `the hint should describe the Shift fill, said: ${r.heldHint}`,
+    r.released !== r.single && `releasing Shift should go back to the single preview (${r.single} ghosts, got ${r.released})`,
+    r.releasedPending && 'releasing Shift should disarm the batch',
+    r.inField !== r.single && `Shift typed in a field must not change the preview (${r.single} ghosts, got ${r.inField})`,
+  ],
   ledgersEveryLevel: r => [r.added < 4 && `SHIFT+click added only ${r.added} ledgers across 3 levels`],
   bracePreview: r => [
     !r.target && `hovering a bay face found no brace target (${r.miss})`,
