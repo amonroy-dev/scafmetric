@@ -31,3 +31,60 @@ th{background:var(--ui-subtle);color:var(--ui-muted);font-size:12px;font-weight:
   .toolbar{gap:0;margin-bottom:16px}
   .admin-wrap{padding-top:28px}
 }
+
+/* Sections under the tabs. */
+.tabs{flex-wrap:wrap}
+#admin-content>section{margin-top:24px}
+.lead{margin:0 0 16px;color:var(--ui-muted)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Find a user / invite an address. */
+.search{max-width:560px}
+.search label{display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:var(--ui-ink-2)}
+.search-row{display:flex;gap:8px}
+.search input{flex:1;min-width:0;height:40px;padding:0 12px;border:1px solid var(--ui-line-strong);border-radius:var(--ui-radius-sm);background:var(--ui-surface);color:var(--ui-ink);font:400 14px/1 var(--ui-font)}
+.search input:focus{outline:none;border-color:var(--ui-ink);box-shadow:0 0 0 3px rgba(24,24,27,.08)}
+.message{margin:14px 0 0;padding:9px 12px;border:1px solid var(--ui-line);border-radius:var(--ui-radius-sm);background:var(--ui-surface);font-size:13px;max-width:560px}
+.message[data-tone=ok]{border-color:var(--ui-ok-line);background:var(--ui-ok-bg);color:var(--ui-ok)}
+.message[data-tone=bad]{border-color:var(--ui-bad-line);background:var(--ui-bad-bg);color:var(--ui-bad)}
+#invites-panel .table-scroll{margin-top:20px}
+
+/* One user. */
+.card{margin-top:20px;max-width:760px;border:1px solid var(--ui-line);border-radius:var(--ui-radius);background:var(--ui-surface)}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 22px;border-bottom:1px solid var(--ui-line)}
+.card-head h2{margin:0;font:600 18px/1.3 var(--ui-font);letter-spacing:-.01em;overflow-wrap:anywhere}
+.card-head p{margin:2px 0 0;color:var(--ui-muted);overflow-wrap:anywhere}
+.badges{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.badge{padding:3px 9px;border:1px solid var(--ui-line-strong);border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.badge[data-tone=ok]{border-color:var(--ui-ok-line);background:var(--ui-ok-bg);color:var(--ui-ok)}
+.badge[data-tone=warn]{border-color:var(--ui-warn-line);background:var(--ui-warn-bg);color:var(--ui-warn)}
+.badge[data-tone=bad]{border-color:var(--ui-bad-line);background:var(--ui-bad-bg);color:var(--ui-bad)}
+.badge[data-tone=ink]{border-color:var(--ui-ink);background:var(--ui-ink);color:#fff}
+.facts{display:grid;grid-template-columns:150px 1fr;gap:8px 16px;margin:0;padding:18px 22px;font-size:13px}
+.facts dt{color:var(--ui-muted)}
+.facts dd{margin:0;overflow-wrap:anywhere}
+.actions{border-top:1px solid var(--ui-line)}
+.action{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 22px}
+.action+.action{border-top:1px solid var(--ui-line)}
+.action h3{margin:0;font:600 13px/1.3 var(--ui-font)}
+.action p{margin:2px 0 0;font-size:13px;color:var(--ui-muted)}
+.action button{flex:none;min-height:36px;font-size:13px}
+.action button:disabled{opacity:.45;cursor:not-allowed}
+.ui-secondary.danger{color:var(--ui-bad)}
+.ui-secondary.danger:hover{background:var(--ui-bad-bg);border-color:var(--ui-bad-line)}
+button.link{padding:0;border:0;background:none;color:var(--ui-ink);font:inherit;text-decoration:underline;text-decoration-color:var(--ui-line-strong);text-underline-offset:3px;cursor:pointer;text-align:left;overflow-wrap:anywhere}
+button.link:hover{text-decoration-color:var(--ui-ink)}
+
+/* "Are you sure" for every change. */
+.confirm{width:min(440px,calc(100vw - 32px));padding:22px;border:1px solid var(--ui-line);border-radius:var(--ui-radius);background:var(--ui-surface);color:var(--ui-ink);box-shadow:0 20px 50px rgba(0,0,0,.18)}
+.confirm::backdrop{background:rgba(24,24,27,.35)}
+.confirm h2{margin:0;font:600 17px/1.3 var(--ui-font)}
+.confirm p{margin:8px 0 0;color:var(--ui-muted);overflow-wrap:anywhere}
+.confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+
+@media (max-width:600px){
+  .action,.card-head{flex-direction:column;align-items:flex-start}
+  .facts{grid-template-columns:1fr;gap:2px 0}
+  .facts dd{margin-bottom:8px}
+  .search-row{flex-direction:column}
+}

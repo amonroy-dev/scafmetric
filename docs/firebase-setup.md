@@ -20,3 +20,13 @@ The account flow collects each signed-in user's name, company and how they found
 Obtain legal review of the Terms of Service and Privacy Policy. Verify the Vercel function route, Google popup and redirect on mobile, email verification, password reset, sign-out, account records and trial dates with test accounts in the deployed environment. A configured status only means required variables are present; it does not prove Firebase or Firestore access. An existing Firebase user's trial derives from the Firebase account creation timestamp, as in Copious.
 
 The sign-in flow asks users to accept the current terms and preliminary-use notice after their identity is verified. Acceptance is stored with a version and server timestamp in the server-owned Firestore account document. Both Google and email sign-in, including existing accounts, use this flow. Update the full terms in `terms.html` and the summary in `signin.html`, and bump `TERMS_VERSION` in `src/terms.js` whenever the terms materially change. Configure Firestore access controls so clients cannot write account acceptance records. Live Firebase authentication and acceptance storage require integration testing with the configured project.
+
+## Owner tools (admin page)
+
+Accounts listed in `ADMIN_UIDS` can open `admin.html` to find a user, email a password reset, block or unblock an account, grant or remove free access, and invite an email address while sign-ups are paused.
+
+- Password reset emails are sent by Firebase through the Identity Toolkit API using `NEXT_PUBLIC_FIREBASE_API_KEY`, so that variable must also be set for the server functions. The owner never sees the reset link.
+- Free access is the `lifetimeFree` flag on `billingEntitlements/{uid}`.
+- Invites are stored in `scafmetricInvites/{email}` and are honoured by sign-in while `SIGNUPS_OPEN` is not `true`.
+- Every change is recorded in `scafmetricAdminLog`.
+- The Firebase service account needs permission to manage Authentication users (disable, revoke tokens) as well as Firestore.

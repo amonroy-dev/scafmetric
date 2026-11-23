@@ -5,6 +5,7 @@ import { ensureAccount, readAccount, hasProfile, normalizeProfile, TERMS_VERSION
 import { COOKIE_NAME, cookieFor, getSessionCookie, issueSession, sameOrigin, verifySession } from '../../server/session-core.js';
 import { canAccessAdmin, isAdminUid } from '../../server/admin-access.js';
 import { SIGNUPS_PAUSED_MESSAGE, signupsOpen } from '../../server/signups.js';
+import { isInvited } from '../../server/admin-users.js';
 
 let adminAuth;
 let firestore;
@@ -38,7 +39,7 @@ export function isConfigured(env = process.env) {
 }
 
 // This handler is exported with injected verification for isolated security tests.
-export function createSessionHandler({ env = process.env, verifyToken = verifyFirebase, accountFor = (data) => ensureAccount(firestore, data), accountStatus = (user) => { getAdminAuth(env); return readAccount(firestore, user); } } = {}) {
+export function createSessionHandler({ env = process.env, verifyToken = verifyFirebase, accountFor = (data) => ensureAccount(firestore, data), accountStatus = (user) => { getAdminAuth(env); return readAccount(firestore, user); }, invited = (email) => { getAdminAuth(env); return isInvited(firestore, email); } } = {}) {
   return async function session(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     if (req.method === 'GET') {
@@ -80,11 +81,18 @@ export function createSessionHandler({ env = process.env, verifyToken = verifyFi
     try { decoded = await verifyToken(body.idToken, env); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
     if (!decoded || decoded.email_verified !== true || typeof decoded.uid !== 'string' || !decoded.uid || typeof decoded.email !== 'string' || !decoded.email) return send(res, 401, { error: 'ID token could not be verified.' });
     // While signups are paused, refuse anyone without an existing account before
-    // an account record or session is created. Allowlisted owners always pass.
+    // an account record or session is created. Allowlisted owners and invited
+    // addresses always pass.
     if (!signupsOpen(env) && !isAdminUid(decoded, env)) {
       let existing;
       try { existing = await accountStatus({ uid: decoded.uid, email: decoded.email }); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
-      if (!existing) return send(res, 403, { error: SIGNUPS_PAUSED_MESSAGE, signupsPaused: true });
+      if (!existing) {
+        // An owner can invite an address from the admin page; it gets in while
+        // everyone else waits.
+        let welcome;
+        try { welcome = await invited(decoded.email); } catch { return send(res, 503, { error: 'Sign-in is temporarily unavailable.' }); }
+        if (welcome !== true) return send(res, 403, { error: SIGNUPS_PAUSED_MESSAGE, signupsPaused: true });
+      }
     }
     try {
       const account = await accountFor({ uid: decoded.uid, email: decoded.email, creationTime: decoded.creationTime, acceptTermsVersion: body.acceptTermsVersion, profile: body.profile });

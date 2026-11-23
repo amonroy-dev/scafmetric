@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Owner data | Scafmetric</title>
+  <meta name="theme-color" content="#f7f7f5">
+  <title>Admin | Scafmetric</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
@@ -13,16 +14,82 @@
 </head>
 <body>
   <main class="admin-wrap">
-    <header class="admin-header"><div><h1>Account and project data</h1><p>Review information submitted by signed-in users.</p></div><a href="calculator.html">Back to calculator</a></header>
+    <header class="admin-header"><div><h1>Admin</h1><p>Manage accounts, access and invitations.</p></div><a href="calculator.html">Back to calculator</a></header>
     <p id="admin-status" role="status" aria-live="polite">Checking owner access…</p>
     <div id="admin-content" hidden>
-      <nav class="tabs" aria-label="Data type"><button type="button" id="accounts-tab" aria-pressed="true">Accounts</button><button type="button" id="projects-tab" aria-pressed="false">Projects</button></nav>
-      <div class="toolbar"><p id="data-description"></p><a id="download" class="download" href="/api/admin/data?type=accounts&amp;format=csv">Download CSV</a></div>
-      <div class="table-scroll"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
-      <button type="button" id="load-more" class="more" hidden>Load more</button>
+      <nav class="tabs" aria-label="Section">
+        <button type="button" id="users-tab" aria-pressed="true">Users</button>
+        <button type="button" id="invites-tab" aria-pressed="false">Invites</button>
+        <button type="button" id="activity-tab" aria-pressed="false">Activity</button>
+        <button type="button" id="accounts-tab" aria-pressed="false">Accounts</button>
+        <button type="button" id="projects-tab" aria-pressed="false">Projects</button>
+      </nav>
+
+      <section id="users-panel">
+        <form id="user-search" class="search">
+          <label for="user-query">Find a user</label>
+          <div class="search-row">
+            <input id="user-query" type="text" autocomplete="off" spellcheck="false" placeholder="Email address or account ID" required>
+            <button type="submit" class="ui-primary">Find</button>
+          </div>
+        </form>
+        <p id="user-message" class="message" role="status" aria-live="polite" hidden></p>
+        <div id="user-card" class="card" hidden>
+          <div class="card-head">
+            <div><h2 id="user-name"></h2><p id="user-email"></p></div>
+            <span id="user-badges" class="badges"></span>
+          </div>
+          <dl id="user-facts" class="facts"></dl>
+          <div class="actions">
+            <div class="action">
+              <div><h3>Password</h3><p id="reset-note"></p></div>
+              <button type="button" class="ui-secondary" id="act-reset">Email a password reset</button>
+            </div>
+            <div class="action">
+              <div><h3>Access</h3><p id="access-note"></p></div>
+              <button type="button" class="ui-secondary" id="act-access"></button>
+            </div>
+            <div class="action">
+              <div><h3>Sign-in</h3><p id="block-note"></p></div>
+              <button type="button" class="ui-secondary danger" id="act-block"></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="invites-panel" hidden>
+        <p class="lead">New sign-ups are paused. An invited address can still create an account.</p>
+        <form id="invite-form" class="search">
+          <label for="invite-email">Invite an email address</label>
+          <div class="search-row">
+            <input id="invite-email" type="email" autocomplete="off" placeholder="name@company.com" required>
+            <button type="submit" class="ui-primary">Invite</button>
+          </div>
+        </form>
+        <p id="invite-message" class="message" role="status" aria-live="polite" hidden></p>
+        <div class="table-scroll"><table><thead><tr><th scope="col">Email</th><th scope="col">Invited</th><th scope="col">By</th><th scope="col"><span class="sr">Remove</span></th></tr></thead><tbody id="invite-rows"></tbody></table></div>
+      </section>
+
+      <section id="activity-panel" hidden>
+        <p class="lead">The last 100 changes made from this page.</p>
+        <div class="table-scroll"><table><thead><tr><th scope="col">When</th><th scope="col">Action</th><th scope="col">User</th><th scope="col">By</th></tr></thead><tbody id="activity-rows"></tbody></table></div>
+      </section>
+
+      <section id="data-panel" hidden>
+        <div class="toolbar"><p id="data-description"></p><a id="download" class="download" href="/api/admin/data?type=accounts&amp;format=csv">Download CSV</a></div>
+        <div class="table-scroll"><table><thead id="table-head"></thead><tbody id="table-body"></tbody></table></div>
+        <button type="button" id="load-more" class="more" hidden>Load more</button>
+      </section>
     </div>
     <p id="admin-signin" class="signin-link" hidden><a href="signin.html">Sign in</a> with an authorized owner account to access this page.</p>
   </main>
+  <dialog id="confirm" class="confirm">
+    <form method="dialog">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text"></p>
+      <div class="confirm-actions"><button value="cancel" class="ui-secondary" autofocus>Cancel</button><button value="ok" class="ui-primary" id="confirm-ok"></button></div>
+    </form>
+  </dialog>
   <script type="module" src="admin.js"></script>
 </body>
 </html>
