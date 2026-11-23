@@ -262,6 +262,8 @@ const CHECKS = {
   marqueeFrontView: r => [
     !(r.during && r.during.shown && r.during.width > 100) && 'dragging in the Front view drew no selection box',
     r.during && !(r.during.inBuilder && r.during.onTop && r.during.visible) && `the selection box is drawn where it cannot be seen: ${JSON.stringify(r.during)}`,
+    !(r.esc.before > 0 && r.esc.after === 0 && r.esc.toolsAfter === 0) && `Esc should unselect everything: ${JSON.stringify(r.esc)}`,
+    !/Nothing selected/.test(r.esc.props) && `after Esc the Selection panel should say nothing is selected, said: ${r.esc.props}`,
     r.during && r.during.mode !== 'crossing' && `a right-to-left drag should be a crossing box, was ${r.during.mode}`,
     !r.hidden && 'the selection box should go away when the drag ends',
     r.kinds.standard !== r.total.standards && `a crossing box over the whole Front view should take every standard (${r.kinds.standard} of ${r.total.standards})`,

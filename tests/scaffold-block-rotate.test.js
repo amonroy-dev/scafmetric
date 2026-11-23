@@ -223,3 +223,40 @@ test('the turned board direction is remembered on other lifts and after a run is
   tools.setTool('select'); tools.setTool('plank');
   assert.ok(sameRunAxis(plankRunAxis(s.ledgers.get(tools._plankPlacementFor(lower, 1).ledgerId)), 0), 'and after switching tools');
 });
+
+test('a block gets two rails round every planked level, on the rosettes above the deck', () => {
+  const s = new ScaffoldState({});
+  const tools = toolsFor(s);
+  tools.setBlockSettings({ widthFt: 14, depthFt: 7, heightFt: 21, plankedLevelsCount: 2 });
+  const plan = tools._blockPlan();
+  assert.deepEqual(plan.deckLifts, [8, 12]);
+  tools.placeBlockAt({ plan, center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
+  const rails = [...s.guardrails.values()];
+  assert.equal(rails.length, 2 * 2 * 4, 'two levels, two rails, four sides');
+  const heights = [...new Set(rails.map(r => +r.a[2].toFixed(4)))].sort((a, b) => a - b);
+  assert.deepEqual(heights, [9, 10, 13, 14].map(l => +s.liftZ(l).toFixed(4)), 'one and two lifts above each deck');
+  assert.ok(rails.every(r => Math.abs(r.a[0]) === 7 && Math.abs(r.b[0]) === 7 || Math.abs(r.a[1]) === 3.5 && Math.abs(r.b[1]) === 3.5), 'on the perimeter only');
+  assert.ok(Math.max(...rails.map(r => r.a[2])) <= s.liftZ(plan.topLift) + 1e-9, 'the standards reach the top rail');
+});
+
+test('two blocks side by side share one perimeter: no rail down the face between them', () => {
+  const s = new ScaffoldState({});
+  const tools = toolsFor(s);
+  tools.setBlockSettings({ widthFt: 7, depthFt: 7 });
+  const plan = tools._blockPlan();
+  tools.placeBlockAt({ plan, center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
+  tools.placeBlockAt({ plan, center: { x: 7, y: 0 }, snapped: true, rotationSteps: 0 });
+  const rails = [...s.guardrails.values()];
+  assert.ok(!rails.some(r => r.a[0] === 3.5 && r.b[0] === 3.5), 'none on the shared x = 3.5 face');
+  assert.equal(rails.length, 2 * 4, 'one rectangle round both, at two heights');
+  s.undo();
+  assert.ok([...s.guardrails.values()].some(r => r.a[0] === 3.5 && r.b[0] === 3.5), 'undo brings the first block\'s own rail back');
+});
+
+test('guardrails can be switched off on the block card', () => {
+  const s = new ScaffoldState({});
+  const tools = toolsFor(s);
+  tools.setBlockSettings({ guardrails: false });
+  tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
+  assert.equal(s.guardrails.size, 0);
+});

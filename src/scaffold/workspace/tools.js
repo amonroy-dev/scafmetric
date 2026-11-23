@@ -166,6 +166,13 @@ export class Tools {
     clearGroup(this.ghostGroup);
     this.engine.invalidate?.();
   }
+  /** Abandon a selection box being dragged, so releasing the mouse selects nothing. */
+  cancelMarquee() {
+    this._marquee = null;
+    this._down = null;
+    this._clearOverlay();
+  }
+
   /** Hide the selection box. */
   _clearOverlay() {
     if (this._marqueeBox) this._marqueeBox.style.display = 'none';
@@ -923,6 +930,10 @@ export class Tools {
         if (decked.some(e => Math.abs(e.z - d.z) < 0.1 && Math.hypot((e.x0 + e.x1) / 2 - cx, (e.y0 + e.y1) / 2 - cy) < 0.5)) continue;
         s.addPlank([d.x0, d.y0, d.z], [d.x1, d.y1, d.z]);
       }
+      // Rails round each planked level, on the two rosettes above the deck.
+      if (this.blockSettings.guardrails) {
+        for (const lift of plan.deckLifts) s.setDeckGuardrails(s.liftZ(lift), [s.liftZ(lift + 1), s.liftZ(lift + 2)]);
+      }
     });
     this.hooks.onBulkFill?.(added, 'block');
     return added;
@@ -943,6 +954,16 @@ export class Tools {
     for (const b of w.braces) meshes.push(tubeBetween(b.a, b.b, 1.69, mat));
     for (const d of w.decks) {
       for (const b of s.plankBoards({ id: 'ghost', ...d })) meshes.push(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat));
+    }
+    if (this.blockSettings.guardrails) {
+      for (const lift of placement.plan.deckLifts) {
+        for (const z of [s.liftZ(lift + 1), s.liftZ(lift + 2)]) {
+          w.corners.forEach((c, i) => {
+            const d = w.corners[(i + 1) % w.corners.length];
+            meshes.push(tubeBetween([c.x, c.y, z], [d.x, d.y, z], 1.69, mat));
+          });
+        }
+      }
     }
     for (const m of instanceMeshes(meshes)) this.ghostGroup.add(m);
     // Footprint: blue, green once it has snapped onto the standards beside it.

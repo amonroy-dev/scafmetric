@@ -4,7 +4,7 @@
 
 import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
-import { planGuardrails, deckRectsByHeight } from './guardrails.js';
+import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
 import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip } from './parts.js';
 import {
   buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
@@ -205,6 +205,31 @@ export class ScaffoldState {
     this._emit();
     return this.guardrails.size;
   }
+  /**
+   * Rails round the decked area at one deck height, as a block lays them: on
+   * the rosettes one and two lifts above the deck, along the outside edge of
+   * every deck at that height taken together. Replaces the rails a block laid
+   * there before, so two blocks side by side share one perimeter and get no
+   * rail down the face between them.
+   */
+  setDeckGuardrails(deckZ, railHeights) {
+    this._pushHistory();
+    const tag = Math.round(deckZ * 1000);
+    for (const [id, g] of [...this.guardrails]) if (g.deckTag === tag) this.guardrails.delete(id);
+    const rects = deckRectsByHeight(this).get(Math.round(deckZ * 1000) / 1000) || [];
+    let n = 0;
+    for (const s of computeRectUnionBoundarySegments(rects)) {
+      for (const z of railHeights) {
+        const [a, b] = s.kind === 'H' ? [[s.x0, s.y, z], [s.x1, s.y, z]] : [[s.x, s.y0, z], [s.x, s.y1, z]];
+        const g = { id: this._id('G'), a, b, kind: 'rail', deckTag: tag };
+        this.guardrails.set(g.id, g);
+        n++;
+      }
+    }
+    this._emit();
+    return n;
+  }
+
   clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }
 
   // --- per-bay live loads --------------------------------------------------

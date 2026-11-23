@@ -284,6 +284,8 @@ export const BLOCK_DEFAULTS = Object.freeze({
   braceFrontBack: 'off',
   braceLeftRight: 'off',
   ledgerEveryN: BRACE_DELTA_LIFT,
+  // Rails round every deck, on the rosettes one and two lifts above it.
+  guardrails: true,
 });
 
 /** Rosettes on one standard segment. */

@@ -115,6 +115,7 @@ const TEMPLATE = `
           <label>Planked levels<input type="number" data-block="plankedLevelsCount" min="0" max="20" step="1"></label>
         </div>
         <label class="sfw-check"><input type="checkbox" data-block="includeBaseDeck"><span>Include base deck (lift 0)</span></label>
+        <label class="sfw-check"><input type="checkbox" data-block="guardrails"><span>Guardrails round every deck</span></label>
         <div class="sfw-grid2 sfw-mt">
           <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
           <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
@@ -259,7 +260,18 @@ class Workspace {
         // user back to the beam form.
         e.preventDefault();
         this._transform = null;
-        if (this.tools) { this.tools.transformHook = null; this.tools._clearOverlay(); this.tools.setTool('select'); }
+        if (this.tools) {
+          this.tools.transformHook = null;
+          this.tools.cancelMarquee();
+          this.tools.setTool('select');
+          // Esc also lets go of whatever is selected, as in ScaffoldPro.
+          if (this.tools.selection.size || this.selection.length) {
+            this.tools.selection.clear();
+            this.selection = [];
+            this._rebuildContent();
+            this._refreshProps();
+          }
+        }
         this.$('sfw-hint').textContent = `${TOOL_META.select.hint} Close with the × button; your model is saved.`;
         return;
       }
@@ -623,10 +635,15 @@ class Workspace {
     const decks = plan.deckLifts.map(l => ft(this.state.liftZ(l)));
     const standardFt = plan.segments.reduce((a, b) => a + b, 0);
     const brace = v => ({ off: 'off', slash: '/', backslash: '\\' }[v] || 'off');
+    const wanted = Math.round(Number(this.tools.blockSettings.plankedLevelsCount) || 0);
     el.innerHTML =
       `${ft(plan.widthFt)} × ${ft(plan.depthFt)} · ${plan.layoutX.bays} × ${plan.layoutY.bays} bay${plan.layoutX.bays * plan.layoutY.bays === 1 ? '' : 's'}<br>` +
       (decks.length ? `Deck${decks.length === 1 ? '' : 's'} at <strong>${decks.join(', ')}</strong>` : '<strong>No deck fits under that height</strong>') +
-      ` · standards ${ft(standardFt)}<br>Braces: front/back ${brace(this.tools.blockSettings.braceFrontBack)} · left/right ${brace(this.tools.blockSettings.braceLeftRight)}`;
+      ` · standards ${ft(standardFt)}` +
+      // Height caps the planked levels; say so rather than quietly placing fewer.
+      (decks.length && decks.length < wanted ? `<br><strong>Only ${decks.length} of ${wanted} planked levels fit under ${ft(plan.heightFt)}.</strong> Raise Height for more: decks go every ${round(this.state.liftZ(8) - this.state.liftZ(4), 2)} ft.` : '') +
+      `<br>Braces: front/back ${brace(this.tools.blockSettings.braceFrontBack)} · left/right ${brace(this.tools.blockSettings.braceLeftRight)}` +
+      `<br>Guardrails: ${this.tools.blockSettings.guardrails && decks.length ? 'two rails round each deck' : 'off'}`;
   }
 
   _bindInputs() {

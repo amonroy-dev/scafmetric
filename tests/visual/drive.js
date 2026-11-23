@@ -738,9 +738,12 @@ window.__sv = (() => {
       await raf(2);
       const windowKinds = {};
       for (const id of ws().selection) { const k = ws()._kindOf(id); windowKinds[k] = (windowKinds[k] || 0) + 1; }
-      ws().selection = []; ws().tools.selection.clear(); ws()._rebuildContent();
+      // Esc lets go of the selection.
+      const beforeEsc = ws().selection.length;
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
       await raf(2);
-      return { during, hidden, selected: ids.length, kinds, total: { standards: s.standards.size, ledgers: s.ledgers.size, braces: s.braces.size }, windowMode, windowKinds };
+      const esc = { before: beforeEsc, after: ws().selection.length, toolsAfter: ws().tools.selection.size, props: ws().$('sfw-props').textContent };
+      return { esc, during, hidden, selected: ids.length, kinds, total: { standards: s.standards.size, ledgers: s.ledgers.size, braces: s.braces.size }, windowMode, windowKinds };
     },
 
     // ScaffoldPro navigation, through real middle-button and wheel events.
