@@ -139,3 +139,16 @@ test('the line view, DXF and parts list carry each family', () => {
   // A truss saved before families existed still draws, as the lattice truss.
   assert.equal(trussWorldMembers([0, 0, 0], [7, 0, 0], undefined).length, trussFrameFor('truss', 7).members.length);
 });
+
+test('a light truss web plate stands on edge in the plane of the truss, whichever way it runs', () => {
+  for (const [b, alongSpan, acrossSpan] of [[[7, 0, 10], 'x', 'y'], [[0, 7, 10], 'y', 'x']]) {
+    const members = trussWorldMembers([0, 0, 10], b, 'light');
+    const plate = buildTruss([0, 0, 10], b, null, 'light')[members.findIndex(m => m.plate)];
+    plate.geometry.computeBoundingBox();
+    plate.updateMatrixWorld(true);
+    const size = plate.geometry.boundingBox.clone().applyMatrix4(plate.matrixWorld).getSize(new THREE.Vector3());
+    assert.ok(size.z > 0.4, `tall: it spans the truss depth (${size.z.toFixed(3)} ft)`);
+    assert.ok(Math.abs(size[alongSpan] - 0.25) < 0.02, `its 3 in width runs along the span (${size[alongSpan].toFixed(3)} ft)`);
+    assert.ok(size[acrossSpan] < 0.02, `and it is 3/16 in thin across the truss (${size[acrossSpan].toFixed(3)} ft)`);
+  }
+});

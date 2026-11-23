@@ -184,7 +184,7 @@ const CHECKS = {
     r.collarZ === null && 'the base collar has no rosette node (lift 0)',
     r.collarLedgers !== 1 && `clicking the collar rosette with the Ledger tool should add 1 ledger at collar height, added ${r.collarLedgers}`,
     r.bracketsAdded !== 2 && `two clicks with the Bracket tool should hang 2 brackets, hung ${r.bracketsAdded}`,
-    r.members !== 14 && `each bracket should draw as its 7-member frame (14 for two), drew ${r.members}`,
+    r.members !== 16 && `each bracket should draw as its 7-member frame plus the elbow at the socket (16 for two), drew ${r.members}`,
     (r.tipNodes !== 2 || r.nodesAdded !== 2) && `each bracket should add a tip rosette node (tips ${r.tipNodes}, nodes +${r.nodesAdded})`,
     !(r.tipLedger && r.tipLedger.a && r.tipLedger.b) && `a ledger from a bracket tip should run to the next tip, got ${JSON.stringify(r.tipLedger)}`,
   ],
@@ -261,6 +261,7 @@ const CHECKS = {
   ],
   marqueeFrontView: r => [
     !(r.during && r.during.shown && r.during.width > 100) && 'dragging in the Front view drew no selection box',
+    r.during && !(r.during.inBuilder && r.during.onTop && r.during.visible) && `the selection box is drawn where it cannot be seen: ${JSON.stringify(r.during)}`,
     r.during && r.during.mode !== 'crossing' && `a right-to-left drag should be a crossing box, was ${r.during.mode}`,
     !r.hidden && 'the selection box should go away when the drag ends',
     r.kinds.standard !== r.total.standards && `a crossing box over the whole Front view should take every standard (${r.kinds.standard} of ${r.total.standards})`,

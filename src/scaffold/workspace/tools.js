@@ -83,9 +83,9 @@ export class Tools {
     // Bracket tool: steps round the free directions from the outward one (R).
     // Kept across tools, as ScaffoldPro keeps it, so a turn holds for the row.
     this.bracketTurn = 0;
-    // Plank tool: which way the boards run, per lift (R), as ScaffoldPro keeps
-    // it per level. Keyed by lift height; the value is the run axis angle.
-    this.plankAxisByLift = new Map();
+    // Plank tool: which way the boards run (R). One choice, kept on every lift
+    // and across runs until R is pressed again; null follows the picked ledger.
+    this.plankRunAxis = null;
     // Truss tool: steps round the rosettes the truss can reach (R).
     this.trussTurn = 0;
     // Why the last brace hover found nothing: 'no-face' | 'too-short' | 'already-braced'.
@@ -278,14 +278,20 @@ export class Tools {
     if (!this._marqueeBox) {
       const box = document.createElement('div');
       box.setAttribute('aria-hidden', 'true');
-      Object.assign(box.style, { position: 'fixed', zIndex: '140', pointerEvents: 'none', boxSizing: 'border-box', display: 'none' });
-      document.body.appendChild(box);
+      // Inside the canvas's own container, above the canvas and under the
+      // toolbars. On the page body it sat behind the builder window (which is
+      // stacked far above the page) and could not be seen.
+      Object.assign(box.style, { position: 'absolute', zIndex: '3', pointerEvents: 'none', boxSizing: 'border-box', display: 'none' });
+      (canvas.parentElement || document.body).appendChild(box);
       this._marqueeBox = box;
     }
     const bounds = canvas.getBoundingClientRect();
     const { rect, mode } = this._marqueeGeometry(this._marquee);
-    const left = bounds.left + Math.max(0, rect.left), top = bounds.top + Math.max(0, rect.top);
-    const right = bounds.left + Math.min(bounds.width, rect.right), bottom = bounds.top + Math.min(bounds.height, rect.bottom);
+    // Canvas-local, which is container-local: the canvas fills its container.
+    const host = (canvas.parentElement || document.body).getBoundingClientRect();
+    const ox = bounds.left - host.left, oy = bounds.top - host.top;
+    const left = ox + Math.max(0, rect.left), top = oy + Math.max(0, rect.top);
+    const right = ox + Math.min(bounds.width, rect.right), bottom = oy + Math.min(bounds.height, rect.bottom);
     this._marqueeBox.dataset.marquee = mode;
     Object.assign(this._marqueeBox.style, {
       display: 'block', left: `${left}px`, top: `${top}px`,
@@ -519,17 +525,15 @@ export class Tools {
 
   // --- decks: which way the boards run --------------------------------------
 
-  _liftKey(z) { return Math.round(z * 1000); }
-
   /**
    * The deck to lay for the bay picked by a ledger and side, honouring the run
-   * direction chosen with R for this lift. Falls back to the picked ledger's
+   * direction chosen with R. Falls back to the picked ledger's
    * own pair when the opening is bounded one way only.
    */
   _plankPlacementFor(ledger, side) {
     const natural = { ledgerId: ledger.id, sideSign: side };
-    const want = this.plankAxisByLift.get(this._liftKey((ledger.a[2] + ledger.b[2]) / 2));
-    if (want === undefined || sameRunAxis(want, plankRunAxis(ledger))) return natural;
+    const want = this.plankRunAxis;
+    if (want === null || sameRunAxis(want, plankRunAxis(ledger))) return natural;
     return crossPlankPlacement(ledger, this.state.ledgerList(), side) || natural;
   }
 
@@ -548,8 +552,8 @@ export class Tools {
 
   /**
    * R with the Plank tool: turn the boards in the hovered opening to run the
-   * other way, decking off the other pair of ledgers, and keep that for the
-   * whole lift. Returns the new run axis, or null when the opening is bounded
+   * other way, decking off the other pair of ledgers, and keep that for
+   * every bay and lift from then on. Returns the new run axis, or null when the opening is bounded
    * one way only.
    */
   _turnPlankRun() {
@@ -561,7 +565,7 @@ export class Tools {
     const cross = crossPlankPlacement(currentLedger, this.state.ledgerList(), current.sideSign);
     if (!cross) return null;
     const axis = plankRunAxis(this.state.ledgers.get(cross.ledgerId));
-    this.plankAxisByLift.set(this._liftKey((currentLedger.a[2] + currentLedger.b[2]) / 2), axis);
+    this.plankRunAxis = axis;
     return axis;
   }
 

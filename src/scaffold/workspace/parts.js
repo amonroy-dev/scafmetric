@@ -70,6 +70,14 @@ const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const HEX_GEO = new THREE.CylinderGeometry(1, 1, 1, 6);
 HEX_GEO.rotateX(Math.PI / 2);
 
+const UNIT_SPHERE = new THREE.SphereGeometry(1, 16, 12);
+
+/** A ball the size of a tube, to close the outside of a bend between two tubes. */
+function jointBall(at, odIn, material) {
+  const r = inchesToFeet(odIn) / 2;
+  return mesh(UNIT_SPHERE, material, at, [r, r, r]);
+}
+
 export const SHARED_GEO = { UNIT_CYL_Z, UNIT_CYL_Y, UNIT_BOX, HEX_GEO };
 
 function mesh(geo, mat, pos, scale) {
@@ -384,7 +392,15 @@ export function sideBracketTubeLengthFt(lengthFt) {
  */
 export function buildSideBracket(node, dir, lengthFt, material) {
   const mat = material || MATERIALS.ledger;
-  return sideBracketWorldMembers(node, dir, lengthFt).map(m => tubeBetween(m.a, m.b, m.odIn, mat));
+  const members = sideBracketWorldMembers(node, dir, lengthFt);
+  const meshes = members.map(m => tubeBetween(m.a, m.b, m.odIn, mat));
+  // Where the diagonal runs into the foot of the socket the two tubes meet at
+  // an angle, and square-cut cylinders leave a notch on the outside of the
+  // bend. A ball of the tube's own size there closes it into one smooth elbow.
+  const diagonal = members.filter(m => m.role === 'diagonal').pop();
+  const socketOd = Math.max(...members.filter(m => m.role === 'socket').map(m => m.odIn));
+  if (diagonal) meshes.push(jointBall(diagonal.b, Math.max(diagonal.odIn, socketOd), mat));
+  return meshes;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,16 +454,17 @@ export function trussMemberLengthFt(spanFt, family = 'truss') {
   return total;
 }
 
-// A flat bar web: its width in the plane of the truss, its thickness across it.
-function flatBarBetween(a, b, widthIn, thicknessIn, material) {
+// A flat bar web, standing on edge: its width lies in the vertical plane of
+// the truss and its thickness across it. `across` is the horizontal normal to
+// that plane, taken from the span so a vertical web knows which way to face.
+function flatBarBetween(a, b, widthIn, thicknessIn, material, across) {
   const av = new THREE.Vector3(a[0], a[1], a[2]);
   const dir = new THREE.Vector3(b[0], b[1], b[2]).sub(av);
   const len = Math.max(dir.length(), 1e-6);
   dir.divideScalar(len);
-  let across = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, 1));
-  if (across.lengthSq() < 1e-8) across = new THREE.Vector3(0, 1, 0);
-  across.normalize();
-  const inPlane = new THREE.Vector3().crossVectors(across, dir).normalize();
+  // Right-handed: X (width) x Y (length) = Z (thickness). A mirrored basis is
+  // not a rotation, and laid the plate flat.
+  const inPlane = new THREE.Vector3().crossVectors(dir, across).normalize();
   const m = new THREE.Mesh(UNIT_BOX, material);
   m.position.copy(av).addScaledVector(dir, len / 2);
   m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(inPlane, dir, across));
@@ -459,8 +476,12 @@ function flatBarBetween(a, b, widthIn, thicknessIn, material) {
 
 export function buildTruss(a, b, material, family = 'truss') {
   const mat = material || MATERIALS.ledger;
+  // Horizontal normal to the truss's plane.
+  const across = new THREE.Vector3(-(b[1] - a[1]), b[0] - a[0], 0);
+  if (across.lengthSq() < 1e-12) across.set(0, 1, 0);
+  across.normalize();
   return trussWorldMembers(a, b, family).map(m => (m.plate
-    ? flatBarBetween(m.a, m.b, m.plate.widthIn, m.plate.thicknessIn, mat)
+    ? flatBarBetween(m.a, m.b, m.plate.widthIn, m.plate.thicknessIn, mat, across)
     : tubeBetween(m.a, m.b, m.odIn, mat)));
 }
 

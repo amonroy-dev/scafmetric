@@ -706,7 +706,20 @@ window.__sv = (() => {
       pointer('pointerdown', a);
       for (let i = 1; i <= 6; i++) { pointer('pointermove', { x: a.x + (b.x - a.x) * i / 6, y: a.y + (b.y - a.y) * i / 6 }, { held: true }); await raf(1); }
       const box = document.querySelector('[data-marquee]');
-      const during = box ? { shown: box.style.display === 'block', mode: box.dataset.marquee, width: parseFloat(box.style.width) } : null;
+      // Seen, not merely present: nothing may be drawn over the middle of the box
+      // except the box's own canvas (the box ignores the pointer, so the element
+      // under that point is the canvas only when the box is not buried).
+      let during = null;
+      if (box) {
+        const br = box.getBoundingClientRect();
+        const under = document.elementFromPoint(br.left + br.width / 2, br.top + br.height / 2);
+        const style = getComputedStyle(box);
+        during = {
+          shown: box.style.display === 'block', mode: box.dataset.marquee, width: br.width,
+          inBuilder: ws().root.contains(box), onTop: under === canvas(),
+          border: style.borderTopWidth, visible: style.visibility === 'visible' && br.height > 20,
+        };
+      }
       pointer('pointerup', b);
       await raf(2);
       const s = ws().state;

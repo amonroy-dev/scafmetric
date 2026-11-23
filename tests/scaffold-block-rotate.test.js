@@ -207,3 +207,19 @@ test('R turns the boards for the whole lift, and Shift fills the run that way', 
   // R again turns them back.
   assert.ok(sameRunAxis(tools.rotate(), Math.PI / 2));
 });
+
+test('the turned board direction is remembered on other lifts and after a run is placed', () => {
+  const { s, tools, front } = bay();
+  tools._batchFillLedgers(2);
+  tools.setTool('plank');
+  tools._hoverAt = { clientX: 0, clientY: 0 };
+  tools._pickLedger = () => ({ ledger: front, point: { x: 3.5, y: 1, z: front.a[2] } });
+  tools.rotate();
+  tools._batchFillPlanks(front, 1);
+  // A different lift, never hovered when R was pressed.
+  const lower = s.ledgerList().find(l => l.a[1] === 0 && l.b[1] === 0 && Math.min(l.a[0], l.b[0]) === 0 && l.a[2] < front.a[2] - 1);
+  const p = tools._plankPlacementFor(lower, 1);
+  assert.ok(sameRunAxis(plankRunAxis(s.ledgers.get(p.ledgerId)), 0), 'still along x on the lift below');
+  tools.setTool('select'); tools.setTool('plank');
+  assert.ok(sameRunAxis(plankRunAxis(s.ledgers.get(tools._plankPlacementFor(lower, 1).ledgerId)), 0), 'and after switching tools');
+});

@@ -794,7 +794,7 @@ class Workspace {
     if (tool === 'plank') {
       if (value === undefined) hint.textContent = 'Hover a bay, then press R to turn its boards.';
       else if (value === null) hint.textContent = 'This bay has ledgers on two sides only, so its boards can run one way only.';
-      else hint.textContent = `Boards now run ${compassAxis(value)} on this lift. R turns them back.`;
+      else hint.textContent = `Boards now run ${compassAxis(value)}, and stay that way until you press R again.`;
       return;
     }
     if (tool === 'liveload') {
