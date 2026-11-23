@@ -13,11 +13,11 @@ export const CATALOG = {
     code: 'STD',
     unit: 'length',
     parts: [
-      { id: 'std-9-10', label: '9 ft 10 in', lengthFt: ft(9, 10.125) },
-      { id: 'std-6-7', label: '6 ft 7 in', lengthFt: ft(6, 6.75) },
-      { id: 'std-4-11', label: '4 ft 11 in', lengthFt: ft(4, 11.0625) },
-      { id: 'std-3-3', label: '3 ft 3 in', lengthFt: ft(3, 3.375) },
-      { id: 'std-1-8', label: '1 ft 8 in', lengthFt: ft(1, 7.6875) },
+      { id: 'std-9-10', label: '9 ft 10 in (3 m)', lengthFt: ft(9, 10.125) },
+      { id: 'std-6-7', label: '6 ft 7 in (2 m)', lengthFt: ft(6, 6.75) },
+      { id: 'std-4-11', label: '4 ft 11 in (1.5 m)', lengthFt: ft(4, 11.0625) },
+      { id: 'std-3-3', label: '3 ft 3 in (1 m)', lengthFt: ft(3, 3.375) },
+      { id: 'std-1-8', label: '1 ft 8 in (0.5 m)', lengthFt: ft(1, 7.6875) },
     ],
   },
   ledgers: {

@@ -37,8 +37,24 @@ const ICONS = {
   // Undo2 / Redo2 from lucide, as ScaffoldPro's toolbar uses them.
   undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>',
   redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg>',
+  fold: svg('<path d="M5 8l5 5 5-5"/>'),
   close: svg('<path d="M5 5l10 10M15 5L5 15"/>'),
   monitor: svg('<rect x="2.5" y="3.5" width="15" height="10" rx="1.5"/><path d="M7 16.5h6M10 13.5v3"/>'),
+};
+
+// What each tool does, in the three gestures a contractor needs: shown on the
+// tool's card so nothing has to be remembered or looked for.
+const TOOL_HOW = {
+  select: [['Click', 'Select a part. Click again for the one behind it.'], ['Drag', 'Left to right takes what is fully inside the box. Right to left takes anything it touches.'], ['Keys', 'Shift adds · Ctrl toggles · Delete removes · Esc lets go']],
+  standard: [['Click', 'Stand a leg on the grid. Click a leg again to add a piece on top.']],
+  block: [['Click', 'Place the block. It snaps onto a block beside it.'], ['R', 'Turn it a quarter turn.']],
+  ledger: [['Click', 'A rosette: the ledger runs to the nearest open standard.'], ['Shift', 'Fill every bay at that level.']],
+  brace: [['Click', 'A bay face: the brace climbs four rosettes.'], ['R', 'Lean it the other way.'], ['Shift', 'Brace the outside faces at that height.']],
+  truss: [['Click', 'A rosette: the truss runs to the rosette its own length away.'], ['R', 'Turn it to the next rosette it can reach.'], ['Shift', 'Fill the face end to end.']],
+  bracket: [['Click', 'A rosette: the bracket hangs pointing out of the scaffold.'], ['R', 'Turn it to the next free direction.']],
+  plank: [['Click', 'A ledger: decks the bay on that side of it.'], ['R', 'Turn the boards to run the other way.'], ['Shift', 'Deck the whole run.']],
+  liveload: [['Click', 'A ledger: loads the bay on that side of it.'], ['R', 'Load the other side.'], ['Shift', 'Load the whole run.']],
+  erase: [['Click', 'Remove a part. Ctrl+Z brings it back.']],
 };
 
 const TOOL_META = {
@@ -106,59 +122,61 @@ const TEMPLATE = `
           <button type="button" class="sfw-hist-btn" data-act="redo" aria-label="Redo" title="Nothing to redo" aria-disabled="true">${ICONS.redo}</button>
         </div>
       </div>
-      <section class="sfw-group sfw-blockcard" id="sfw-blockcard" aria-label="Block" hidden>
-        <h3>Block<button type="button" class="sfw-icon-btn" data-block-close aria-label="Close the Block tool" title="Back to Select (Esc)">${ICONS.close}</button></h3>
-        <div class="sfw-grid2">
-          <label>Width<span class="sfw-u"><input type="number" data-block="widthFt" min="0.5" step="any"><i>ft</i></span></label>
-          <label>Depth<span class="sfw-u"><input type="number" data-block="depthFt" min="0.5" step="any"><i>ft</i></span></label>
-          <label>Height<span class="sfw-u"><input type="number" data-block="heightFt" min="0.5" step="any" title="Height of the top working deck"><i>ft</i></span></label>
-          <label>Planked levels<input type="number" data-block="plankedLevelsCount" min="0" max="20" step="1"></label>
+      <!-- One card beside the toolbar for whichever tool is in hand: its options,
+           then what a click, R and Shift do. Each control names its tools in data-for. -->
+      <section class="sfw-group sfw-blockcard sfw-toolcard" id="sfw-toolcard" aria-label="Tool options">
+        <h3><span id="sfw-tool-title">Standard</span><span class="sfw-card-btns">
+          <button type="button" class="sfw-icon-btn" data-card-fold aria-label="Collapse the card" title="Collapse" aria-expanded="true">${ICONS.fold}</button>
+          <button type="button" class="sfw-icon-btn" data-card-close aria-label="Hide the card" title="Hide (pick the tool again to show it)">${ICONS.close}</button></span></h3>
+        <div class="sfw-toolcard-body">
+          <label data-for="truss">Type<select id="sfw-cat"></select></label>
+          <label data-for="standard ledger brace truss bracket plank" class="sfw-gap">Size<select id="sfw-part"></select></label>
+          <p class="sfw-note" id="sfw-partnote" hidden></p>
+          <div data-for="standard">
+            <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
+            <p class="sfw-note" id="sfw-stdh-note">0 places one piece of the size above. Any other height stacks the pieces for you.</p>
+          </div>
+          <div data-for="brace">
+            <div class="sfw-grid2 sfw-mt">
+              <label>Leans<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
+              <label>Sides<select id="sfw-brace-filter"><option value="all">All</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option></select></label>
+            </div>
+            <label class="sfw-mt">Shift fills<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
+          </div>
+          <div data-for="liveload">
+            <label>Load on each bay<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
+          </div>
+          <div data-for="select">
+            <div id="sfw-props" class="sfw-props"></div>
+            <div class="sfw-actions-row">
+              <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
+              <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
+            </div>
+          </div>
+          <div data-for="block" id="sfw-blockcard">
+            <div class="sfw-grid2">
+              <label>Width<span class="sfw-u"><input type="number" data-block="widthFt" min="0.5" step="any"><i>ft</i></span></label>
+              <label>Depth<span class="sfw-u"><input type="number" data-block="depthFt" min="0.5" step="any"><i>ft</i></span></label>
+              <label>Height<span class="sfw-u"><input type="number" data-block="heightFt" min="0.5" step="any" title="Height of the top working deck"><i>ft</i></span></label>
+              <label>Planked levels<input type="number" data-block="plankedLevelsCount" min="0" max="20" step="1"></label>
+            </div>
+            <label class="sfw-check"><input type="checkbox" data-block="includeBaseDeck"><span>Include base deck (lift 0)</span></label>
+            <label class="sfw-check"><input type="checkbox" data-block="guardrails"><span>Guardrails round every deck</span></label>
+            <div class="sfw-grid2 sfw-mt">
+              <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
+              <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
+            </div>
+            <p class="sfw-note" id="sfw-block-summary"></p>
+            <div class="sfw-blockcard-foot">
+              <button type="button" class="sfw-btn ghost" data-block-reset>Reset</button>
+            </div>
+                    </div>
+          <dl class="sfw-how" id="sfw-how"></dl>
         </div>
-        <label class="sfw-check"><input type="checkbox" data-block="includeBaseDeck"><span>Include base deck (lift 0)</span></label>
-        <label class="sfw-check"><input type="checkbox" data-block="guardrails"><span>Guardrails round every deck</span></label>
-        <div class="sfw-grid2 sfw-mt">
-          <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
-          <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
-        </div>
-        <p class="sfw-note" id="sfw-block-summary"></p>
-        <div class="sfw-blockcard-foot">
-          <button type="button" class="sfw-btn ghost" data-block-reset>Reset</button>
-          <span>Click to place · <kbd>R</kbd> rotates</span>
-        </div>
-      </section>
+</section>
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
     <aside class="sfw-side">
-      <!-- Only what the tool in hand needs. Each control names its tools in data-for. -->
-      <div class="sfw-group">
-        <h3 id="sfw-tool-title">Standard</h3>
-        <label data-for="truss">Type<select id="sfw-cat"></select></label>
-        <label data-for="standard ledger brace truss bracket plank" class="sfw-gap">Size<select id="sfw-part"></select></label>
-        <p class="sfw-note" id="sfw-partnote" hidden></p>
-        <div data-for="standard">
-          <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
-          <p class="sfw-note" id="sfw-stdh-note">0 places one piece of the size above. Any other height stacks the pieces for you.</p>
-        </div>
-        <div data-for="brace">
-          <div class="sfw-grid2 sfw-mt">
-            <label>Leans<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
-            <label>Sides<select id="sfw-brace-filter"><option value="all">All</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option></select></label>
-          </div>
-          <label class="sfw-mt">Shift fills<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
-        </div>
-        <div data-for="liveload">
-          <label>Load on each bay<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
-        </div>
-        <div data-for="select">
-          <div id="sfw-props" class="sfw-props"></div>
-          <div class="sfw-actions-row">
-            <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
-            <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
-          </div>
-        </div>
-        <p class="sfw-note" data-for="block">Set the block in the card on the canvas, then click the grid to place it.</p>
-        <p class="sfw-note" data-for="erase">Click a part to remove it. Ctrl+Z brings it back.</p>
-      </div>
       <div class="sfw-group">
         <h3>Send to beam</h3>
         <div class="sfw-grid2">
@@ -581,10 +599,14 @@ class Workspace {
 
   _applyToolUi(name) {
     for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
-    this.$('sfw-hint').textContent = TOOL_META[name]?.hint || '';
-    // The side panel shows only what this tool needs.
+    // The card says how the tool works; the bubble is for what is happening now.
+    this.$('sfw-hint').textContent = '';
+    // The card shows only what this tool needs.
     this.$('sfw-tool-title').textContent = TOOL_META[name]?.label || '';
-    for (const el of this.root.querySelectorAll('.sfw-side [data-for]')) el.hidden = !el.dataset.for.split(' ').includes(name);
+    for (const el of this.root.querySelectorAll('#sfw-toolcard [data-for]')) el.hidden = !el.dataset.for.split(' ').includes(name);
+    // Picking a tool brings its card back if it was hidden.
+    this.$('sfw-toolcard').hidden = false;
+    this.$('sfw-how').innerHTML = (TOOL_HOW[name] || []).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
     // With the Truss tool, Type offers the three truss families and nothing else.
     for (const o of this.$('sfw-cat').options) o.hidden = CATEGORY_TOOL[o.value] !== 'truss';
     // The block card comes up with the Block tool, as ScaffoldPro's does.
@@ -627,9 +649,16 @@ class Workspace {
       this.tools.setBlockSettings({ ...BLOCK_DEFAULTS });
       this._fillBlockCard();
     });
-    card.querySelector('[data-block-close]').addEventListener('click', () => this.tools.setTool('select'));
+    const toolCard = this.$('sfw-toolcard');
+    toolCard.querySelector('[data-card-close]').addEventListener('click', () => { toolCard.hidden = true; });
+    const fold = toolCard.querySelector('[data-card-fold]');
+    fold.addEventListener('click', () => {
+      const folded = toolCard.classList.toggle('is-folded');
+      fold.setAttribute('aria-expanded', String(!folded));
+      fold.title = folded ? 'Expand' : 'Collapse';
+    });
     // Typing in the card must not reach the canvas shortcuts (R, Delete...).
-    card.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
+    toolCard.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
   }
 
   _fillBlockCard() {

@@ -15,9 +15,12 @@ import { buildBestFitPlankLayout, PLANK } from './parts.js';
 // length less the two mouthpieces.
 export const PLANK_MOUTHPIECE_TOTAL_IN = 6;
 
-/** Board top sits on the ledger tube, so the profile centre drops half a depth. */
+/**
+ * Board centre above the ledger's centreline so the walking surface is flush
+ * with the top of the ledger tube, as planks hooked over a ledger sit.
+ */
 export function plankSeatOffsetFt() {
-  return inchesToFeet(LEDGER_TUBE_OD_IN / 2) - inchesToFeet(PLANK.profileDepthIn) / 2;
+  return inchesToFeet(LEDGER_TUBE_OD_IN / 2) - inchesToFeet(PLANK.profileDepthIn) * PLANK.topAboveCentre;
 }
 
 /**

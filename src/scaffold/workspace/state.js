@@ -10,7 +10,7 @@ import {
   buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
   distributeLedgerPointLoad, DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
-import { buildPlankDecks, resolvePlankPlacement } from './planks.js';
+import { buildPlankDecks, resolvePlankPlacement, plankSeatOffsetFt } from './planks.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -460,7 +460,10 @@ export class ScaffoldState {
     const lengthFt = runAlongX ? w : d;
     const crossSpanIn = (runAlongX ? d : w) * 12;
     const slots = buildBestFitPlankLayout(crossSpanIn);
-    const z = p.z + inchesToFeet(PLANK.profileDepthIn) / 2;
+    // Flush with the top of the ledgers, the same seat a ledger-hung deck uses.
+    // (It used to sit a full half-depth above the ledger centreline, which left
+    // a block's deck standing more than an inch proud of its ledgers.)
+    const z = p.z + plankSeatOffsetFt();
     return slots.map((slot, i) => ({
       id: `${p.id}b${i}`,
       bayId: p.id,

@@ -36,6 +36,7 @@ export const BASE_COLLAR = {
   wallIn: 0.12,
 };
 export const STANDARD_TUBE_OD_IN = 1.9;
+export const STANDARD_TUBE_WALL_IN = 0.12;
 export const TUBE_RADIAL_SEGMENTS = 12;
 
 // Height from ground to the bottom of the standard tube. Must match the load
@@ -67,6 +68,28 @@ UNIT_CYL_Z.rotateX(Math.PI / 2);
 // Unit cylinder along +Y, for arbitrary-direction tubes (ledgers/braces).
 const UNIT_CYL_Y = new THREE.CylinderGeometry(1, 1, 1, TUBE_RADIAL_SEGMENTS);
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+
+// A standard is a tube, 1.9 in OD with a 0.12 in wall, and is drawn as one: an
+// outer skin, an inner skin facing the bore, and a ring closing each end, so
+// the open top of a leg shows its wall instead of a solid round bar. Unit
+// outer radius and height along +Z, scaled per instance like the cylinders.
+const UNIT_TUBE_Z = (() => {
+  const bore = (STANDARD_TUBE_OD_IN - 2 * STANDARD_TUBE_WALL_IN) / STANDARD_TUBE_OD_IN;
+  const outer = new THREE.CylinderGeometry(1, 1, 1, TUBE_RADIAL_SEGMENTS, 1, true);
+  const inner = new THREE.CylinderGeometry(bore, bore, 1, TUBE_RADIAL_SEGMENTS, 1, true);
+  // Turn the inner skin to face the bore: reverse each triangle and its normals.
+  const idx = inner.index.array;
+  for (let i = 0; i < idx.length; i += 3) { const t = idx[i]; idx[i] = idx[i + 2]; idx[i + 2] = t; }
+  const n = inner.attributes.normal.array;
+  for (let i = 0; i < n.length; i++) n[i] = -n[i];
+  const top = new THREE.RingGeometry(bore, 1, TUBE_RADIAL_SEGMENTS).rotateX(-Math.PI / 2).translate(0, 0.5, 0);
+  const bottom = new THREE.RingGeometry(bore, 1, TUBE_RADIAL_SEGMENTS).rotateX(Math.PI / 2).translate(0, -0.5, 0);
+  const parts = [outer, inner, top, bottom];
+  const merged = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  merged.rotateX(Math.PI / 2);
+  return merged;
+})();
 const HEX_GEO = new THREE.CylinderGeometry(1, 1, 1, 6);
 HEX_GEO.rotateX(Math.PI / 2);
 
@@ -89,11 +112,12 @@ function mesh(geo, mat, pos, scale) {
   return m;
 }
 
-// Vertical tube from z0 to z1 at (x,y), given an outside diameter in inches.
+// A standard: a hollow tube from z0 to z1 at (x,y), outside diameter in inches
+// (the wall keeps the standard's own proportion, 0.12 in on 1.9 in).
 export function verticalTube(x, y, z0, z1, odIn, material) {
   const r = inchesToFeet(odIn) / 2;
   const h = Math.max(z1 - z0, 1e-6);
-  return mesh(UNIT_CYL_Z, material, [x, y, z0 + h / 2], [r, r, h]);
+  return mesh(UNIT_TUBE_Z, material, [x, y, z0 + h / 2], [r, r, h]);
 }
 
 // Tube between two arbitrary world points (ledgers, braces).
@@ -218,7 +242,12 @@ export function rosetteDisk(x, y, z, material) {
 // Planks — profiled deck board, matching how Scaffxiq_v2 draws them.
 // Unit space: x = width, y = length, z = profile depth; scaled per instance.
 // ---------------------------------------------------------------------------
-export const PLANK = { widthIn: 9, narrowWidthIn: 6, profileDepthIn: 2.25, color: 0xc5c9ce };
+// topAboveCentre: where the walking surface sits in the board's profile, as a
+// fraction of its depth above the profile's centre (the profile below has its
+// top face at 0.44, with the ribs hanging further down than the top stands up).
+// Timber tan, so a deck reads as a deck: steel is grey, blue means selected or
+// previewed, and cyan is a live load patch.
+export const PLANK = { widthIn: 9, narrowWidthIn: 6, profileDepthIn: 2.25, topAboveCentre: 0.44, color: 0xc8a472 };
 
 const PLANK_PROFILE_GEO = (() => {
   const geoms = [];
@@ -240,7 +269,7 @@ const PLANK_PROFILE_GEO = (() => {
 })();
 
 export const PLANK_MATERIAL = new THREE.MeshStandardMaterial({
-  color: PLANK.color, metalness: 0.35, roughness: 0.42,
+  color: PLANK.color, metalness: 0.05, roughness: 0.7,
 });
 
 /**

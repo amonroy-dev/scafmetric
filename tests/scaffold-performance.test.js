@@ -144,3 +144,23 @@ test('a precomputed lift frame finds the same ledger targets', () => {
   }
   assert.equal(liftFrame([nodes[0]]), null, 'a single node has no grid');
 });
+
+test('a standard is drawn as a hollow tube, 1.9 in OD with a 0.12 in wall', async () => {
+  const { verticalTube, STANDARD_TUBE_OD_IN, STANDARD_TUBE_WALL_IN } = await import('../src/scaffold/workspace/parts.js');
+  assert.equal(STANDARD_TUBE_OD_IN, 1.9);
+  assert.equal(STANDARD_TUBE_WALL_IN, 0.12);
+  const m = verticalTube(0, 0, 0, 10, STANDARD_TUBE_OD_IN, MATERIALS.steel);
+  m.updateMatrixWorld(true);
+  const pos = m.geometry.attributes.position;
+  const radiiIn = new Set();
+  for (let i = 0; i < pos.count; i++) {
+    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+    radiiIn.add(+(Math.hypot(v.x, v.y) * 12).toFixed(3));
+  }
+  assert.deepEqual([...radiiIn].sort((a, b) => a - b), [0.83, 0.95], 'only the bore (0.83 in) and the outside (0.95 in): nothing closes the middle');
+  // Looking straight down the bore, a ray passes through instead of hitting a cap.
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 0, 50), new THREE.Vector3(0, 0, -1));
+  assert.equal(ray.intersectObject(m).length, 0, 'the top is open');
+  const wall = new THREE.Raycaster(new THREE.Vector3(0.89 / 12 * Math.cos(0.2), 0.89 / 12 * Math.sin(0.2), 50), new THREE.Vector3(0, 0, -1)); // off the facet edges
+  assert.ok(wall.intersectObject(m).length > 0, 'the end of the wall is there');
+});

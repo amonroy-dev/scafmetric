@@ -275,3 +275,17 @@ test('a block lands with its standards on the grid lines, turned or not', () => 
     assert.ok(Math.hypot(c.x - 10.3, c.y - 4.8) < 1, 'and still under the pointer');
   }
 });
+
+test('a deck is flush with the top of its ledgers, block-laid or ledger-hung', async () => {
+  const { PLANK, inchesToFeet } = await import('../src/scaffold/workspace/parts.js');
+  const top = b => b.center[2] + inchesToFeet(PLANK.profileDepthIn) * PLANK.topAboveCentre;
+  const s = new ScaffoldState({});
+  const tools = toolsFor(s);
+  tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
+  const ledgerTop = s.liftZ(4) + inchesToFeet(1.9 / 2);
+  const blockDeck = s.plankBays()[0];
+  assert.ok(Math.abs(top(blockDeck.boards[0]) - ledgerTop) < 1e-9, 'block deck: flush');
+  const { s: s2, front } = bay();
+  s2.addPlankOnLedger(front.id, 1);
+  assert.ok(Math.abs(top(s2.plankBays()[0].boards[0]) - (front.a[2] + inchesToFeet(1.9 / 2))) < 1e-9, 'ledger-hung deck: flush');
+});

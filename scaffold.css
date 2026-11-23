@@ -109,10 +109,34 @@
   color:var(--sfw-ink-2);font:400 12.5px/1.45 var(--sfw-font);text-align:center;pointer-events:none}
 .sfw-hint:empty{display:none}
 
+/* The tool card: the block card's look, for every tool. */
+.sfw-toolcard h3{gap:6px}
+.sfw-card-btns{display:flex;gap:2px;margin:-4px -6px -4px 0}
+.sfw-toolcard h3 .sfw-card-btns .sfw-icon-btn{margin:0}
+.sfw-toolcard [data-card-fold] svg{transition:transform .12s}
+.sfw-toolcard.is-folded [data-card-fold] svg{transform:rotate(-90deg)}
+.sfw-toolcard.is-folded{padding-bottom:12px}
+.sfw-toolcard.is-folded h3{margin-bottom:0}
+.sfw-toolcard.is-folded .sfw-toolcard-body{display:none}
+.sfw-toolcard .sfw-props{margin-bottom:10px}
+.sfw-toolcard .sfw-actions-row .sfw-btn{margin-top:0}
+/* What a click, R and Shift do. */
+.sfw-how{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--sfw-line);display:grid;gap:6px}
+.sfw-how:first-child{margin-top:0;padding-top:0;border-top:0}
+.sfw-how:empty{display:none}
+.sfw-how div{display:grid;grid-template-columns:42px 1fr;gap:8px;align-items:baseline}
+.sfw-how dt{font:600 11px/1.4 var(--sfw-font);color:var(--sfw-ink-2)}
+.sfw-how dd{margin:0;font:400 12px/1.4 var(--sfw-font);color:var(--sfw-muted)}
+
 /* Folded sections of the side panel: there when wanted, out of the way otherwise. */
 .sfw-fold>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;list-style:none;
   font:600 13px/1.3 var(--sfw-font);color:var(--sfw-ink);user-select:none}
 .sfw-fold>summary::-webkit-details-marker{display:none}
+/* The beam page styles every <summary> (padding, a blue marker, a hover wash); undo that here. */
+#scaffold-modal .sfw-fold>summary{padding:0;background:none;transition:none}
+#scaffold-modal .sfw-fold>summary::before{content:none;display:none}
+#scaffold-modal .sfw-fold>summary:hover{background:none;color:var(--sfw-ink)}
+#scaffold-modal .sfw-fold>summary span{font:400 12px/1.3 var(--sfw-font);color:var(--sfw-muted)}
 .sfw-fold>summary::after{content:"";flex:none;width:7px;height:7px;margin-right:3px;border-right:1.5px solid var(--sfw-muted);border-bottom:1.5px solid var(--sfw-muted);transform:rotate(45deg);transition:transform .12s}
 .sfw-fold[open]>summary::after{transform:rotate(-135deg)}
 .sfw-fold[open]>summary{margin-bottom:12px}
@@ -122,6 +146,8 @@
 .sfw-group .sfw-fold>summary{font-weight:500;font-size:12px;color:var(--sfw-muted)}
 .sfw-group [hidden]{display:none!important}
 .sfw-gap:not(:first-of-type){margin-top:12px}
+.sfw-toolcard [hidden]+.sfw-gap{margin-top:0}
+.sfw-toolcard .sfw-toolcard-body>[data-for]>.sfw-mt:first-child{margin-top:12px}
 .sfw-btn.sfw-nomt{margin-top:0}
 
 /* Block card: comes up over the canvas with the Block tool (ScaffoldPro's block

@@ -35,6 +35,9 @@ import { bracketDirections, chooseBracketDirection, runCentroid } from './bracke
 // stops meaning "the cursor is on this side of that ledger".
 const SIDE_PICK_MAX_FT = 4;
 const DRAG_PX = MARQUEE_DRAG_THRESHOLD_PX;
+// A click this close to a tube on screen selects it, however thin it is drawn.
+const PICK_TOLERANCE_PX = 6;
+const PICK_BAND_PX = 3;
 // Truss fits, from ScaffoldPro: two degrees off a run still counts as along it
 // (rosettes sit on a grid, so this only absorbs noise); an inch off its own
 // length still fits (the frames do not stretch); 0.05 ft is the same lift.
@@ -577,19 +580,53 @@ export class Tools {
   }
 
   /**
+   * What a click is on, nearest first.
+   *
+   * A tube is under two inches across, which zoomed out is a pixel or two: a
+   * click had to land exactly on it, and standards in a whole-scaffold view
+   * were close to unselectable. So besides what the ray actually hits, every
+   * tube passing within a few pixels of the click counts, as ScaffoldPro's
+   * fatter pick targets do, but measured on the screen so it works the same at
+   * any zoom.
+   *
+   * Ordered by how far off the click was (in bands, so an exact click on a
+   * back leg beats a near miss on a front one) and then by distance from the
+   * camera. Clicking again steps to the next one behind.
+   */
+  _pickCandidates(e) {
+    const { raycaster, camera, renderer } = this.engine;
+    raycaster.setFromCamera(this.engine.pointer, camera);
+    const best = new Map();
+    const note = (id, px, depth) => {
+      const band = Math.floor(px / PICK_BAND_PX);
+      const cur = best.get(id);
+      if (!cur || band < cur.band || (band === cur.band && depth < cur.depth)) best.set(id, { id, band, depth });
+    };
+    for (const h of raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false)) {
+      const d = hitData(h);
+      if (d.proxy || !d.id) continue; // invisible hit targets never select
+      note(d.id, 0, h.distance);
+    }
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const ray = raycaster.ray;
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), onRay = new THREE.Vector3(), onSeg = new THREE.Vector3();
+    for (const seg of this._marqueeParts().segments) {
+      ray.distanceSqToSegment(p0.set(...seg.a), p1.set(...seg.b), onRay, onSeg);
+      const depth = onRay.distanceTo(ray.origin);
+      onSeg.project(camera);
+      if (onSeg.z < -1 || onSeg.z > 1) continue; // behind the camera or past the far plane
+      const px = Math.hypot(((onSeg.x + 1) / 2) * bounds.width - (e.clientX - bounds.left), ((1 - onSeg.y) / 2) * bounds.height - (e.clientY - bounds.top));
+      if (px <= PICK_TOLERANCE_PX) note(seg.id, px, depth);
+    }
+    return [...best.values()].sort((p, q) => p.band - q.band || p.depth - q.depth).map(c => c.id);
+  }
+
+  /**
    * Pick with cycling: clicking the same spot again steps to the next object
    * behind the current one, so overlapping members stay reachable.
    */
   _cyclePick(e) {
-    this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
-    const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
-    const ids = [];
-    for (const h of hits) {
-      const d = hitData(h);
-      if (d.proxy) continue; // invisible hit targets never select
-      const id = d.id;
-      if (id && !ids.includes(id)) ids.push(id);
-    }
+    const ids = this._pickCandidates(e);
     if (!ids.length) { this._cycle = null; return null; }
     const near = this._cycle && Math.hypot(e.clientX - this._cycle.x, e.clientY - this._cycle.y) < 6;
     if (near && this._cycle.ids.join('|') === ids.join('|')) {
