@@ -121,12 +121,6 @@
 .sfw-toolcard .sfw-props{margin-bottom:10px}
 .sfw-toolcard .sfw-actions-row .sfw-btn{margin-top:0}
 /* What a click, R and Shift do. */
-.sfw-how{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--sfw-line);display:grid;gap:6px}
-.sfw-how:first-child{margin-top:0;padding-top:0;border-top:0}
-.sfw-how:empty{display:none}
-.sfw-how div{display:grid;grid-template-columns:42px 1fr;gap:8px;align-items:baseline}
-.sfw-how dt{font:600 11px/1.4 var(--sfw-font);color:var(--sfw-ink-2)}
-.sfw-how dd{margin:0;font:400 12px/1.4 var(--sfw-font);color:var(--sfw-muted)}
 
 /* Folded sections of the side panel: there when wanted, out of the way otherwise. */
 .sfw-fold>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;list-style:none;

@@ -213,7 +213,7 @@ const CHECKS = {
     !r.shown && 'choosing the Block tool should bring up the block card',
     r.defaults !== '7,3,10,1' && `the card should open on ScaffoldPro's defaults 7 x 3 x 10 ft, 1 level; showed ${r.defaults}`,
     !(r.settings.widthFt === 8 && r.settings.depthFt === 6 && r.settings.heightFt === 13 && r.settings.braceFrontBack === 'slash') && `typing in the card did not reach the block: ${JSON.stringify(r.settings)}`,
-    !/Deck at/.test(r.summary || '') && `the card should say where the deck lands, said: ${r.summary}`,
+    r.summary && `the card should stay quiet when the block fits, said: ${r.summary}`,
     !(r.ghosts > 0) && 'hovering with the Block tool drew no ghost block',
     r.turned.steps !== (r.before + 1) % 4 && `R should turn the block a quarter turn (${r.before} -> ${r.turned.steps})`,
     !(r.turned.drew > 0) && 'R turned the block but drew no frame: the ghost waited for the mouse',

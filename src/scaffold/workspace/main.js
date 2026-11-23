@@ -11,7 +11,7 @@ import { ScaffoldState, stateBounds } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
-import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './catalog.js';
+import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
 import { BLOCK_DEFAULTS } from './planning.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
@@ -40,21 +40,6 @@ const ICONS = {
   fold: svg('<path d="M5 8l5 5 5-5"/>'),
   close: svg('<path d="M5 5l10 10M15 5L5 15"/>'),
   monitor: svg('<rect x="2.5" y="3.5" width="15" height="10" rx="1.5"/><path d="M7 16.5h6M10 13.5v3"/>'),
-};
-
-// What each tool does, in the three gestures a contractor needs: shown on the
-// tool's card so nothing has to be remembered or looked for.
-const TOOL_HOW = {
-  select: [['Click', 'Select a part. Click again for the one behind it.'], ['Drag', 'Left to right takes what is fully inside the box. Right to left takes anything it touches.'], ['Keys', 'Shift adds · Ctrl toggles · Delete removes · Esc lets go']],
-  standard: [['Click', 'Stand a leg on the grid. Click a leg again to add a piece on top.']],
-  block: [['Click', 'Place the block. It snaps onto a block beside it.'], ['R', 'Turn it a quarter turn.']],
-  ledger: [['Click', 'A rosette: the ledger runs to the nearest open standard.'], ['Shift', 'Fill every bay at that level.']],
-  brace: [['Click', 'A bay face: the brace climbs four rosettes.'], ['R', 'Lean it the other way.'], ['Shift', 'Brace the outside faces at that height.']],
-  truss: [['Click', 'A rosette: the truss runs to the rosette its own length away.'], ['R', 'Turn it to the next rosette it can reach.'], ['Shift', 'Fill the face end to end.']],
-  bracket: [['Click', 'A rosette: the bracket hangs pointing out of the scaffold.'], ['R', 'Turn it to the next free direction.']],
-  plank: [['Click', 'A ledger: decks the bay on that side of it.'], ['R', 'Turn the boards to run the other way.'], ['Shift', 'Deck the whole run.']],
-  liveload: [['Click', 'A ledger: loads the bay on that side of it.'], ['R', 'Load the other side.'], ['Shift', 'Load the whole run.']],
-  erase: [['Click', 'Remove a part. Ctrl+Z brings it back.']],
 };
 
 const TOOL_META = {
@@ -120,19 +105,18 @@ const TEMPLATE = `
           <button type="button" class="sfw-hist-btn" data-act="redo" aria-label="Redo" title="Nothing to redo" aria-disabled="true">${ICONS.redo}</button>
         </div>
       </div>
-      <!-- One card beside the toolbar for whichever tool is in hand: its options,
-           then what a click, R and Shift do. Each control names its tools in data-for. -->
+      <!-- One card beside the toolbar for whichever tool is in hand: its options
+           and nothing else. Each control names its tools in data-for. A tool with
+           no options (ledger, plank, erase) shows no card. -->
       <section class="sfw-group sfw-blockcard sfw-toolcard" id="sfw-toolcard" aria-label="Tool options">
         <h3><span id="sfw-tool-title">Standard</span><span class="sfw-card-btns">
           <button type="button" class="sfw-icon-btn" data-card-fold aria-label="Collapse the card" title="Collapse" aria-expanded="true">${ICONS.fold}</button>
           <button type="button" class="sfw-icon-btn" data-card-close aria-label="Hide the card" title="Hide (pick the tool again to show it)">${ICONS.close}</button></span></h3>
         <div class="sfw-toolcard-body">
           <label data-for="truss">Type<select id="sfw-cat"></select></label>
-          <label data-for="standard ledger brace truss bracket plank" class="sfw-gap">Size<select id="sfw-part"></select></label>
-          <p class="sfw-note" id="sfw-partnote" hidden></p>
+          <label data-for="standard truss bracket" class="sfw-gap">Size<select id="sfw-part"></select></label>
           <div data-for="standard">
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
-            <p class="sfw-note" id="sfw-stdh-note">0 places one piece of the size above. Any other height stacks the pieces for you.</p>
           </div>
           <div data-for="brace">
             <div class="sfw-grid2 sfw-mt">
@@ -164,12 +148,11 @@ const TEMPLATE = `
               <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
               <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
             </div>
-            <p class="sfw-note" id="sfw-block-summary"></p>
+            <p class="sfw-note" id="sfw-block-summary" hidden></p>
             <div class="sfw-blockcard-foot">
               <button type="button" class="sfw-btn ghost" data-block-reset>Reset</button>
             </div>
                     </div>
-          <dl class="sfw-how" id="sfw-how"></dl>
         </div>
 </section>
       <div class="sfw-hint" id="sfw-hint"></div>
@@ -582,17 +565,10 @@ class Workspace {
     sel.value = DEFAULT_PART[key];
     if (switchTool) this.tools.setCatalog(key, sel.value);
     else { this.tools.categoryKey = key; this.tools.partId = sel.value; }
-    this._updatePartNote();
   }
   _onPartChange() {
     const key = this.$('sfw-cat').value;
     this.tools.setCatalog(key, this.$('sfw-part').value);
-    this._updatePartNote();
-  }
-  _updatePartNote() {
-    const key = this.$('sfw-cat').value;
-    const part = getPart(key, this.$('sfw-part').value);
-    this.$('sfw-partnote').textContent = part ? `${CATALOG[key].code} · ${part.label} · generic tube, no part number` : '';
   }
 
   _applyToolUi(name) {
@@ -603,8 +579,8 @@ class Workspace {
     this.$('sfw-tool-title').textContent = TOOL_META[name]?.label || '';
     for (const el of this.root.querySelectorAll('#sfw-toolcard [data-for]')) el.hidden = !el.dataset.for.split(' ').includes(name);
     // Picking a tool brings its card back if it was hidden.
-    this.$('sfw-toolcard').hidden = false;
-    this.$('sfw-how').innerHTML = (TOOL_HOW[name] || []).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+    // ...unless the tool has nothing to set: an empty card is only clutter.
+    this.$('sfw-toolcard').hidden = ![...this.root.querySelectorAll('#sfw-toolcard [data-for]')].some(el => !el.hidden);
     // With the Truss tool, Type offers the three truss families and nothing else.
     for (const o of this.$('sfw-cat').options) o.hidden = CATEGORY_TOOL[o.value] !== 'truss';
     // The block card comes up with the Block tool, as ScaffoldPro's does.
@@ -670,24 +646,16 @@ class Workspace {
     this._updateBlockSummary();
   }
 
-  /** What the recipe works out to, so Height reads as the deck it is. */
+  /** Says something only when the block cannot be built as asked. */
   _updateBlockSummary() {
     const el = this.$('sfw-block-summary');
     if (!el) return;
     const plan = this.tools._blockPlan();
-    const ft = v => `${round(v, 2)} ft`;
-    const decks = plan.deckLifts.map(l => ft(this.state.liftZ(l)));
-    const standardFt = plan.segments.reduce((a, b) => a + b, 0);
-    const brace = v => ({ off: 'off', slash: '/', backslash: '\\' }[v] || 'off');
+    const decks = plan.deckLifts.length;
     const wanted = Math.round(Number(this.tools.blockSettings.plankedLevelsCount) || 0);
-    el.innerHTML =
-      `${ft(plan.widthFt)} × ${ft(plan.depthFt)} · ${plan.layoutX.bays} × ${plan.layoutY.bays} bay${plan.layoutX.bays * plan.layoutY.bays === 1 ? '' : 's'}<br>` +
-      (decks.length ? `Deck${decks.length === 1 ? '' : 's'} at <strong>${decks.join(', ')}</strong>` : '<strong>No deck fits under that height</strong>') +
-      ` · standards ${ft(standardFt)}` +
-      // Height caps the planked levels; say so rather than quietly placing fewer.
-      (decks.length && decks.length < wanted ? `<br><strong>Only ${decks.length} of ${wanted} planked levels fit under ${ft(plan.heightFt)}.</strong> Raise Height for more: decks go every ${round(this.state.liftZ(8) - this.state.liftZ(4), 2)} ft.` : '') +
-      `<br>Braces: front/back ${brace(this.tools.blockSettings.braceFrontBack)} · left/right ${brace(this.tools.blockSettings.braceLeftRight)}` +
-      `<br>Guardrails: ${this.tools.blockSettings.guardrails && decks.length ? 'two rails round each deck' : 'off'}`;
+    el.textContent = !decks && wanted ? 'No deck fits under that height.'
+      : decks < wanted ? `Only ${decks} of ${wanted} planked levels fit under ${round(plan.heightFt, 2)} ft.` : '';
+    el.hidden = !el.textContent;
   }
 
   _bindInputs() {
@@ -713,7 +681,6 @@ class Workspace {
     this.$('sfw-view-save').addEventListener('click', () => this._saveView());
     this.$('sfw-stdh').addEventListener('input', e => {
       this.tools.standardTargetHeightFt = Math.max(0, Number(e.target.value) || 0);
-      this._updateStandardPlanNote();
     });
     this.$('sfw-brace-dir').addEventListener('change', e => { this.tools.braceDirection = e.target.value; });
     this.$('sfw-brace-filter').addEventListener('change', e => { this.tools.braceFaceFilter = e.target.value; });
@@ -742,26 +709,6 @@ class Workspace {
       this.state.clearLiveLoads();
       this.$('sfw-hint').textContent = 'Bay live loads cleared; back to the uniform psf over every deck.';
     });
-  }
-
-  /** Spell out the stack a typed target height will build. */
-  _updateStandardPlanNote() {
-    const el = this.$('sfw-stdh-note');
-    if (!el) return;
-    const target = this.tools.standardTargetHeightFt || 0;
-    if (!target) {
-      el.textContent = '0 uses the catalog size above. Any other height plans the stack for you.';
-      return;
-    }
-    const plan = this.tools.standardStackPlan();
-    if (!plan.length) { el.textContent = 'No catalog segments available to plan a stack.'; return; }
-    const total = plan.reduce((a, b) => a + b, 0);
-    const counts = new Map();
-    for (const len of plan) counts.set(len, (counts.get(len) || 0) + 1);
-    const parts = [...counts].sort((a, b) => b[0] - a[0]).map(([len, n]) => `${n} x ${round(len, 3)} ft`);
-    const shortBy = target - total;
-    el.textContent = `${parts.join(' + ')} = ${round(total, 3)} ft` +
-      (Math.abs(shortBy) > 1e-6 ? ` (${shortBy > 0 ? 'short of' : 'over'} ${round(Math.abs(shortBy), 3)} ft — catalog sizes do not sum exactly)` : ' (exact)');
   }
 
   /** Live readout for whatever the hovered tool is about to place. */
