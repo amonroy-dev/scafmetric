@@ -112,10 +112,8 @@ const TEMPLATE = `
     <div class="sfw-stage" id="sfw-stage">
       <div class="sfw-stagebar">
         <div class="sfw-viewbar" role="toolbar" aria-label="View">
-          <button type="button" class="sfw-toggle" data-toggle="ortho" title="Orthographic projection">Orthographic</button>
-          <button type="button" class="sfw-toggle" data-toggle="skeleton" title="Centerline view">Lines</button>
           <button type="button" class="sfw-toggle is-on" data-toggle="legloads" title="Show leg loads">Leg loads</button>
-          <button type="button" class="sfw-toggle" data-toggle="panlock" title="Left-drag pans (for trackpads)">Pan</button>
+          
         </div>
         <div class="sfw-history" role="toolbar" aria-label="History">
           <button type="button" class="sfw-hist-btn" data-act="undo" aria-label="Undo" title="Nothing to undo" aria-disabled="true">${ICONS.undo}</button>

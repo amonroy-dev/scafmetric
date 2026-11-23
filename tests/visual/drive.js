@@ -168,7 +168,10 @@ window.__sv = (() => {
 
   function toggle(name) {
     const b = ws().root.querySelector('[data-toggle="' + name + '"]');
-    if (b) b.click();
+    if (b) { b.click(); return; }
+    // The centerline view has no button any more; it is still what the DXF
+    // exports, so the check flips it directly.
+    if (name === 'skeleton') { ws().skeleton = !ws().skeleton; ws()._rebuildContent(); }
   }
 
   function hint() { return ws().$('sfw-hint').textContent; }
