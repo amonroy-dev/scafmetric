@@ -47,7 +47,7 @@ const TOOL_META = {
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
   ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
-  truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a length in the catalog, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
+  truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a size in the panel, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
   plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
   liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a ledger to load the bay on that side at the bay patch psf. R flips the side. Shift+click loads every bay along the run.' },
@@ -129,80 +129,92 @@ const TEMPLATE = `
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
     <aside class="sfw-side">
+      <!-- Only what the tool in hand needs. Each control names its tools in data-for. -->
       <div class="sfw-group">
-        <h3>Catalog</h3>
-        <label>Category<select id="sfw-cat"></select></label>
-        <label class="sfw-mt">Size<select id="sfw-part"></select></label>
-        <p class="sfw-note" id="sfw-partnote"></p>
+        <h3 id="sfw-tool-title">Standard</h3>
+        <label data-for="truss">Type<select id="sfw-cat"></select></label>
+        <label data-for="standard ledger brace truss bracket plank" class="sfw-gap">Size<select id="sfw-part"></select></label>
+        <p class="sfw-note" id="sfw-partnote" hidden></p>
+        <div data-for="standard">
+          <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
+          <p class="sfw-note" id="sfw-stdh-note">0 places one piece of the size above. Any other height stacks the pieces for you.</p>
+        </div>
+        <div data-for="brace">
+          <div class="sfw-grid2 sfw-mt">
+            <label>Leans<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
+            <label>Sides<select id="sfw-brace-filter"><option value="all">All</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option></select></label>
+          </div>
+          <label class="sfw-mt">Shift fills<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
+        </div>
+        <div data-for="liveload">
+          <label>Load on each bay<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
+        </div>
+        <div data-for="select">
+          <div id="sfw-props" class="sfw-props"></div>
+          <div class="sfw-actions-row">
+            <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
+            <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
+          </div>
+        </div>
+        <p class="sfw-note" data-for="block">Set the block in the card on the canvas, then click the grid to place it.</p>
+        <p class="sfw-note" data-for="erase">Click a part to remove it. Ctrl+Z brings it back.</p>
       </div>
       <div class="sfw-group">
-        <h3>Base</h3>
-        <label>Standard target height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = single segment"><i>ft</i></span></label>
-        <p class="sfw-note" id="sfw-stdh-note">0 uses the catalog size above. Any other height plans the stack for you.</p>
-        <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
-        <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
-        <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
-        <dl class="sfw-counts" id="sfw-counts"></dl>
-        <button type="button" class="sfw-btn ghost" id="sfw-clear">Clear all</button>
+        <h3>Send to beam</h3>
+        <div class="sfw-grid2">
+          <label>Beam runs<select id="sfw-axis"><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
+          <label>Beam line at<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
+        </div>
+        <p class="sfw-note">Beam span: <strong id="sfw-span">—</strong>. The first leg on the line sits over the left support.</p>
+        <button type="button" class="sfw-btn" id="sfw-pick">Pick the legs on the beam</button>
+        <div class="sfw-totals" id="sfw-totals"></div>
+        <div class="sfw-table-wrap"><table class="sfw-table"><thead><tr><th>Leg</th><th>From left</th><th>Dead</th><th>Live</th></tr></thead><tbody id="sfw-rows"></tbody></table></div>
+        <p class="sfw-warn" id="sfw-warn" hidden></p>
       </div>
       <div class="sfw-group">
         <h3>Loads</h3>
-        <div class="sfw-grid2">
-          <label>Live load<span class="sfw-u"><input type="number" id="sfw-live" min="0" step="any" value="${DEFAULT_LIVE_LOAD_PSF}"><i>psf</i></span></label>
-          <label>Plank wt<span class="sfw-u"><input type="number" id="sfw-plank" min="0" step="any" value="${DEFAULT_COMPONENTS.plank.areaWeightLbPerFt2}"><i>psf</i></span></label>
-        </div>
-        <div class="sfw-grid2 sfw-mt">
-          <label>Bay patch<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
-          <label>Mode<select id="sfw-live-mode"><option value="uniform">Uniform over decks</option><option value="bays">Placed bay patches</option></select></label>
-        </div>
+        <label>Live load on decks<span class="sfw-u"><input type="number" id="sfw-live" min="0" step="any" value="${DEFAULT_LIVE_LOAD_PSF}"><i>psf</i></span></label>
         <p class="sfw-note" id="sfw-live-note"></p>
-        <button type="button" class="sfw-btn ghost" id="sfw-live-clear">Clear bay loads</button>
+        <details class="sfw-fold">
+          <summary>More load settings</summary>
+          <div class="sfw-grid2 sfw-mt">
+            <label>Plank weight<span class="sfw-u"><input type="number" id="sfw-plank" min="0" step="any" value="${DEFAULT_COMPONENTS.plank.areaWeightLbPerFt2}"><i>psf</i></span></label>
+            <label>Live load from<select id="sfw-live-mode"><option value="uniform">Every deck</option><option value="bays">Loaded bays only</option></select></label>
+          </div>
+          <button type="button" class="sfw-btn ghost" id="sfw-live-clear">Clear loaded bays</button>
+        </details>
       </div>
-      <div class="sfw-group">
-        <h3>Selection</h3>
-        <div id="sfw-props" class="sfw-props"></div>
-        <div class="sfw-actions-row">
-          <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
-          <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
-        </div>
-      </div>
-      <div class="sfw-group">
-        <h3>Bracing</h3>
-        <div class="sfw-grid2">
-          <label>Direction<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
-          <label>Faces<select id="sfw-brace-filter"><option value="all">All</option><option value="front">Front</option><option value="back">Back</option><option value="left">Left</option><option value="right">Right</option></select></label>
-        </div>
-        <label class="sfw-mt">Every nth bay<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
-        <p class="sfw-note">Hover a bay face with the Brace tool; <strong>R</strong> flips direction, <strong>SHIFT</strong>+click fills the perimeter.</p>
-      </div>
-      <div class="sfw-group">
-        <h3>Guardrails</h3>
+      <details class="sfw-group sfw-fold">
+        <summary>Base</summary>
+        <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
+        <label class="sfw-check"><input type="checkbox" id="sfw-sill" checked><span>Wood sill</span></label>
+        <label class="sfw-check"><input type="checkbox" id="sfw-collar" checked><span>Base collar</span></label>
+      </details>
+      <details class="sfw-group sfw-fold">
+        <summary>Guardrails</summary>
+        <p class="sfw-note">Blocks come with their rails. This adds rails round every deck you placed by hand.</p>
         <div class="sfw-actions-row">
           <button type="button" class="sfw-btn" id="sfw-rails">Add to decks</button>
           <button type="button" class="sfw-btn ghost" id="sfw-rails-clear">Clear</button>
         </div>
-      </div>
-      <div class="sfw-group">
-        <h3>Saved views <button type="button" class="sfw-link" id="sfw-view-save">Save current</button></h3>
-        <div id="sfw-views" class="sfw-views-list"></div>
-      </div>
-      <div class="sfw-group">
-        <h3>Bill of materials <button type="button" class="sfw-link" id="sfw-bom-csv">Export CSV</button></h3>
+      </details>
+      <details class="sfw-group sfw-fold">
+        <summary>Parts list <span class="sfw-fold-sum" id="sfw-bom-sum"></span></summary>
+        <dl class="sfw-counts" id="sfw-counts"></dl>
         <div class="sfw-table-wrap sfw-bom-wrap"><table class="sfw-table sfw-bom"><thead><tr><th>Item</th><th>Qty</th><th>Wt (lb)</th></tr></thead><tbody id="sfw-bom-rows"></tbody></table></div>
         <div class="sfw-totals" id="sfw-bom-total"></div>
-        <button type="button" class="sfw-btn ghost sfw-mt" id="sfw-dxf">Export DXF centerlines</button>
-      </div>
-      <div class="sfw-group">
-        <h3>Beam and import</h3>
-        <div class="sfw-grid2">
-          <label>Runs along<select id="sfw-axis"><option value="x">X</option><option value="y">Y</option></select></label>
-          <label>Position<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
+        <div class="sfw-actions-row">
+          <button type="button" class="sfw-btn ghost" id="sfw-bom-csv">Export CSV</button>
+          <button type="button" class="sfw-btn ghost" id="sfw-dxf">Export DXF</button>
         </div>
-        <p class="sfw-note">Span from beam workspace: <strong id="sfw-span">—</strong>. Left support = first leg on the line.</p>
-        <button type="button" class="sfw-btn" id="sfw-pick">Select legs on beam</button>
-        <div class="sfw-totals" id="sfw-totals"></div>
-        <div class="sfw-table-wrap"><table class="sfw-table"><thead><tr><th>Leg</th><th>x<sub>L</sub></th><th>Dead</th><th>Live</th></tr></thead><tbody id="sfw-rows"></tbody></table></div>
-        <p class="sfw-warn" id="sfw-warn" hidden></p>
+      </details>
+      <details class="sfw-group sfw-fold">
+        <summary>Saved views</summary>
+        <button type="button" class="sfw-btn ghost" id="sfw-view-save">Save this view</button>
+        <div id="sfw-views" class="sfw-views-list"></div>
+      </details>
+      <div class="sfw-group">
+        <button type="button" class="sfw-btn ghost sfw-nomt" id="sfw-clear">Clear all</button>
       </div>
     </aside>
   </div>
@@ -570,6 +582,11 @@ class Workspace {
   _applyToolUi(name) {
     for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
     this.$('sfw-hint').textContent = TOOL_META[name]?.hint || '';
+    // The side panel shows only what this tool needs.
+    this.$('sfw-tool-title').textContent = TOOL_META[name]?.label || '';
+    for (const el of this.root.querySelectorAll('.sfw-side [data-for]')) el.hidden = !el.dataset.for.split(' ').includes(name);
+    // With the Truss tool, Type offers the three truss families and nothing else.
+    for (const o of this.$('sfw-cat').options) o.hidden = CATEGORY_TOOL[o.value] !== 'truss';
     // The block card comes up with the Block tool, as ScaffoldPro's does.
     const card = this.$('sfw-blockcard');
     if (card) {
@@ -1065,6 +1082,8 @@ class Workspace {
     this.$('sfw-bom-rows').innerHTML = bom.lineItems.length
       ? bom.lineItems.map(r => `<tr><td>${r.description}</td><td>${r.quantity}</td><td>${r.totalWeightLb}</td></tr>`).join('')
       : '<tr><td colspan="3" class="sfw-empty">Nothing placed yet.</td></tr>';
+    const sum = this.$('sfw-bom-sum');
+    if (sum) sum.textContent = bom.summary.totalQuantity ? `${bom.summary.totalQuantity} pieces · ${Math.round(bom.summary.totalWeightLb).toLocaleString('en-US')} lb` : '';
     this.$('sfw-bom-total').innerHTML =
       `<div><dt>Lines</dt><dd>${bom.summary.lineItemCount}</dd></div>` +
       `<div><dt>Pieces</dt><dd>${bom.summary.totalQuantity}</dd></div>` +
@@ -1177,7 +1196,7 @@ class Workspace {
     const located = this._legsForImport().sort((a, b) => a.locationFt - b.locationFt);
     this.$('sfw-rows').innerHTML = located.length
       ? located.map(r => `<tr class="${r.onSpan && r.onBeam ? '' : 'sfw-off'}"><td>${r.leg.id}</td><td>${round(r.locationFt, 2)}</td><td>${round(r.leg.deadLb, 0)}</td><td>${round(r.leg.liveLb, 0)}</td></tr>`).join('')
-      : '<tr><td colspan="4" class="sfw-empty">No legs selected — use Select legs on beam.</td></tr>';
+      : '<tr><td colspan="4" class="sfw-empty">No legs picked yet. Press Pick the legs on the beam.</td></tr>';
     const { imported, skipped } = toBeamPointLoads(located);
     this._importable = imported;
     const dead = imported.reduce((s, e) => s + e.deadLb, 0), live = imported.reduce((s, e) => s + e.liveLb, 0);

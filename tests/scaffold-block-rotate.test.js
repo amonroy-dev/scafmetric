@@ -260,3 +260,18 @@ test('guardrails can be switched off on the block card', () => {
   tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
   assert.equal(s.guardrails.size, 0);
 });
+
+test('a block lands with its standards on the grid lines, turned or not', () => {
+  const s = new ScaffoldState({ snapStep: 1 });
+  const tools = toolsFor(s);
+  const plan = tools._blockPlan(); // 7 x 3 ft
+  for (const steps of [0, 1]) {
+    tools.rotationSteps = steps;
+    const c = tools._blockCenterOnGrid({ x: 10.3, y: 4.8 }, plan);
+    const world = tools._blockWorld({ plan, center: c, rotationSteps: steps });
+    for (const p of world.standards) {
+      assert.ok(Math.abs(p.x - Math.round(p.x)) < 1e-9 && Math.abs(p.y - Math.round(p.y)) < 1e-9, `on the lines (turn ${steps}): ${p.x}, ${p.y}`);
+    }
+    assert.ok(Math.hypot(c.x - 10.3, c.y - 4.8) < 1, 'and still under the pointer');
+  }
+});

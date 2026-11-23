@@ -858,11 +858,26 @@ export class Tools {
 
   /** Where the block would go with the pointer at `e`, or null off the ground. */
   _blockPlacement(e) {
-    const g = this._groundSnap(e);
-    if (!g) return null;
+    this.engine.setPointerFromEvent(e);
+    const p = this.engine.groundPoint();
+    if (!p) return null;
     const plan = this._blockPlan();
+    const g = this._blockCenterOnGrid(p, plan);
     const c = snapBlockCenter(g, plan, this.rotationSteps, [...this.state.standards.values()]);
     return { plan, center: { x: c.x, y: c.y }, snapped: c.snapped, rotationSteps: this.rotationSteps };
+  }
+
+  /**
+   * The block centre nearest the pointer that puts the block's standards ON the
+   * grid lines. Snapping the centre itself left a 7 x 3 ft block's standards
+   * half a foot off the lines, between them; the corner standard is what is
+   * snapped, and the centre follows from it.
+   */
+  _blockCenterOnGrid(p, plan) {
+    const turned = this.rotationSteps % 2 === 1;
+    const halfX = (turned ? plan.depthFt : plan.widthFt) / 2;
+    const halfY = (turned ? plan.widthFt : plan.depthFt) / 2;
+    return { x: this.state.snap(p.x - halfX) + halfX, y: this.state.snap(p.y - halfY) + halfY };
   }
 
   /** A placement in world feet: plain data the ghost and the placement share. */
