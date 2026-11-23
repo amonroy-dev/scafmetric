@@ -9,7 +9,7 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame,
@@ -28,29 +28,25 @@ import {
   buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
   bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
 } from './braces.js';
+import { marqueeFromDrag, marqueeHits, combineSelection, flatRectangleCorners, MARQUEE_DRAG_THRESHOLD_PX } from './screenmarquee.js';
 import { bracketDirections, chooseBracketDirection, runCentroid } from './bracketdirs.js';
 
 // How far from the tube the horizontal side-pick crossing may land before it
 // stops meaning "the cursor is on this side of that ledger".
 const SIDE_PICK_MAX_FT = 4;
-const DRAG_PX = 4;
+const DRAG_PX = MARQUEE_DRAG_THRESHOLD_PX;
+// Truss fits, from ScaffoldPro: two degrees off a run still counts as along it
+// (rosettes sit on a grid, so this only absorbs noise); an inch off its own
+// length still fits (the frames do not stretch); 0.05 ft is the same lift.
+const TRUSS_AXIS_TOL_RAD = (2 * Math.PI) / 180;
+const TRUSS_SPAN_TOL_FT = 1 / 12;
+const TRUSS_LEVEL_TOL_FT = 0.05;
 export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
-const PLANE_GEO = new THREE.PlaneGeometry(1, 1);
 // The block ghost's footprint: blue, and green once snapped (ScaffoldPro's cue).
 const BLOCK_OUTLINE = new THREE.LineBasicMaterial({ color: 0x2563eb });
 const BLOCK_OUTLINE_SNAPPED = new THREE.LineBasicMaterial({ color: 0x16a34a });
-
-function normalizeRect(a, b) {
-  return { xMin: Math.min(a.x, b.x), xMax: Math.max(a.x, b.x), yMin: Math.min(a.y, b.y), yMax: Math.max(a.y, b.y) };
-}
-function windowContains(sel, r) {
-  return r.xMin >= sel.xMin && r.xMax <= sel.xMax && r.yMin >= sel.yMin && r.yMax <= sel.yMax;
-}
-function crossingIntersects(sel, r) {
-  return !(r.xMax < sel.xMin || r.xMin > sel.xMax || r.yMax < sel.yMin || r.yMin > sel.yMax);
-}
 
 // Order-free key for a ledger between two points. Ledger ends are copied from
 // node coordinates, so equal points give equal keys.
@@ -90,6 +86,8 @@ export class Tools {
     // Plank tool: which way the boards run, per lift (R), as ScaffoldPro keeps
     // it per level. Keyed by lift height; the value is the run axis angle.
     this.plankAxisByLift = new Map();
+    // Truss tool: steps round the rosettes the truss can reach (R).
+    this.trussTurn = 0;
     // Why the last brace hover found nothing: 'no-face' | 'too-short' | 'already-braced'.
     this.braceMiss = null;
     this.selection = new Set();
@@ -97,8 +95,8 @@ export class Tools {
     this._marquee = null;
 
     this.ghostGroup = new THREE.Group();
-    this.overlayGroup = new THREE.Group();
-    engine.scene.add(this.ghostGroup, this.overlayGroup);
+    engine.scene.add(this.ghostGroup);
+    this._marqueeBox = null; // the selection box, a DOM element over the canvas
 
     const el = engine.renderer.domElement;
     this._bound = [];
@@ -168,16 +166,9 @@ export class Tools {
     clearGroup(this.ghostGroup);
     this.engine.invalidate?.();
   }
+  /** Hide the selection box. */
   _clearOverlay() {
-    if (!this.overlayGroup.children.length) return;
-    // The marquee is redrawn on every move with its own materials and edge
-    // geometry; free them rather than leak a set per pointer event.
-    for (const c of this.overlayGroup.children) {
-      c.material.dispose();
-      if (c.geometry !== PLANE_GEO) c.geometry.dispose();
-    }
-    this.overlayGroup.clear();
-    this.engine.invalidate?.();
+    if (this._marqueeBox) this._marqueeBox.style.display = 'none';
   }
 
   /**
@@ -229,21 +220,17 @@ export class Tools {
   _onDown(e) {
     if (e.button !== 0 || this._navGesture(e)) return;
     this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
-    if (!e.shiftKey) {  // left-drag marquees in any tool; left-click still places
-      const g = this.engine.projectClientToGround(e.clientX, e.clientY);
-      if (g) this._marquee = { start: { x: g.x, y: g.y }, current: { x: g.x, y: g.y }, startClientX: e.clientX, currentClientX: e.clientX };
-    }
+    // A left-drag draws a selection box in any tool and any view; a click
+    // without a drag still belongs to the tool.
+    this._marquee = { startClientX: e.clientX, startClientY: e.clientY, currentClientX: e.clientX, currentClientY: e.clientY };
   }
 
   _onMove(e) {
     if (this._down) this._down.moved = Math.max(Math.abs(e.clientX - this._down.x), Math.abs(e.clientY - this._down.y));
     if (this._marquee && (e.buttons & 1)) {
-      const g = this.engine.projectClientToGround(e.clientX, e.clientY);
-      if (g) {
-        this._marquee.current = { x: g.x, y: g.y };
-        this._marquee.currentClientX = e.clientX;
-        if (this._down && this._down.moved >= DRAG_PX) this._drawMarquee();
-      }
+      this._marquee.currentClientX = e.clientX;
+      this._marquee.currentClientY = e.clientY;
+      if (this._down && this._down.moved >= DRAG_PX) { this._clearGhost(); this._drawMarquee(); }
       return;
     }
     if (this._marquee && !(e.buttons & 1)) { this._marquee = null; this._clearOverlay(); }
@@ -261,7 +248,14 @@ export class Tools {
     this._clearOverlay();
     if (!down) return;
     const dragged = down.moved >= DRAG_PX;
-    if (marquee && dragged) { this._finishMarquee(marquee, down.ctrl || this.tool !== 'select'); return; }
+    if (marquee && dragged) {
+      marquee.currentClientX = e.clientX;
+      marquee.currentClientY = e.clientY;
+      // Shift adds and Ctrl toggles, as in ScaffoldPro. Outside Select a box
+      // adds to what is selected rather than replacing it.
+      this._finishMarquee(marquee, { shiftKey: down.shift || this.tool !== 'select', ctrlKey: down.ctrl });
+      return;
+    }
     if (dragged) return; // camera/aborted drag
     this._act(e);
     // The ghost previewed what this click just placed. Show what the next click
@@ -270,37 +264,61 @@ export class Tools {
     this._updateGhost(e);
   }
 
-  _drawMarquee() {
-    this._clearOverlay();
-    const m = this._marquee;
-    const r = normalizeRect(m.start, m.current);
-    const w = Math.max(r.xMax - r.xMin, 1e-4);
-    const d = Math.max(r.yMax - r.yMin, 1e-4);
-    const crossing = m.currentClientX < m.startClientX;
-    // Source palette: window = blue, crossing = green.
-    const edgeColor = crossing ? 0x34d399 : 0x60a5fa;
-    const fillColor = crossing ? 0x6ee7b7 : 0x93c5fd;
-    const opacity = crossing ? 0.12 : 0.08;
-    const fill = new THREE.Mesh(PLANE_GEO, new THREE.MeshBasicMaterial({ color: fillColor, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
-    fill.position.set((r.xMin + r.xMax) / 2, (r.yMin + r.yMax) / 2, 0.04);
-    fill.scale.set(w, d, 1);
-    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(PLANE_GEO), new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.95 }));
-    edge.position.copy(fill.position);
-    edge.scale.copy(fill.scale);
-    this.overlayGroup.add(fill, edge);
-    this.engine.invalidate?.();
+  // --- the selection box (ScaffoldPro's screen marquee) ------------------------
+  // Drawn on the screen, not on the ground, so it works in every view. Left to
+  // right is a Window (solid blue: wholly inside), right to left a Crossing
+  // (dashed green: anything touched). See screenmarquee.js.
+
+  _marqueeGeometry(m) {
+    return marqueeFromDrag(this.engine.renderer.domElement.getBoundingClientRect(), this.engine.camera, m);
   }
 
-  _finishMarquee(m, additive) {
-    const rect = normalizeRect(m.start, m.current);
-    const crossing = m.currentClientX < m.startClientX;
-    const hit = [];
-    for (const s of this.state.standards.values()) {
-      const r = { xMin: s.x - 0.1, xMax: s.x + 0.1, yMin: s.y - 0.1, yMax: s.y + 0.1 };
-      if (crossing ? crossingIntersects(rect, r) : windowContains(rect, r)) hit.push(s.id);
+  _drawMarquee() {
+    const canvas = this.engine.renderer.domElement;
+    if (!this._marqueeBox) {
+      const box = document.createElement('div');
+      box.setAttribute('aria-hidden', 'true');
+      Object.assign(box.style, { position: 'fixed', zIndex: '140', pointerEvents: 'none', boxSizing: 'border-box', display: 'none' });
+      document.body.appendChild(box);
+      this._marqueeBox = box;
     }
-    if (additive) for (const id of hit) this.selection.add(id);
-    else this.selection = new Set(hit);
+    const bounds = canvas.getBoundingClientRect();
+    const { rect, mode } = this._marqueeGeometry(this._marquee);
+    const left = bounds.left + Math.max(0, rect.left), top = bounds.top + Math.max(0, rect.top);
+    const right = bounds.left + Math.min(bounds.width, rect.right), bottom = bounds.top + Math.min(bounds.height, rect.bottom);
+    this._marqueeBox.dataset.marquee = mode;
+    Object.assign(this._marqueeBox.style, {
+      display: 'block', left: `${left}px`, top: `${top}px`,
+      width: `${Math.max(0, right - left)}px`, height: `${Math.max(0, bottom - top)}px`,
+      border: mode === 'window' ? '1px solid #2f6fed' : '1px dashed #0f7b0f',
+      background: mode === 'window' ? 'rgba(47, 111, 237, 0.08)' : 'rgba(15, 123, 15, 0.08)',
+    });
+  }
+
+  /** Every part as the box tests it: tubes as segments, decks and loads as outlines. */
+  _marqueeParts() {
+    const s = this.state;
+    const segments = [], outlines = [];
+    const base = s.baseOffsetFt();
+    // A standard is its whole height, ground to top, so a box round any of it counts.
+    for (const c of s.standards.values()) segments.push({ id: c.id, a: [c.x, c.y, 0], b: [c.x, c.y, base + s.standardHeightFt(c)] });
+    for (const map of [s.ledgers, s.braces, s.guardrails]) for (const m of map.values()) segments.push({ id: m.id, a: m.a, b: m.b });
+    for (const k of s.brackets.values()) for (const m of sideBracketWorldMembers(k, k.dir, k.lengthFt)) segments.push({ id: k.id, a: m.a, b: m.b });
+    for (const t of s.trusses.values()) for (const m of trussWorldMembers(t.a, t.b, t.family)) segments.push({ id: t.id, a: m.a, b: m.b });
+    for (const d of s.plankBays()) {
+      outlines.push({ id: d.id, corners: [[d.x0, d.y0, d.z], [d.x1, d.y0, d.z], [d.x1, d.y1, d.z], [d.x0, d.y1, d.z]] });
+    }
+    for (const p of s.liveLoadPatches()) {
+      const corners = flatRectangleCorners({ x: p.center[0], y: p.center[1] }, p.widthFt / 2, p.lengthFt / 2, p.rotationZ, p.center[2]);
+      outlines.push({ id: p.id, corners: corners.map(c => [c.x, c.y, c.z]) });
+    }
+    return { segments, outlines };
+  }
+
+  _finishMarquee(m, modifiers) {
+    const { rect, mode, projector } = this._marqueeGeometry(m);
+    const hits = marqueeHits(projector, rect, mode, this._marqueeParts());
+    this.selection = new Set(combineSelection([...this.selection], hits, modifiers));
     this.hooks.onSelectionChange?.([...this.selection]);
   }
 
@@ -384,14 +402,105 @@ export class Tools {
       return;
     }
 
-    // Trusses still take two nodes.
+    // One click: the truss runs from this rosette to the one its own length
+    // away along the run; R steps to the next direction, SHIFT fills the face.
     if (this.tool === 'truss') {
-      if (!this.pending) { this.pending = node; return; }
-      const a = this.pending;
-      this.pending = null;
-      if (a.x === node.x && a.y === node.y) return;
-      s.addTruss([a.x, a.y, a.z], [node.x, node.y, node.z]);
+      const span = this._trussSpan(node);
+      if (!span) return;
+      if (e.shiftKey) { this._batchFillTrusses(span); return; }
+      s.addTruss(span.a, span.b, this._trussFamily());
     }
+  }
+
+  // --- trusses ----------------------------------------------------------------
+  // Placed as ScaffoldPro places them (its trussPlacement.ts): a truss reaches
+  // from one rosette to another exactly its own length away, at the same lift
+  // and along a run, so from any rosette there are only a few places it can
+  // go. One is offered, R steps to the next, and the choice sticks.
+
+  _trussFamily() { return CATALOG[this.categoryKey]?.family || 'truss'; }
+
+  _trussExists(a, b) {
+    const k = segmentKey(a, b);
+    for (const t of this.state.trusses.values()) if (segmentKey(t.a, t.b) === k) return true;
+    return false;
+  }
+
+  /** The rosettes a truss of the chosen length can reach from here, by bearing. */
+  _trussCandidates(node) {
+    const part = this.currentPart();
+    if (!part || !node || !CATALOG[this.categoryKey]?.family) return [];
+    const along = (bearing, axis) => {
+      const d = Math.abs(Math.atan2(Math.sin(bearing - axis), Math.cos(bearing - axis)));
+      return d <= TRUSS_AXIS_TOL_RAD || d >= Math.PI - TRUSS_AXIS_TOL_RAD;
+    };
+    // Along a run, not merely the right distance away: a truss replaces a
+    // ledger on a bay line and never cuts a bay corner to corner. Runs come
+    // from the ledgers meeting this standard, or the plan axes before any.
+    const axes = [];
+    for (const l of this.state.ledgers.values()) {
+      for (const [p, q] of [[l.a, l.b], [l.b, l.a]]) {
+        if (Math.hypot(p[0] - node.x, p[1] - node.y) > 0.01) continue;
+        const bearing = Math.atan2(q[1] - p[1], q[0] - p[0]);
+        if (Math.hypot(q[0] - p[0], q[1] - p[1]) > 0.1 && !axes.some(a => along(bearing, a))) axes.push(bearing);
+      }
+    }
+    if (!axes.length) axes.push(0, Math.PI / 2);
+    const out = [];
+    for (const n of this._nodesAtLevel(node.level)) {
+      if (Math.abs(n.z - node.z) > TRUSS_LEVEL_TOL_FT) continue;
+      const dist = Math.hypot(n.x - node.x, n.y - node.y);
+      if (Math.abs(dist - part.lengthFt) > TRUSS_SPAN_TOL_FT) continue;
+      const bearing = Math.atan2(n.y - node.y, n.x - node.x);
+      if (!axes.some(a => along(bearing, a))) continue;
+      if (this._trussExists([node.x, node.y, node.z], [n.x, n.y, n.z])) continue;
+      out.push({ target: n, bearing });
+    }
+    return out.sort((p, q) => p.bearing - q.bearing);
+  }
+
+  /** The span R has landed on from this rosette, or null. */
+  _trussSpan(node) {
+    const c = this._trussCandidates(node);
+    if (!c.length) return null;
+    const t = c[((this.trussTurn % c.length) + c.length) % c.length].target;
+    return { a: [node.x, node.y, node.z], b: [t.x, t.y, t.z], choices: c.length };
+  }
+
+  /**
+   * SHIFT: the whole face. Steps one truss length at a time both ways along
+   * the span and stops at the first step with no rosette to land on or a truss
+   * already there. It does not turn corners.
+   */
+  _trussFaceRun(span) {
+    const len = Math.hypot(span.b[0] - span.a[0], span.b[1] - span.a[1]);
+    if (len < 1e-6) return [];
+    const ux = (span.b[0] - span.a[0]) / len, uy = (span.b[1] - span.a[1]) / len;
+    const nodes = this.state.nodes().filter(n => Math.abs(n.z - span.a[2]) <= TRUSS_LEVEL_TOL_FT);
+    const next = (from, sign) => {
+      const x = from[0] + ux * len * sign, y = from[1] + uy * len * sign;
+      const n = nodes.find(q => Math.hypot(q.x - x, q.y - y) <= TRUSS_SPAN_TOL_FT);
+      return n ? [n.x, n.y, n.z] : null;
+    };
+    const run = [{ a: span.a, b: span.b }];
+    for (const [anchor, sign] of [[span.b, 1], [span.a, -1]]) {
+      let from = anchor;
+      for (let guard = 0; guard < 200; guard++) {
+        const to = next(from, sign);
+        if (!to || this._trussExists(from, to)) break;
+        run.push(sign === 1 ? { a: from, b: to } : { a: to, b: from });
+        from = to;
+      }
+    }
+    return run;
+  }
+
+  _batchFillTrusses(span) {
+    const run = this._trussFaceRun(span);
+    const family = this._trussFamily();
+    this.state.batch(() => { for (const r of run) this.state.addTruss(r.a, r.b, family); });
+    this.hooks.onBulkFill?.(run.length, 'truss');
+    return run.length;
   }
 
   /**
@@ -918,7 +1027,14 @@ export class Tools {
       this.sideFlipped = !this.sideFlipped;
       return done('liveload', this.sideFlipped ? 'flipped' : 'cursor');
     }
-    if (this.tool === 'truss' || this.tool === 'ledger') {
+    if (this.tool === 'truss') {
+      // The next rosette this truss can reach from the hovered one.
+      this.trussTurn++;
+      const node = this._hoverAt ? this._nearestNode(this._hoverAt) : null;
+      const span = node ? this._trussSpan(node) : null;
+      return done('truss', span ? span.choices : null);
+    }
+    if (this.tool === 'ledger') {
       // Nothing to rotate; report so the UI can say so rather than go silent.
       this.hooks.onRotate?.(this.tool, null);
     }
@@ -1063,9 +1179,16 @@ export class Tools {
       this.hooks.onPreview?.('bracket', dir ? 1 : 0, { dir });
       return;
     }
-    if (this.pending && this.tool === 'truss') {
-      const a = this.pending;
-      for (const m of buildTruss([a.x, a.y, a.z], [node.x, node.y, node.z], mat)) this.ghostGroup.add(m);
+    if (this.tool === 'truss') {
+      const span = this._trussSpan(node);
+      const family = this._trussFamily();
+      const spans = span ? (e.shiftKey ? this._trussFaceRun(span) : [span]) : [];
+      const meshes = spans.flatMap(r => buildTruss(r.a, r.b, mat, family));
+      for (const m of instanceMeshes(meshes)) this.ghostGroup.add(m);
+      this._pendingBatch = e.shiftKey && spans.length
+        ? { count: spans.length, label: 'truss', apply: () => this._batchFillTrusses(span) }
+        : null;
+      this.hooks.onPreview?.('truss', spans.length, { batch: e.shiftKey, family, choices: span ? span.choices : 0, lengthFt: this.currentPart()?.lengthFt });
     }
   }
 
@@ -1074,6 +1197,7 @@ export class Tools {
     window.removeEventListener('keydown', this._onKey);
     window.removeEventListener('keyup', this._onKeyUp);
     window.removeEventListener('blur', this._onBlur);
-    this.engine.scene.remove(this.ghostGroup, this.overlayGroup);
+    this.engine.scene.remove(this.ghostGroup);
+    this._marqueeBox?.remove();
   }
 }

@@ -180,9 +180,10 @@ export class ScaffoldState {
 
   addLedger(a, b) { this._pushHistory(); const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
   addBrace(a, b) { this._pushHistory(); const v = { id: this._id('B'), a: [...a], b: [...b] }; this.braces.set(v.id, v); this._emit(); return v; }
-  addTruss(a, b) {
+  /** A truss between two rosettes at one lift. family: 'light' | 'heavy' | 'truss'. */
+  addTruss(a, b, family = 'truss') {
     this._pushHistory();
-    const t = { id: this._id('T'), a: [...a], b: [...b] };
+    const t = { id: this._id('T'), a: [...a], b: [...b], family };
     this.trusses.set(t.id, t); this._emit(); return t;
   }
 
@@ -499,7 +500,7 @@ export class ScaffoldState {
     }
     for (const t of this.trusses.values()) {
       const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
-      const w = perFootLedger * trussMemberLengthFt(len); // every chord, post, tie and diagonal
+      const w = perFootLedger * trussMemberLengthFt(len, t.family); // every chord, post, tie and diagonal
       attribute(t.a[0], t.a[1], w / 2); attribute(t.b[0], t.b[1], w / 2);
     }
     for (const g of this.guardrails.values()) {

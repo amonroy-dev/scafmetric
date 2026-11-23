@@ -116,8 +116,9 @@ export function deriveBom(state) {
   if (state.trusses) {
     for (const t of state.trusses.values()) {
       const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
-      add('Trusses', `len${sizeKey(len)}`, `Triangular truss · ${formatFeetInches(len)}`,
-        1, trussWeightLb(len, state));
+      const family = TRUSS_FAMILY_LABEL[t.family] ? t.family : 'truss';
+      add('Trusses', `${family}${sizeKey(len)}`, `${TRUSS_FAMILY_LABEL[family]} · ${formatFeetInches(len)}`,
+        1, trussWeightLb(len, state, family));
     }
   }
   if (state.guardrails) {
@@ -168,8 +169,10 @@ export function bracketWeightLb(lengthFt, state) {
   return tubeWeightPerFoot(state.components.ledger) * sideBracketTubeLengthFt(lengthFt);
 }
 
-export function trussWeightLb(spanFt, state) {
-  return tubeWeightPerFoot(state.components.ledger) * trussMemberLengthFt(spanFt);
+export const TRUSS_FAMILY_LABEL = { light: 'Light truss', heavy: 'Heavy truss', truss: 'Truss' };
+
+export function trussWeightLb(spanFt, state, family = 'truss') {
+  return tubeWeightPerFoot(state.components.ledger) * trussMemberLengthFt(spanFt, family);
 }
 
 // Plain-text export (CSV) for the BOM table.

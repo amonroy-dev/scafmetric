@@ -15,7 +15,7 @@ import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL, getPart } from './cat
 import { BLOCK_DEFAULTS } from './planning.js';
 import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
-import { deriveBom, bomToCsv } from './bom.js';
+import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
 import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
@@ -47,7 +47,7 @@ const TOOL_META = {
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
   ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
-  truss: { label: 'Truss', icon: ICONS.truss, hint: 'Click two rosette nodes to span a truss between them.' },
+  truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a length in the catalog, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
   plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
   liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a ledger to load the bay on that side at the bay patch psf. R flips the side. Shift+click loads every bay along the run.' },
@@ -486,8 +486,10 @@ class Workspace {
       btn.addEventListener('click', () => {
         this.tools.setTool(btn.dataset.tool);
         // Keep the catalog dropdown in step with the chosen tool.
+        // Several categories can drive one tool (the three truss families):
+        // leave the dropdown alone when it already shows one of them.
         const cat = CATEGORIES.find(c => CATEGORY_TOOL[c] === btn.dataset.tool);
-        if (cat && this.$('sfw-cat').value !== cat) { this.$('sfw-cat').value = cat; this._onCategoryChange(false); }
+        if (cat && CATEGORY_TOOL[this.$('sfw-cat').value] !== btn.dataset.tool) { this.$('sfw-cat').value = cat; this._onCategoryChange(false); }
       });
     }
     // View toggles sit on the canvas and undo/redo in the header.
@@ -730,6 +732,14 @@ class Workspace {
         (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
       return;
     }
+    if (tool === 'truss') {
+      const name = (TRUSS_FAMILY_LABEL[info.family] || 'Truss').toLowerCase();
+      if (!count) { hint.textContent = `No rosette is ${round(info.lengthFt, 2)} ft away along a run at this lift. Pick another length, or another rosette.`; return; }
+      hint.textContent = info.batch
+        ? `SHIFT: ${count} ${name}${count === 1 ? '' : 'es'} along this face — click or press Enter.`
+        : `Click to place the ${round(info.lengthFt, 2)} ft ${name}.${info.choices > 1 ? ' R turns it to the next rosette.' : ''} SHIFT fills the face.`;
+      return;
+    }
     if (tool === 'bracket') {
       hint.textContent = info.dir
         ? `Click to hang the bracket pointing ${compassOf(info.dir)}. R turns it to the next free direction.`
@@ -770,6 +780,11 @@ class Workspace {
       const sel = this.$('sfw-brace-dir');
       if (sel) sel.value = value;
       hint.textContent = `Bracing direction: ${value}.`;
+      return;
+    }
+    if (tool === 'truss') {
+      if (value === null) hint.textContent = 'Hover a rosette the truss can start from, then press R to turn it.';
+      else if (value < 2) hint.textContent = 'This truss can only run one way from this rosette.';
       return;
     }
     if (tool === 'bracket') {
@@ -889,7 +904,7 @@ class Workspace {
     }
     for (const t of g.trusses || []) {
       const mat = this._matFor(t.id, MATERIALS.ledger);
-      for (const m of buildTruss(t.a, t.b, mat)) add(m, { id: t.id, kind: 'truss' });
+      for (const m of buildTruss(t.a, t.b, mat, t.family)) add(m, { id: t.id, kind: 'truss' });
     }
     for (const gr of g.guardrails || []) {
       const mat = this._matFor(gr.id, MATERIALS.brace);
@@ -1000,7 +1015,8 @@ class Workspace {
       const m = map.get(id);
       if (m) {
         const len = Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]);
-        return [['Type', m.kind ? `${label} (${m.kind})` : label], ['Length', `${r(len)} ft`],
+        const type = map === this.state.trusses ? (TRUSS_FAMILY_LABEL[m.family] || 'Truss') : (m.kind ? `${label} (${m.kind})` : label);
+        return [['Type', type], ['Length', `${r(len)} ft`],
           ['From', `${r(m.a[0])}, ${r(m.a[1])}, ${r(m.a[2])}`], ['To', `${r(m.b[0])}, ${r(m.b[1])}, ${r(m.b[2])}`]];
       }
     }
@@ -1082,7 +1098,8 @@ class Workspace {
   /** Can the active tool start a placement from this node? */
   _nodeValidator(tool) {
     if (tool === 'ledger') return n => this.tools.ledgerTargetFor(n) !== null;
-    if (tool === 'truss') return () => true;
+    // A rosette takes a truss when another sits the truss's own length away along a run.
+    if (tool === 'truss') return n => this.tools._trussCandidates(n).length > 0;
     // A rosette takes a bracket when it is on a standard (not another bracket's
     // tip) and has a direction no ledger or bracket already takes.
     if (tool === 'bracket') return n => this.tools._bracketDir(n) !== null;

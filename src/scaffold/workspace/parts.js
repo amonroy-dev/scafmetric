@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PICK_LAYER } from './instancing.js';
+import { TRUSS_FRAMES } from './trussframes.js';
 
 export const inchesToFeet = i => i / 12;
 
@@ -387,121 +388,84 @@ export function buildSideBracket(node, dir, lengthFt, material) {
 }
 
 // ---------------------------------------------------------------------------
-// Truss — a 3-chord TRIANGULAR truss, matching how the source app builds it:
-// one top chord and two bottom chords, with A-frame posts, bottom cross ties
-// and alternating side diagonals over 5 panels. Everything is tube.
-// Local +Y runs along the connection direction.
+// Trusses - the frames ScaffoldPro's centerline view draws (trussframes.js,
+// generated from its truss frame data), in three families:
+//
+//   light  a truss ledger: a top chord with a shallow bottom member a few
+//          inches below it, tied by flat bar webs
+//   heavy  a heavy-duty truss ledger: a king post, or a small trapezoid on
+//          the longer sizes
+//   truss  a lattice girder: two parallel chords 1 ft 7 11/16 in apart with a
+//          tube web
+//
+// A truss spans two rosettes at one lift. Its top chord runs between them and
+// the rest hangs straight down in the vertical plane of the span.
 // ---------------------------------------------------------------------------
-export const TRUSS = { panelCount: 5, webHeightIn: 8, baseWidthIn: 10 };
+export const TRUSS_FAMILIES = ['light', 'heavy', 'truss'];
 
-function trussFrame() {
-  const chordRadius = inchesToFeet(STANDARD_TUBE_OD_IN) / 2;
-  const braceRadius = chordRadius * 0.75;
-  const webHeightFt = Math.max(inchesToFeet(TRUSS.webHeightIn), chordRadius * 8);
-  const baseWidthFt = Math.max(inchesToFeet(TRUSS.baseWidthIn), webHeightFt * 0.9);
-  return { chordRadius, braceRadius, webHeightFt, baseWidthFt };
+/** The frame for a family nearest a span. Legacy trusses carry no family. */
+export function trussFrameFor(family, spanFt) {
+  const list = TRUSS_FRAMES[family] || TRUSS_FRAMES.truss;
+  return list.reduce((best, t) => (Math.abs(t.lengthFt - spanFt) < Math.abs(best.lengthFt - spanFt) ? t : best));
 }
 
-// Every member of the truss as unit-space endpoints: x across, y along the span
-// in [-0.5, 0.5], z up. Shared by the renderer and the weight takeoff.
-export function trussMembers() {
-  const { webHeightFt, baseWidthFt } = trussFrame();
-  const topZ = webHeightFt / 2, bottomZ = -webHeightFt / 2;
-  const leftX = -baseWidthFt / 2, rightX = baseWidthFt / 2;
-  const n = TRUSS.panelCount, step = 1 / n;
-  const members = [];
-
-  // 3 chords, full span
-  members.push({ a: [0, -0.5, topZ], b: [0, 0.5, topZ], chord: true });
-  members.push({ a: [leftX, -0.5, bottomZ], b: [leftX, 0.5, bottomZ], chord: true });
-  members.push({ a: [rightX, -0.5, bottomZ], b: [rightX, 0.5, bottomZ], chord: true });
-
-  for (let i = 0; i <= n; i++) {
-    const y = -0.5 + i * step;
-    members.push({ a: [0, y, topZ], b: [leftX, y, bottomZ], chord: false });   // A-frame post
-    members.push({ a: [0, y, topZ], b: [rightX, y, bottomZ], chord: false });  // A-frame post
-    members.push({ a: [leftX, y, bottomZ], b: [rightX, y, bottomZ], chord: false }); // cross tie
-  }
-  for (let i = 0; i < n; i++) {
-    const y0 = -0.5 + i * step, y1 = y0 + step;
-    const fromTop = i % 2 === 0;
-    members.push(fromTop
-      ? { a: [0, y0, topZ], b: [leftX, y1, bottomZ], chord: false }
-      : { a: [leftX, y0, bottomZ], b: [0, y1, topZ], chord: false });
-    members.push(fromTop
-      ? { a: [0, y0, topZ], b: [rightX, y1, bottomZ], chord: false }
-      : { a: [rightX, y0, bottomZ], b: [0, y1, topZ], chord: false });
-  }
-  return members;
+/** Every member of a truss between two rosettes, as world-space segments. */
+export function trussWorldMembers(a, b, family = 'truss') {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const span = Math.hypot(dx, dy, dz) || 1e-6;
+  const frame = trussFrameFor(family, span);
+  // Fitted to the rosettes: the end nodes land exactly on the connections.
+  const scale = span / frame.lengthFt;
+  const ux = dx / span, uy = dy / span, uz = dz / span;
+  const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  const at = ([s, d]) => [mid[0] + ux * s * scale, mid[1] + uy * s * scale, mid[2] + uz * s * scale + d];
+  return frame.members.map(([i, j, role, odIn, plateWidthIn, plateThicknessIn]) => ({
+    a: at(frame.nodes[i]), b: at(frame.nodes[j]), role, odIn,
+    plate: plateWidthIn ? { widthIn: plateWidthIn, thicknessIn: plateThicknessIn } : null,
+  }));
 }
 
-/** Total tubing length in a truss of the given span, for the weight takeoff. */
-export function trussMemberLengthFt(spanFt) {
+/**
+ * Tubing in a truss for its self-weight, as feet of ledger tube: smaller
+ * tubes and the flat bar webs count for less in proportion to their steel.
+ */
+export function trussMemberLengthFt(spanFt, family = 'truss') {
   let total = 0;
-  for (const m of trussMembers()) {
-    const dx = m.b[0] - m.a[0];
-    const dy = (m.b[1] - m.a[1]) * spanFt;
-    const dz = m.b[2] - m.a[2];
-    total += Math.hypot(dx, dy, dz);
+  for (const m of trussWorldMembers([0, 0, 0], [spanFt, 0, 0], family)) {
+    const len = Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]);
+    total += len * (m.plate ? (m.plate.widthIn * m.plate.thicknessIn) / 0.671 : m.odIn / STANDARD_TUBE_OD_IN);
   }
   return total;
 }
 
-export function buildTruss(a, b, material) {
-  const mat = material || MATERIALS.ledger;
-  const { chordRadius, braceRadius } = trussFrame();
+// A flat bar web: its width in the plane of the truss, its thickness across it.
+function flatBarBetween(a, b, widthIn, thicknessIn, material) {
   const av = new THREE.Vector3(a[0], a[1], a[2]);
-  const bv = new THREE.Vector3(b[0], b[1], b[2]);
-  const yAxis = new THREE.Vector3().subVectors(bv, av);
-  const span = yAxis.length() || 1e-6;
-  yAxis.divideScalar(span);
-  // Local Z is world up unless the member is vertical; X completes the frame.
-  let zAxis = new THREE.Vector3(0, 0, 1);
-  if (Math.abs(yAxis.dot(zAxis)) > 0.999) zAxis = new THREE.Vector3(0, 1, 0);
-  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
-  zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-  const mid = new THREE.Vector3().addVectors(av, bv).multiplyScalar(0.5);
+  const dir = new THREE.Vector3(b[0], b[1], b[2]).sub(av);
+  const len = Math.max(dir.length(), 1e-6);
+  dir.divideScalar(len);
+  let across = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 0, 1));
+  if (across.lengthSq() < 1e-8) across = new THREE.Vector3(0, 1, 0);
+  across.normalize();
+  const inPlane = new THREE.Vector3().crossVectors(across, dir).normalize();
+  const m = new THREE.Mesh(UNIT_BOX, material);
+  m.position.copy(av).addScaledVector(dir, len / 2);
+  m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(inPlane, dir, across));
+  m.scale.set(inchesToFeet(widthIn), len, inchesToFeet(thicknessIn));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
 
-  const toWorld = p => [
-    mid.x + yAxis.x * p[1] * span + xAxis.x * p[0] + zAxis.x * p[2],
-    mid.y + yAxis.y * p[1] * span + xAxis.y * p[0] + zAxis.y * p[2],
-    mid.z + yAxis.z * p[1] * span + xAxis.z * p[0] + zAxis.z * p[2],
-  ];
-
-  const out = [];
-  for (const m of trussMembers()) {
-    const od = (m.chord ? chordRadius : braceRadius) * 2 * 12; // back to inches
-    out.push(tubeBetween(toWorld(m.a), toWorld(m.b), od, mat));
-  }
-  return out;
+export function buildTruss(a, b, material, family = 'truss') {
+  const mat = material || MATERIALS.ledger;
+  return trussWorldMembers(a, b, family).map(m => (m.plate
+    ? flatBarBetween(m.a, m.b, m.plate.widthIn, m.plate.thicknessIn, mat)
+    : tubeBetween(m.a, m.b, m.odIn, mat)));
 }
 
 // Guardrail rail/post tubing.
 export const GUARDRAIL_OD_IN = 1.69;
-
-/** Truss members as world-space segments between two connection points. */
-export function trussWorldMembers(a, b) {
-  const { chordRadius, braceRadius } = trussFrame();
-  const av = new THREE.Vector3(a[0], a[1], a[2]);
-  const bv = new THREE.Vector3(b[0], b[1], b[2]);
-  const yAxis = new THREE.Vector3().subVectors(bv, av);
-  const span = yAxis.length() || 1e-6;
-  yAxis.divideScalar(span);
-  let zAxis = new THREE.Vector3(0, 0, 1);
-  if (Math.abs(yAxis.dot(zAxis)) > 0.999) zAxis = new THREE.Vector3(0, 1, 0);
-  const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis).normalize();
-  zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-  const mid = new THREE.Vector3().addVectors(av, bv).multiplyScalar(0.5);
-  const toWorld = p => [
-    mid.x + yAxis.x * p[1] * span + xAxis.x * p[0] + zAxis.x * p[2],
-    mid.y + yAxis.y * p[1] * span + xAxis.y * p[0] + zAxis.y * p[2],
-    mid.z + yAxis.z * p[1] * span + xAxis.z * p[0] + zAxis.z * p[2],
-  ];
-  return trussMembers().map(m => ({
-    a: toWorld(m.a), b: toWorld(m.b),
-    odIn: (m.chord ? chordRadius : braceRadius) * 2 * 12,
-  }));
-}
 
 // --- live load patches -------------------------------------------------------
 // A translucent slab over a bay, striped across the span so the one-way

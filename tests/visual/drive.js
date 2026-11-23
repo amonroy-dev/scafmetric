@@ -352,7 +352,16 @@ window.__sv = (() => {
     // Raycaster.setFromCamera.
     async marqueeSelect() {
       tool('select');
-      await drag([-3, -3, 0], [BAY + 3, BAY + 3, 0]);
+      // The box is drawn on the screen, so it goes round the stacks as they
+      // appear: every foot and every top, left to right (a window box).
+      const st = ws().state;
+      const pts = [...st.standards.values()].flatMap(c => [project([c.x, c.y, 0]), project([c.x, c.y, st.baseOffsetFt() + st.standardHeightFt(c)])]);
+      const from = { x: Math.min(...pts.map(p => p.x)) - 12, y: Math.min(...pts.map(p => p.y)) - 12 };
+      const to = { x: Math.max(...pts.map(p => p.x)) + 12, y: Math.max(...pts.map(p => p.y)) + 12 };
+      pointer('pointermove', from); pointer('pointerdown', from);
+      for (let i = 1; i <= 8; i++) { pointer('pointermove', { x: from.x + (to.x - from.x) * i / 8, y: from.y + (to.y - from.y) * i / 8 }, { held: true }); await raf(1); }
+      pointer('pointerup', to);
+      await raf(2);
       const selected = ws().selection.length;
       ws().selection = [];
       ws().tools.selection.clear();
@@ -682,6 +691,43 @@ window.__sv = (() => {
       ws()._frame();
       await raf(10);
       return { projection: ws().engine.projection, camDir: camDir(), coverage: coverage() };
+    },
+
+    // A selection box works in any view and takes any part, as ScaffoldPro's
+    // does. In the Front view the old ground-plane marquee could select nothing.
+    async marqueeFrontView() {
+      tool('select');
+      ws().engine.setView('front');
+      ws()._frame();
+      await raf(6);
+      const r = canvas().getBoundingClientRect();
+      const a = { x: r.right - 12, y: r.top + 70 }, b = { x: r.left + 12, y: r.bottom - 12 };
+      pointer('pointermove', a);
+      pointer('pointerdown', a);
+      for (let i = 1; i <= 6; i++) { pointer('pointermove', { x: a.x + (b.x - a.x) * i / 6, y: a.y + (b.y - a.y) * i / 6 }, { held: true }); await raf(1); }
+      const box = document.querySelector('[data-marquee]');
+      const during = box ? { shown: box.style.display === 'block', mode: box.dataset.marquee, width: parseFloat(box.style.width) } : null;
+      pointer('pointerup', b);
+      await raf(2);
+      const s = ws().state;
+      const ids = ws().selection.slice();
+      const kinds = {};
+      for (const id of ids) { const k = ws()._kindOf(id); kinds[k] = (kinds[k] || 0) + 1; }
+      const hidden = box ? box.style.display === 'none' : false;
+      // A left-to-right box round one standard only, top to bottom: a window.
+      const col = [...s.standards.values()].find(c => c.x === 0 && c.y === 0);
+      const top = project([0, 0, s.baseOffsetFt() + s.standardHeightFt(col)]), foot = project([0, 0, 0]);
+      const w1 = { x: foot.x - 6, y: top.y - 6 }, w2 = { x: foot.x + 6, y: foot.y + 6 };
+      pointer('pointermove', w1); pointer('pointerdown', w1);
+      for (let i = 1; i <= 4; i++) { pointer('pointermove', { x: w1.x + (w2.x - w1.x) * i / 4, y: w1.y + (w2.y - w1.y) * i / 4 }, { held: true }); await raf(1); }
+      const windowMode = box ? box.dataset.marquee : null;
+      pointer('pointerup', w2);
+      await raf(2);
+      const windowKinds = {};
+      for (const id of ws().selection) { const k = ws()._kindOf(id); windowKinds[k] = (windowKinds[k] || 0) + 1; }
+      ws().selection = []; ws().tools.selection.clear(); ws()._rebuildContent();
+      await raf(2);
+      return { during, hidden, selected: ids.length, kinds, total: { standards: s.standards.size, ledgers: s.ledgers.size, braces: s.braces.size }, windowMode, windowKinds };
     },
 
     // ScaffoldPro navigation, through real middle-button and wheel events.

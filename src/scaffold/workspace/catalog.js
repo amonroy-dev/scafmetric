@@ -5,7 +5,7 @@
 
 const ft = (f, i = 0) => f + i / 12;
 
-export const CATEGORIES = ['standards', 'ledgers', 'braces', 'trusses', 'brackets', 'planks'];
+export const CATEGORIES = ['standards', 'ledgers', 'braces', 'lightTrusses', 'heavyTrusses', 'trusses', 'brackets', 'planks'];
 
 export const CATALOG = {
   standards: {
@@ -51,12 +51,47 @@ export const CATALOG = {
       { id: 'brc-2', label: '2 ft bay', lengthFt: 2 },
     ],
   },
+  // Three truss families, each spanning two rosettes at one lift (parts.js).
+  lightTrusses: {
+    label: 'Light trusses',
+    code: 'LTR',
+    unit: 'length',
+    family: 'light',
+    parts: [
+      { id: 'ltr-10', label: '10 ft', lengthFt: 10 },
+      { id: 'ltr-8', label: '8 ft', lengthFt: 8 },
+      { id: 'ltr-7', label: '7 ft', lengthFt: 7 },
+      { id: 'ltr-6', label: '6 ft', lengthFt: 6 },
+      { id: 'ltr-5', label: '5 ft', lengthFt: 5 },
+    ],
+  },
+  heavyTrusses: {
+    label: 'Heavy trusses',
+    code: 'HTR',
+    unit: 'length',
+    family: 'heavy',
+    parts: [
+      { id: 'htr-10', label: '10 ft', lengthFt: 10 },
+      { id: 'htr-8', label: '8 ft', lengthFt: 8 },
+      { id: 'htr-7', label: '7 ft', lengthFt: 7 },
+      { id: 'htr-6', label: '6 ft', lengthFt: 6 },
+      { id: 'htr-5', label: '5 ft', lengthFt: 5 },
+    ],
+  },
   trusses: {
     label: 'Trusses',
     code: 'TRS',
     unit: 'length',
+    family: 'truss',
     parts: [
+      { id: 'trs-20', label: '20 ft', lengthFt: 20 },
+      { id: 'trs-18', label: '18 ft', lengthFt: 18 },
+      { id: 'trs-16', label: '16 ft', lengthFt: 16 },
+      { id: 'trs-15', label: '15 ft', lengthFt: 15 },
+      { id: 'trs-14', label: '14 ft', lengthFt: 14 },
+      { id: 'trs-12', label: '12 ft', lengthFt: 12 },
       { id: 'trs-10', label: '10 ft', lengthFt: 10 },
+      { id: 'trs-9', label: '9 ft', lengthFt: 9 },
       { id: 'trs-8', label: '8 ft', lengthFt: 8 },
       { id: 'trs-7', label: '7 ft', lengthFt: 7 },
       { id: 'trs-6', label: '6 ft', lengthFt: 6 },
@@ -95,6 +130,8 @@ export const DEFAULT_PART = {
   braces: 'brc-7',
   planks: 'plk-7',
   brackets: 'brk-2',
+  lightTrusses: 'ltr-7',
+  heavyTrusses: 'htr-7',
   trusses: 'trs-7',
 };
 
@@ -111,5 +148,7 @@ export const CATEGORY_TOOL = {
   braces: 'brace',
   planks: 'plank',
   brackets: 'bracket',
+  lightTrusses: 'truss',
+  heavyTrusses: 'truss',
   trusses: 'truss',
 };

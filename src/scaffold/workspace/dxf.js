@@ -62,7 +62,7 @@ export function buildCenterlineModel(state) {
   // Trusses contribute their full member set, so the skeleton and the DXF show
   // the real triangular frame rather than a single line.
   for (const t of state.trusses?.values?.() ?? []) {
-    for (const seg of trussWorldMembers(t.a, t.b)) addSegment(seg.a, seg.b, LAYERS.truss, t.id);
+    for (const seg of trussWorldMembers(t.a, t.b, t.family)) addSegment(seg.a, seg.b, LAYERS.truss, t.id);
   }
 
   return { segments, points: [...joints.values()] };
