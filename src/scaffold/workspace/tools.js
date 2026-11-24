@@ -21,10 +21,9 @@ import {
   getLedgerSideSign, buildDeckLoadPreview, deckSpanIsSupported, connectedDecks, pickDeckWithRay,
   DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
-import { buildSupportPair } from './supportspan.js';
-import {
-  buildPlankPreviewForLedger, computePlankBatchPreview, crossPlankPlacement, plankRunAxis, sameRunAxis,
-} from './planks.js';
+import { buildSupportPair, collinearRun } from './supportspan.js';
+import { buildPlankPreviewForLedger, crossPlankPlacement, plankRunAxis, sameRunAxis } from './planks.js';
+import { ARM_PREFIX } from './state.js';
 import {
   buildFaceGraph, framedFaces, facingOutward, faceKey, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
   bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
@@ -46,6 +45,9 @@ const PICK_BAND_PX = 3;
 // this wide.
 const LEG_PICK_TOLERANCE_PX = 12;
 const LEG_HOVER_OD_IN = 18;
+// With "On side brackets" ticked, the Standard tool takes the bracket socket
+// nearest the pointer within this reach on the screen, as ScaffoldPro's does.
+const BRACKET_SEAT_SNAP_PX = 28;
 // Truss fits, from ScaffoldPro: two degrees off a run still counts as along it
 // (rosettes sit on a grid, so this only absorbs noise); an inch off its own
 // length still fits (the frames do not stretch); 0.05 ft is the same lift.
@@ -86,6 +88,9 @@ export class Tools {
     // Standard tool: when set, placing a standard builds a planned stack that
     // reaches this height instead of dropping a single catalog segment.
     this.standardTargetHeightFt = 0;
+    // Standard tool: when set, a standard goes in a side bracket's socket and
+    // nowhere else (the card's "On side brackets").
+    this.standardsOnBrackets = false;
     // Block tool: ScaffoldPro's block recipe (the block card edits it) and the
     // preview's quarter turns (R).
     this.blockSettings = { ...BLOCK_DEFAULTS };
@@ -353,16 +358,26 @@ export class Tools {
     this.hooks.onSelectionChange?.([...this.selection]);
   }
 
-  /** Each standard as the screen tests it: its whole height, ground to top, so a box or a click on any of it counts. */
-  _standardSegments() {
-    const s = this.state, base = s.baseOffsetFt();
-    return [...s.standards.values()].map(c => ({ id: c.id, a: [c.x, c.y, 0], b: [c.x, c.y, base + s.standardHeightFt(c)] }));
+  /**
+   * Each standard as the screen tests it: its whole height, so a box or a click
+   * on any of it counts. A leg runs from the ground, one seated in a side
+   * bracket from its socket. `legsOnly` leaves the seated ones out.
+   */
+  _standardSegments(legsOnly = false) {
+    const s = this.state;
+    const out = [];
+    for (const c of s.standards.values()) {
+      const leg = s.isLeg(c);
+      if (legsOnly && !leg) continue;
+      out.push({ id: c.id, a: [c.x, c.y, leg ? 0 : s.standardBaseZ(c)], b: [c.x, c.y, s.standardTopZ(c)] });
+    }
+    return out;
   }
 
   /** A box dragged with Send to beam open: the legs in it, and nothing else. */
   _finishLegMarquee(m, modifiers) {
     const { rect, mode, projector } = this._marqueeGeometry(m);
-    const ids = marqueeHits(projector, rect, mode, { segments: this._standardSegments(), outlines: [] });
+    const ids = marqueeHits(projector, rect, mode, { segments: this._standardSegments(true), outlines: [] });
     this.hooks.onLegBox?.(ids, modifiers);
   }
 
@@ -376,6 +391,13 @@ export class Tools {
     // Send to beam: a click puts the leg under it on the beam, or takes it off.
     if (this.tool === 'beam') {
       this.hooks.onLegPick?.(this._pickStandard(e));
+      return;
+    }
+    if (this.tool === 'standard' && this.standardsOnBrackets) {
+      const plan = this._bracketStandardPlan(e);
+      if (!plan || !plan.seats.length) return;
+      const n = this._addBracketStandards(plan);
+      if (e.shiftKey) this.hooks.onBulkFill?.(n, 'bracket standard');
       return;
     }
     if (this.tool === 'standard') {
@@ -621,14 +643,14 @@ export class Tools {
     const natural = { ledgerId: ledger.id, sideSign: side };
     const want = this.plankRunAxis;
     if (want === null || sameRunAxis(want, plankRunAxis(ledger))) return natural;
-    return crossPlankPlacement(ledger, this.state.ledgerList(), side) || natural;
+    return crossPlankPlacement(ledger, this.state.supportList(), side) || natural;
   }
 
   /** True when this placement's opening already has a deck, either way round. */
   _isDecked(placement) {
-    const ledger = this.state.ledgers.get(placement.ledgerId);
+    const ledger = this.state.supportById(placement.ledgerId);
     if (!ledger) return true;
-    const pair = buildSupportPair(ledger, this.state.ledgerList(), placement.sideSign);
+    const pair = buildSupportPair(ledger, this.state.supportList(), placement.sideSign);
     if (!pair) return true;
     const { source, signedOffsetFt, overlapMinFt, overlapMaxFt } = pair;
     const cx = source.mid.x + source.dir.x * (overlapMinFt + overlapMaxFt) / 2 + source.perp.x * signedOffsetFt / 2;
@@ -648,10 +670,10 @@ export class Tools {
     if (!hit) return undefined;
     const side = this._sideFor(hit.ledger, hit.point);
     const current = this._plankPlacementFor(hit.ledger, side);
-    const currentLedger = this.state.ledgers.get(current.ledgerId);
-    const cross = crossPlankPlacement(currentLedger, this.state.ledgerList(), current.sideSign);
+    const currentLedger = this.state.supportById(current.ledgerId);
+    const cross = crossPlankPlacement(currentLedger, this.state.supportList(), current.sideSign);
     if (!cross) return null;
-    const axis = plankRunAxis(this.state.ledgers.get(cross.ledgerId));
+    const axis = plankRunAxis(this.state.supportById(cross.ledgerId));
     this.plankRunAxis = axis;
     return axis;
   }
@@ -728,13 +750,15 @@ export class Tools {
     const tags = this.hooks.getLegTags?.() || [];
     if (tags.length) {
       const id = raycaster.intersectObjects(tags, false)[0]?.object.userData.legId;
-      if (id && this.state.standards.has(id)) return id;
+      const tagged = id ? this.state.standards.get(id) : null;
+      if (tagged && this.state.isLeg(tagged)) return id;
     }
     const bounds = renderer.domElement.getBoundingClientRect();
     const ray = raycaster.ray;
     const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), onRay = new THREE.Vector3(), onSeg = new THREE.Vector3();
     let best = null;
-    for (const seg of this._standardSegments()) {
+    // Legs only: a standard seated in a side bracket is carried by another leg.
+    for (const seg of this._standardSegments(true)) {
       ray.distanceSqToSegment(p0.set(...seg.a), p1.set(...seg.b), onRay, onSeg);
       const depth = onRay.distanceTo(ray.origin);
       onSeg.project(camera);
@@ -752,8 +776,7 @@ export class Tools {
     const id = this._pickStandard(e);
     const c = id ? this.state.standards.get(id) : null;
     if (c) {
-      const top = this.state.baseOffsetFt() + this.state.standardHeightFt(c);
-      this.ghostGroup.add(legColumn(c.x, c.y, 0, top, LEG_HOVER_OD_IN, MATERIALS.legHover));
+      this.ghostGroup.add(legColumn(c.x, c.y, 0, this.state.standardTopZ(c), LEG_HOVER_OD_IN, MATERIALS.legHover));
     }
     this._setCursor(c ? 'pointer' : '');
     this.hooks.onPreview?.('beam', c ? 1 : 0, { id: c ? id : null });
@@ -791,6 +814,102 @@ export class Tools {
     return part ? [part.lengthFt] : [];
   }
 
+  // --- standards on side brackets -------------------------------------------
+  // With "On side brackets" ticked the Standard tool stands its standard in a
+  // side bracket's socket and nowhere else: the free socket nearest the
+  // pointer, as ScaffoldPro snaps to it, or with SHIFT every one along that
+  // row of brackets. The standard's height comes from the bracket (see
+  // ScaffoldState.bracketSeat), so its rosettes land on the scaffold's lifts.
+
+  setStandardsOnBrackets(on) {
+    this.standardsOnBrackets = !!on;
+    this._clearGhost();
+    this._pendingBatch = null;
+    this._refreshGhost();
+  }
+
+  /**
+   * The segments to stand from a height: the size chosen in the card, or with
+   * a height to build to, the stack that brings the top level with a standard
+   * built to that height from the ground.
+   */
+  standardStackPlanFrom(baseZ) {
+    const target = Number(this.standardTargetHeightFt) || 0;
+    if (target > 0) {
+      const lengths = CATALOG.standards.parts.map(p => p.lengthFt);
+      const remaining = target - (baseZ - this.state.baseOffsetFt());
+      if (remaining >= Math.min(...lengths) - 1e-6) {
+        const plan = planStandardSegmentsForHeight(remaining, lengths);
+        if (plan.length) return plan;
+      }
+    }
+    const part = this.currentPart();
+    return part ? [part.lengthFt] : [];
+  }
+
+  /** The bracket socket a click here would use: a seat (ScaffoldState.bracketSeat), or null. */
+  _bracketSeatUnderPointer(e) {
+    const { camera, renderer } = this.engine;
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const p = new THREE.Vector3();
+    let best = null, bestPx = Infinity, bestZ = Infinity;
+    for (const k of this.state.brackets.values()) {
+      const seat = this.state.bracketSeat(k.id);
+      if (!seat || seat.blocked) continue;
+      // Aimed at the socket itself, where the standard's foot goes.
+      p.set(seat.x, seat.y, k.z).project(camera);
+      if (p.z < -1 || p.z > 1) continue;
+      const px = Math.hypot(((p.x + 1) / 2) * bounds.width - (e.clientX - bounds.left), ((1 - p.y) / 2) * bounds.height - (e.clientY - bounds.top));
+      if (px > BRACKET_SEAT_SNAP_PX) continue;
+      // Seen from above, brackets one over another are one point on the
+      // screen: the lowest is the one a standard starts from.
+      const nearer = px < bestPx - 0.5;
+      const sameSpotLower = Math.abs(px - bestPx) <= 0.5 && k.z < bestZ;
+      if (nearer || sameSpotLower) { bestPx = px; bestZ = k.z; best = seat; }
+    }
+    return best;
+  }
+
+  /**
+   * What a click would stand: { seats, row }. One standard in the socket under
+   * the pointer, or with SHIFT one in every socket along that row of brackets
+   * that is in the same state as the hovered one: free sockets get a standard,
+   * or, hovering one that has a standard already, each standard in the row
+   * gets another segment. `row` is how many brackets the row has.
+   */
+  _bracketStandardPlan(e) {
+    const seat = this._bracketSeatUnderPointer(e);
+    if (!seat) return null;
+    if (!e.shiftKey) return { seats: [seat], row: 1 };
+    const row = this.state.bracketRow(seat.bracketId);
+    const seats = [];
+    const spots = new Set();
+    for (const k of row) {
+      const s = this.state.bracketSeat(k.id);
+      if (!s || s.blocked || !!s.standard !== !!seat.standard) continue;
+      const spot = `${Math.round(s.x * 1000)},${Math.round(s.y * 1000)}`;
+      if (spots.has(spot)) continue;
+      spots.add(spot);
+      seats.push(s);
+    }
+    return { seats, row: row.length };
+  }
+
+  /** Stand the standards of a plan, as one edit. Returns how many sockets were used. */
+  _addBracketStandards(plan) {
+    return this.state.batch(() => {
+      let n = 0;
+      for (const seat of plan.seats) {
+        let stood = false;
+        for (const len of this.standardStackPlanFrom(seat.z)) {
+          if (this.state.addStandardOnBracket(seat.bracketId, len)) stood = true;
+        }
+        if (stood) n++;
+      }
+      return n;
+    });
+  }
+
   // --- braces --------------------------------------------------------------
 
   /**
@@ -803,18 +922,40 @@ export class Tools {
     // standards against every third one, and a hover asks for it on each move.
     const version = this.state.version;
     if (this._faceCache && this._faceCache.version === version) return this._faceCache.faces;
-    const standards = [...this.state.standards.values()];
+    // The scaffold's own faces are between its legs. A standard seated in a
+    // side bracket is outside it, and is given faces of its own below.
+    const standards = this._legs();
     // Sides of the scaffold as it is framed (a ledger between the two
     // standards, where there are ledgers), each outside one facing out.
     const faces = facingOutward(framedFaces(buildFaceGraph(standards), this._standardLinks(standards)));
-    if (this.state.brackets.size > 1) {
+    if (this.state.brackets.size) {
       const nodes = this.state.nodes();
+      const byColumn = nodesByColumn(nodes);
+      const centroid = footprintCentroid(standards);
+      // Along a row of brackets: between the tips, or the standards seated in
+      // them, wherever a brace can climb.
       const tips = new Map();
       for (const n of nodes) if (n.bracketId && !tips.has(n.columnId)) tips.set(n.columnId, { id: n.columnId, x: n.x, y: n.y, dir: n.dir });
-      faces.push(...bracketTipFaces([...tips.values()], nodesByColumn(nodes), footprintCentroid(standards)));
+      faces.push(...bracketTipFaces([...tips.values()], byColumn, centroid));
+      // And the short face from a seated standard back to the standard its
+      // bracket hangs on, so the two can be braced together.
+      const at = new Map([...this.state.standards.values()].map(c => [`${Math.round(c.x * 100)},${Math.round(c.y * 100)}`, c]));
+      for (const c of this.state.standards.values()) {
+        const k = this.state.standardBracket(c);
+        const host = k ? at.get(`${Math.round(k.x * 100)},${Math.round(k.y * 100)}`) : null;
+        if (!host) continue;
+        for (const f of buildFaceGraph([host, c], centroid)) {
+          if (faceBraceTarget(f, byColumn, 0, 'ascending') || faceBraceTarget(f, byColumn, 0, 'descending')) faces.push({ ...f, bracketEnd: true });
+        }
+      }
     }
     this._faceCache = { version, faces };
     return faces;
+  }
+
+  /** The standards that stand on the ground. */
+  _legs() {
+    return [...this.state.standards.values()].filter(c => this.state.isLeg(c));
   }
 
   /**
@@ -857,7 +998,7 @@ export class Tools {
     const r = this.engine.raycaster.ray;
     const faces = this._faces();
     if (!faces.length) { this.braceMiss = 'no-face'; return null; }
-    const standards = [...this.state.standards.values()];
+    const standards = this._legs();
     const picked = pickFace(
       { origin: [r.origin.x, r.origin.y, r.origin.z], direction: [r.direction.x, r.direction.y, r.direction.z] },
       faces,
@@ -897,7 +1038,7 @@ export class Tools {
   _perimeterBracePlan(targetZ) {
     const byColumn = nodesByColumn(this.state.nodes());
     return planPerimeterBraces(this._faces(), this.state.nodes(), {
-      standards: [...this.state.standards.values()],
+      standards: this._legs(),
       filter: this.braceFaceFilter,
       nthBay: this.braceNthBay,
       direction: this.braceDirection,
@@ -952,11 +1093,18 @@ export class Tools {
    * any opening already decked either way round.
    */
   _plankRunPlacements(ledger, sideSign) {
-    const ledgers = this.state.ledgerList();
+    const supports = this.state.supportList();
+    // Along the connected run of ledgers; or, from a side bracket, along its
+    // row of brackets, each arm decked across to the next.
+    const run = ledger.bracketId
+      ? this.state.bracketRow(ledger.bracketId).map(k => this.state.supportById(`${ARM_PREFIX}${k.id}`)).filter(Boolean)
+      : collinearRun(ledger, this.state.ledgerList());
     const seen = new Set();
     const out = [];
-    for (const preview of computePlankBatchPreview(ledger, ledgers, sideSign, [])) {
-      const runLedger = this.state.ledgers.get(preview.placement.ledgerId);
+    for (const member of run) {
+      const preview = buildPlankPreviewForLedger(member, supports, sideSign, []);
+      if (!preview) continue;
+      const runLedger = this.state.supportById(preview.placement.ledgerId);
       const p = this._plankPlacementFor(runLedger, preview.placement.sideSign);
       const key = `${p.ledgerId}:${p.sideSign}`;
       if (seen.has(key) || this._isDecked(p)) continue;
@@ -983,8 +1131,9 @@ export class Tools {
     const hits = this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false);
     for (const h of hits) {
       const d = hitData(h);
-      if (d.kind !== 'ledger' && d.kind !== 'line') continue;
-      const ledger = this.state.ledgers.get(d.id);
+      if (d.kind !== 'ledger' && d.kind !== 'line' && d.kind !== 'bracket') continue;
+      // A side bracket is picked by any part of it: boards bear on its arm.
+      const ledger = this.state.ledgers.get(d.id) || this.state.supportById(`${ARM_PREFIX}${d.id}`);
       if (ledger) return { ledger, point: this._sidePoint(ledger, ray, h.point) };
     }
     return null;
@@ -1021,7 +1170,8 @@ export class Tools {
     const version = this.state.version;
     if (this._deckCache && this._deckCache.version === version) return this._deckCache;
     const decks = this.state.plankBays().filter(d => d.frame);
-    this._deckCache = { version, decks, ledgers: this.state.ledgerList(), loads: this.state.liveLoadsByDeck(decks) };
+    // What a deck bears on: the ledgers, and the arms of the side brackets.
+    this._deckCache = { version, decks, ledgers: this.state.supportList(), loads: this.state.liveLoadsByDeck(decks) };
     return this._deckCache;
   }
 
@@ -1094,7 +1244,7 @@ export class Tools {
     if (!p) return null;
     const plan = this._blockPlan();
     const g = this._blockCenterOnGrid(p, plan);
-    const c = snapBlockCenter(g, plan, this.rotationSteps, [...this.state.standards.values()]);
+    const c = snapBlockCenter(g, plan, this.rotationSteps, this._legs());
     return { plan, center: { x: c.x, y: c.y }, snapped: c.snapped, rotationSteps: this.rotationSteps };
   }
 
@@ -1336,7 +1486,7 @@ export class Tools {
     const want = getLedgerSideSign(ledger, point);
     // A side with no opposite ledger has no bay, so nothing can go there. Rather
     // than silently doing nothing, fall back to the side that does have one.
-    const ledgers = this.state.ledgerList();
+    const ledgers = this.state.supportList();
     if (buildSupportPair(ledger, ledgers, want)) return want;
     const other = want === 1 ? -1 : 1;
     return buildSupportPair(ledger, ledgers, other) ? other : want;
@@ -1391,14 +1541,14 @@ export class Tools {
       const hit = this._pickLedger(e);
       if (!hit) return;
       const side = this._sideFor(hit.ledger, hit.point);
-      const ledgers = this.state.ledgerList();
+      const ledgers = this.state.supportList();
       // Each bay decked the way R chose for this lift.
       const placements = e.shiftKey
         ? this._plankRunPlacements(hit.ledger, side)
         : [this._plankPlacementFor(hit.ledger, side)].filter(p => !this._isDecked(p));
       let crossed = false;
       for (const p of placements) {
-        const preview = buildPlankPreviewForLedger(this.state.ledgers.get(p.ledgerId), ledgers, p.sideSign, []);
+        const preview = buildPlankPreviewForLedger(this.state.supportById(p.ledgerId), ledgers, p.sideSign, []);
         if (!preview) continue;
         crossed ||= p.ledgerId !== hit.ledger.id;
         for (const b of preview.deck.boards) {
@@ -1429,6 +1579,31 @@ export class Tools {
       return;
     }
     const mat = MATERIALS.ghost;
+    // On side brackets: the standard a click would stand in the socket under
+    // the pointer, or with SHIFT in every socket along the row.
+    if (this.tool === 'standard' && this.standardsOnBrackets) {
+      const plan = this._bracketStandardPlan(e);
+      const ghosts = [];
+      let totalFt = 0;
+      for (const seat of plan ? plan.seats : []) {
+        let z = seat.z;
+        for (const len of this.standardStackPlanFrom(seat.z)) {
+          ghosts.push(verticalTube(seat.x, seat.y, z, z + len, STANDARD_TUBE_OD_IN, mat));
+          z += len;
+        }
+        totalFt = z - seat.z;
+      }
+      for (const m of instanceMeshes(ghosts)) this.ghostGroup.add(m);
+      const count = plan ? plan.seats.length : 0;
+      this._pendingBatch = e.shiftKey && count
+        ? { count, label: 'bracket standard', apply: () => this._addBracketStandards(plan) }
+        : null;
+      this.hooks.onPreview?.('standard', count, {
+        onBrackets: true, batch: e.shiftKey, row: plan ? plan.row : 0, totalFt,
+        adding: !!(plan && plan.seats[0] && plan.seats[0].standard), brackets: this.state.brackets.size,
+      });
+      return;
+    }
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
       const plan = this.standardStackPlan();

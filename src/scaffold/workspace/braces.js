@@ -384,7 +384,10 @@ export function planPerimeterBraces(faces, nodes, opts = {}) {
   // The standards' perimeter is judged among the standards' faces alone, so a
   // row of bracket tips outside does not make the face behind it "interior".
   // Bracket rows are outside by construction and always eligible.
-  const own = faces.filter(f => !f.tipRow);
+  // The short face from a standard seated in a bracket back to the standard
+  // the bracket hangs on is braced by hand, never by a fill: a fill would put
+  // one at every bracket.
+  const own = faces.filter(f => !f.tipRow && !f.bracketEnd);
   const tipRows = faces.filter(f => f.tipRow);
 
   const out = [];

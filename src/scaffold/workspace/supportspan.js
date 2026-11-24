@@ -74,6 +74,8 @@ export function findOppositeSupportFrame(source, ledgers, sideSign) {
     if (overlap < MIN_OVERLAP_FT) continue;
 
     const absOffset = Math.abs(signedOffset);
+    // A bracket arm carries a deck no further than a plank is long.
+    if (absOffset > Math.min(source.ledger.maxSpanFt ?? Infinity, candidate.maxSpanFt ?? Infinity)) continue;
     if (absOffset < bestOffset) { bestOffset = absOffset; best = frame; }
   }
   return best;

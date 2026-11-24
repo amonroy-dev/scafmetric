@@ -125,9 +125,23 @@ export function forBeamForm(entry) {
 }
 
 // The load on a leg in whole pounds, as its tag in the builder shows it and as
-// the beam form receives it: dead and live each rounded, then added.
+// the beam form receives it: dead and live each rounded, then added. Negative
+// for a leg in uplift.
 export function wholePoundsOnLeg(leg) {
-  return Math.round(leg.deadLb) + Math.round(leg.liveLb);
+  return Math.round(leg.deadLb) + Math.round(leg.liveLb) + 0;
+}
+
+// What a leg sends to the beam it stands on, which is not always its load as
+// the scaffold stands. A side bracket on the leg in front levers load off this
+// one (leg.lifted). The live part of that is not counted: the bracket can
+// stand empty while the deck behind it is loaded, and then this leg bears
+// down in full. The dead part is there all the time and stays, down to
+// nothing: a leg does not pull up on a beam it only stands on.
+export function loadOnBeamFromLeg(leg) {
+  return {
+    deadLb: Math.max(0, leg.deadLb) + 0,
+    liveLb: Math.max(0, leg.liveLb + (leg.lifted?.liveLb || 0)) + 0,
+  };
 }
 
 // Convert located legs into importable beam point loads (pounds), keeping dead and
@@ -140,8 +154,7 @@ export function toBeamPointLoads(located, { includeOffBeam = false } = {}) {
     const usable = rec.onSpan && rec.onBeam;
     const entry = {
       legId: rec.leg.id,
-      deadLb: rec.leg.deadLb,
-      liveLb: rec.leg.liveLb,
+      ...loadOnBeamFromLeg(rec.leg),
       locationFt: rec.locationFt,
       perpFt: rec.perpFt,
       onSpan: rec.onSpan,

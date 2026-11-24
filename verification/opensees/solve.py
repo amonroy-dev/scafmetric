@@ -4,16 +4,29 @@
 
 Writes <name>.reactions.json beside each model. Feet and pounds throughout.
 
-Each model is solved three ways, for dead and for live load separately:
+Each model is solved up to four ways, for dead and for live load separately:
 
-  pinned   Ledgers and deck strips pin-ended, braces as weight only. Every
-           load has one path to the ground, so the reactions are fixed by
-           equilibrium alone and no stiffness enters. This is the load path a
-           tributary takeoff assumes; the builder's leg loads must equal these.
+  pinned   Ledgers and deck strips pin-ended, braces as weight only, bases
+           held rigidly. Every load has one path to the ground, so the
+           reactions are fixed by equilibrium alone and no stiffness enters.
+           This is the load path a tributary takeoff assumes. A load on a side
+           bracket goes down the leg the bracket hangs on, and its overturning
+           is taken out at that leg's foot as a moment.
 
-  braced   The same, with the diagonal braces added as axial members. The
-           standards shorten under load and the braces resist it, so a little
-           load moves between legs. Shows what bracing stiffness does.
+  levered  Only for a model with side brackets that have a leg behind them.
+           The same, but a leg on a screw jack has no moment to give at its
+           foot: the bases of the legs under and behind each bracket hinge
+           about the line of the face, and the members joining each such pair
+           are fixed to them, so the pair holds the overturning as two forces.
+           Still one path for every load, and still no stiffness in the
+           answer. Where it is solved, the builder's leg loads must equal
+           these; elsewhere they must equal "pinned", which is then the same
+           thing.
+
+  braced   Whichever of those two the builder is held to, with the diagonal
+           braces added as axial members. The standards shorten under load
+           and the braces resist it, so a little load moves between legs.
+           Shows what bracing stiffness does.
 
   rigid    Ledgers welded to the standards (no end releases), braces in,
            bases pinned. Ledgers running over a standard act as continuous
@@ -47,7 +60,11 @@ TUBE = tube(1.9, 0.12)
 # so that it cannot tie the rotations of the two ledgers it rests on together.
 STRIP = (0.02, 1.0e-4, 1.0e-10)
 
-VARIANTS = ('pinned', 'braced', 'rigid')
+VARIANTS = ('pinned', 'levered', 'braced', 'rigid')
+
+
+def has_levers(model):
+    return any(support.get('hinge') for support in model['supports'])
 
 
 def build(model, variant):
@@ -65,10 +82,19 @@ def build(model, variant):
         if member['kind'] == 'ledger':
             framed.update(member['chain'])
 
+    # The braced run starts from the model the builder is held to.
+    levered = variant in ('levered', 'braced') and has_levers(model)
     tag = 0
     for member in model['members']:
         area, inertia, torsion = STRIP if member['kind'] == 'strip' else TUBE
         pin_ended = member['pinned'] and not (variant == 'rigid' and member['kind'] == 'ledger')
+        if levered and member.get('lever'):
+            # What joins the leg under a bracket to the leg behind it: fixed to both.
+            pin_ended = False
+        elif levered and pin_ended:
+            # A ledger along the face must not pass one frame's turning on to
+            # the next by twisting, or each frame would not stand alone.
+            torsion = STRIP[2]
         chain = member['chain']
         for k in range(len(chain) - 1):
             a, b = chain[k], chain[k + 1]
@@ -85,7 +111,13 @@ def build(model, variant):
                 args += ['-releasez', release, '-releasey', release]
             ops.element('elasticBeamColumn', *args)
 
-    if variant != 'pinned':
+    if levered:
+        # A truss that is the only thing joining such a pair of legs: a member here.
+        for a, b in model.get('ties', []):
+            tag += 1
+            ops.element('elasticBeamColumn', tag, a + 1, b + 1, TUBE[0], E, G, TUBE[2], TUBE[1], TUBE[1], 2)
+
+    if variant in ('braced', 'rigid'):
         for brace in model['braces']:
             tag += 1
             a, b = brace['ends']
@@ -97,10 +129,11 @@ def build(model, variant):
         # ledger on it has nothing to lean on and is held rigidly instead.
         chain = next(m['chain'] for m in model['members'] if m['kind'] == 'standard' and m['id'] == support['leg'])
         leans = any(n in framed for n in chain)
+        hinge = support.get('hinge', '') if levered else ''
         if variant == 'rigid' and leans:
             ops.fix(node, 1, 1, 1, 0, 0, 0)
         else:
-            ops.fix(node, 1, 1, 1, 1, 1, 1)
+            ops.fix(node, 1, 1, 1, 0 if 'x' in hinge else 1, 0 if 'y' in hinge else 1, 1)
 
 
 def solve(model, variant, case):
@@ -128,7 +161,9 @@ def main(folder):
             model = json.load(handle)
         result = {'opensees': ops.version(), 'variants': {}}
         for variant in VARIANTS:
-            if variant != 'pinned' and variant != 'rigid' and not model['braces']:
+            if variant == 'levered' and not has_levers(model):
+                continue  # no bracket with a leg behind it: the same as pinned
+            if variant == 'braced' and not model['braces']:
                 continue  # nothing to add
             result['variants'][variant] = {case: solve(model, variant, case) for case in ('dead', 'live')}
         out = path.replace('.model.json', '.reactions.json')

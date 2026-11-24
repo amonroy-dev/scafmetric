@@ -293,6 +293,39 @@ const CHECKS = {
     !(r.afterEsc.tool === 'select' && r.afterEsc.drawn === 0 && r.afterEsc.kept === 3 && r.afterEsc.cardHidden)
       && `Esc should put Select back in hand and take the beam off the canvas, keeping the picks: ${JSON.stringify(r.afterEsc)}`,
   ],
+  onSideBrackets: r => [
+    r.label !== 'On side brackets' && `the Standard card should offer "On side brackets", it says ${r.label}`,
+    !(r.standardPreview.ghosts > 0 && r.standardPreview.pending === 3 && /3 of the 3 brackets/.test(r.standardPreview.hint))
+      && `SHIFT over a bracket's socket should preview a standard in each of the row's three: ${JSON.stringify(r.standardPreview)}`,
+    !(r.stood.added === 3 && r.stood.seated === 3) && `the click should stand three standards in the brackets, and a click on open ground none: ${JSON.stringify(r.stood)}`,
+    r.stood.legs !== 0 && `a standard in a bracket is not a leg, yet the legs changed by ${r.stood.legs}`,
+    !(r.stood.onLifts && r.stood.footAboveBracket === 3.9375) && `its rosettes should be on the scaffold's lifts, its foot 3.9375 in above the bracket's rosette: ${JSON.stringify(r.stood)}`,
+    r.stood.bases !== 0 && 'a standard seated in a bracket should be drawn with no base under it',
+    !(r.deckPreview.ghosts > 0 && r.deckPreview.pending === 2) && `SHIFT with the Plank tool on a bracket should preview a deck in each of the row's two bays: ${JSON.stringify(r.deckPreview)}`,
+    !(r.decked.added === 2 && r.decked.alongFace && r.decked.boards === '2,2') && `two bays decked on the brackets, two boards each, running along the face: ${JSON.stringify(r.decked)}`,
+    !(r.decked.onFrontLegs && r.decked.offBackLegs && Math.abs(r.decked.net - r.decked.deckLb) < 0.2)
+      && `the decks' weight should come down the legs the brackets hang on, levered a little off the legs behind, with nothing lost: ${JSON.stringify(r.decked)}`,
+  ],
+  bracketUplift: r => [
+    !(r.unloaded.tags.length === 1 && !r.unloaded.tags[0].holdDown && r.unloaded.tags[0].text === `${r.unloaded.leg.total} lb` && r.unloaded.leg.total > 0)
+      && `with nothing on the brackets the leg behind carries one plain load tag: ${JSON.stringify(r.unloaded)}`,
+    !(r.loaded.leg.total < 0) && `100 psf on the brackets should put the leg behind them in uplift: ${JSON.stringify(r.loaded.leg)}`,
+    !(r.loaded.tags.length === 2) && `a leg in uplift that needs holding down carries two tags: ${JSON.stringify(r.loaded.tags)}`,
+    !r.loaded.tags.some(t => !t.holdDown && t.text === `Uplift ${-r.loaded.leg.total} lb`)
+      && `its load tag should read "Uplift ${-r.loaded.leg.total} lb": ${JSON.stringify(r.loaded.tags)}`,
+    !r.loaded.tags.some(t => t.holdDown && t.text === `Hold-down ${r.loaded.leg.holdDown} lb`)
+      && `and a second tag should read "Hold-down ${r.loaded.leg.holdDown} lb": ${JSON.stringify(r.loaded.tags)}`,
+    !(r.loaded.leg.holdDown > -r.loaded.leg.total) && `the hold-down against overturning is more than the uplift, never the same number: ${JSON.stringify(r.loaded.leg)}`,
+    !(r.props['Uplift as loaded'] === `${-r.loaded.leg.total} lb` && r.props.Overturning === `${r.loaded.leg.factor} : 1` && r.props['Hold-down for 1.5 : 1'] === `${r.loaded.leg.holdDown} lb`)
+      && `selected, the leg's card should name its uplift, its overturning factor and its hold-down apart: ${JSON.stringify(r.props)}`,
+    !(r.onBeam.rows.length === 3 && r.onBeam.rows.every(row => !/-/.test(row[2] + row[3])))
+      && `a beam under the three back legs should be sent nothing negative: ${JSON.stringify(r.onBeam.rows)}`,
+    !(r.onBeam.rows[1] && r.onBeam.rows[1][2] === `${Math.max(0, r.loaded.leg.dead)} lb` && r.onBeam.rows[1][3] === `${r.loaded.leg.live + r.loaded.leg.liftedLive} lb`)
+      && `the middle leg should send its dead load and its live load without what the brackets lever off: ${JSON.stringify(r.onBeam.rows)} for ${JSON.stringify(r.loaded.leg)}`,
+    !/levers off legs 1, 2 and 3 is not counted/.test(r.onBeam.note) && `the card should say the levered-off live load is not counted, said: ${r.onBeam.note}`,
+    !(r.onBeam.tags.length === 1 && /^2 · \d+ lb$/.test(r.onBeam.tags[0].text))
+      && `picked for the beam the leg shows what it sends and no hold-down tag: ${JSON.stringify(r.onBeam.tags)}`,
+  ],
   backGuard: r => [
     !r.guarded && 'opening the builder should arm the Back guard',
     !(r.stillOpen && r.sameUrl) && `Back (a sideways wheel press) left the builder: open ${r.stillOpen}, same page ${r.sameUrl}`,

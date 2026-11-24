@@ -7,16 +7,16 @@ import { Tools, TOOLS } from './tools.js';
 import { DEFAULT_BAY_LIVE_LOAD_PSF } from './liveloads.js';
 import { workspaceSupported } from './viewport.js';
 import { BRACE_DELTA_LIFT } from './braces.js';
-import { ScaffoldState, stateBounds } from './state.js';
+import { ScaffoldState, stateBounds, OVERTURNING_FACTOR } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, liveLoadArrows, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
 import { BLOCK_DEFAULTS } from './planning.js';
-import { beamUnderPickedLegs, toBeamPointLoads, forBeamForm, wholePoundsOnLeg } from '../legloads.js';
+import { beamUnderPickedLegs, toBeamPointLoads, forBeamForm, wholePoundsOnLeg, loadOnBeamFromLeg } from '../legloads.js';
 import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
-import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN, SHARED_GEO } from './parts.js';
+import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN, SHARED_GEO, sideBracketTip } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
@@ -71,11 +71,19 @@ const BEAM_END_TICK_FT = { along: 0.2, across: 1.6 };
 const BEAM_TAG_OUT_FT = 2.1;
 const BEAM_LEG_OUT = new THREE.MeshStandardMaterial({ color: 0xc2410c, emissive: 0x9a3412, emissiveIntensity: 0.35, metalness: 0.2, roughness: 0.4 });
 // Leg-load tags: dark as a rule; blue and numbered on the beam; the warning
-// colour for a picked leg left off it.
+// colour for a picked leg left off it; red for a leg in uplift.
 const TAG_LEG = { fill: '#18181b', tick: '#fb923c' };
 const TAG_ON_BEAM = { fill: '#2563eb', tick: '#ffffff' };
 const TAG_LEFT_OUT = { fill: '#c2410c', tick: '#ffffff' };
+const TAG_UPLIFT = { fill: '#b91c1c', tick: '#ffffff' };
 const TAG_BEAM_END = { fill: '#2563eb', tick: null };
+// What a leg needs against overturning is not a load on it, and must not be
+// read as one: its tag is outlined, not filled, and sits over the load.
+const TAG_HOLD_DOWN = { fill: '#ffffff', ink: '#b91c1c', edge: '#b91c1c', tick: null, wide: true };
+// Where that second tag sits: one tag's height above the first, on the screen,
+// so the two read as a pair from overhead as well as from the side, and the
+// tags of the legs in front do not cover it.
+const TAG_SECOND_ROW = -0.6;
 
 // As ScaffoldPro's App.tsx: typing in a field keeps the field's own undo.
 function isTextInputTarget(target) {
@@ -138,6 +146,7 @@ const TEMPLATE = `
           <label data-for="standard truss bracket" class="sfw-gap">Size<select id="sfw-part"></select></label>
           <div data-for="standard">
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
+            <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
           <div data-for="brace">
             <div class="sfw-grid2 sfw-mt">
@@ -232,23 +241,27 @@ const TEMPLATE = `
 // tick (the tag on the beam's left support, which is not a load).
 function labelSprite(text, look = TAG_LEG) {
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 64;
+  // A tag that carries words as well as a number is a quarter longer.
+  const w = look.wide ? 320 : 256;
+  c.width = w; c.height = 64;
   const g = c.getContext('2d');
   const r = 14;
   g.beginPath();
-  g.moveTo(r + 2, 2); g.arcTo(254, 2, 254, 62, r); g.arcTo(254, 62, 2, 62, r); g.arcTo(2, 62, 2, 2, r); g.arcTo(2, 2, 254, 2, r);
+  g.moveTo(r + 2, 2); g.arcTo(w - 2, 2, w - 2, 62, r); g.arcTo(w - 2, 62, 2, 62, r); g.arcTo(2, 62, 2, 2, r); g.arcTo(2, 2, w - 2, 2, r);
   g.closePath();
   g.fillStyle = look.fill; g.fill();
+  if (look.edge) { g.lineWidth = 4; g.strokeStyle = look.edge; g.stroke(); }
   if (look.tick) { g.fillStyle = look.tick; g.fillRect(18, 22, 6, 20); }
-  g.fillStyle = '#ffffff';
+  g.fillStyle = look.ink || '#ffffff';
   g.font = '600 30px Inter, "Segoe UI", system-ui, sans-serif';
   g.textAlign = 'center'; g.textBaseline = 'middle';
   // Squeezed rather than cut off when a number and a long load share the tag.
-  if (look.tick) g.fillText(text, 138, 34, 204);
-  else g.fillText(text, 128, 34, 224);
+  if (look.tick) g.fillText(text, w / 2 + 10, 34, w - 52);
+  else g.fillText(text, w / 2, 34, w - 32);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(1.9, 0.48, 1);
+  sp.scale.set(1.9 * w / 256, 0.48, 1);
+  sp.userData.text = text;
   sp.userData.ownsMaterial = true; // its texture is freed when the labels are rebuilt
   return sp;
 }
@@ -449,6 +462,8 @@ class Workspace {
             ? `Loaded ${n} bay${n === 1 ? '' : 's'} at ${this.tools.liveLoadPsf} psf. Ctrl+Z takes it back.`
             : tool === 'bracket'
               ? `Hung ${n} bracket${n === 1 ? '' : 's'} along the run. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
+            : tool === 'bracket standard'
+              ? `Stood ${n} standard${n === 1 ? '' : 's'} along the row of brackets. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
             : n
               ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
               : 'Nothing to add at that level — place more standards first.';
@@ -710,6 +725,14 @@ class Workspace {
     this.$('sfw-stdh').addEventListener('input', e => {
       this.tools.standardTargetHeightFt = Math.max(0, Number(e.target.value) || 0);
     });
+    this.$('sfw-std-brackets').addEventListener('change', e => {
+      this.tools.setStandardsOnBrackets(e.target.checked);
+      this.$('sfw-hint').textContent = e.target.checked
+        ? (this.state.brackets.size ? 'Point at the rosette on the end of a side bracket.' : 'Hang a side bracket first: the standard stands in its socket.')
+        : '';
+      // The sockets that can take a standard light up, as rosettes do for the other tools.
+      this._rebuildNodes();
+    });
     this.$('sfw-brace-dir').addEventListener('change', e => { this.tools.braceDirection = e.target.value; });
     this.$('sfw-brace-filter').addEventListener('change', e => { this.tools.braceFaceFilter = e.target.value; });
     this.$('sfw-brace-nth').addEventListener('change', e => {
@@ -787,7 +810,7 @@ class Workspace {
         return;
       }
       const way = info.across ? 'across the planks' : 'along the planks';
-      const oneWay = info.oneWayOnly ? ' This bay has ledgers on two sides only, so its load stays along the planks.' : '';
+      const oneWay = info.oneWayOnly ? ' This bay is held on two sides only, so its load stays along the planks.' : '';
       if (!count) {
         hint.textContent = info.batch
           ? `Every bay of this platform carries ${info.psf} psf ${way}.`
@@ -814,6 +837,22 @@ class Workspace {
       }
       if (!count) { hint.textContent = 'Every bay at this level already has its ledgers.'; return; }
       hint.textContent = `SHIFT: ${count} ledger${count === 1 ? '' : 's'} to fill this level — click or press Enter.`;
+      return;
+    }
+    if (tool === 'standard' && info.onBrackets) {
+      if (!count) {
+        hint.textContent = info.brackets ? 'Point at the rosette on the end of a side bracket.' : 'Hang a side bracket first: the standard stands in its socket.';
+        return;
+      }
+      if (info.batch) {
+        hint.textContent = info.adding
+          ? `SHIFT: another segment on ${count} standard${count === 1 ? '' : 's'} along this row of brackets — click or press Enter.`
+          : `SHIFT: a standard in ${count} of the ${info.row} brackets along this row — click or press Enter.`;
+        return;
+      }
+      hint.textContent = info.adding
+        ? 'Click to add a segment to the standard on this bracket. SHIFT takes the whole row.'
+        : `Click to stand a ${round(info.totalFt, 2)} ft standard in this bracket. SHIFT takes the whole row.`;
       return;
     }
     if (tool === 'standard' && count > 1) {
@@ -845,7 +884,7 @@ class Workspace {
     }
     if (tool === 'plank') {
       if (value === undefined) hint.textContent = 'Hover a bay, then press R to turn its boards.';
-      else if (value === null) hint.textContent = 'This bay has ledgers on two sides only, so its boards can run one way only.';
+      else if (value === null) hint.textContent = 'This bay is held on two sides only, so its boards can run one way only.';
       else hint.textContent = `Boards now run ${compassAxis(value)}, and stay that way until you press R again.`;
       return;
     }
@@ -853,7 +892,7 @@ class Workspace {
       const sel = this.$('sfw-load-dir');
       if (sel) sel.value = value.across ? 'across' : 'along';
       hint.textContent = value.oneWayOnly
-        ? 'This bay has ledgers on two sides only, so its load stays along the planks.'
+        ? 'This bay is held on two sides only, so its load stays along the planks.'
         : value.across ? 'Loads now run across the planks. R turns them back.' : 'Loads now run along the planks.';
       return;
     }
@@ -909,13 +948,14 @@ class Workspace {
     const g = this.state.geometry();
     for (const s of g.standards) {
       const mat = this._matFor(s.id, MATERIALS.steel);
-      const { meshes } = buildBaseAssembly({
+      // A base under each leg. A standard seated in a side bracket has none.
+      const { meshes } = s.leg ? buildBaseAssembly({
         x: s.x, y: s.y, groundZ: 0,
         jackExtensionIn: this.state.base.jackExtensionIn,
         showWoodSill: this.state.base.showWoodSill,
         showBaseCollar: this.state.base.showBaseCollar,
         material: mat === MATERIALS.steel ? null : mat,
-      });
+      }) : { meshes: [] };
       for (const m of meshes) add(m, { ...m.userData, id: s.id, kind: 'base' });
       add(verticalTube(s.x, s.y, s.baseZ, s.topZ, STANDARD_TUBE_OD_IN, mat), { id: s.id, kind: 'standard' });
     }
@@ -948,6 +988,9 @@ class Workspace {
       for (const m of buildSideBracket({ x: br.x, y: br.y, z: br.z }, br.dir, br.lengthFt, mat)) {
         add(m, { id: br.id, kind: 'bracket' });
       }
+      // A fat invisible target along the arm, so the Plank tool can be pointed
+      // at a bracket as easily as at a ledger. Never selected (a proxy).
+      add(tubePickProxy([br.x, br.y, br.z], sideBracketTip(br, br.dir, br.lengthFt)), { id: br.id, kind: 'bracket', proxy: true });
     }
   }
 
@@ -1021,9 +1064,10 @@ class Workspace {
       if (field) field.value = ll.psf;
       this.tools.liveLoadPsf = ll.psf;
     }
+    // A row may carry a third item: what it means, shown when it is pointed at.
     const rows = this._describe(id);
     el.innerHTML = `<dl class="sfw-proplist">` +
-      rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('') + '</dl>';
+      rows.map(([k, v, means]) => `<div${means ? ` title="${means}"` : ''}><dt>${k}</dt><dd>${v}</dd></div>`).join('') + '</dl>';
   }
 
   _kindOf(id) {
@@ -1044,10 +1088,31 @@ class Workspace {
     if (st) {
       const { legs } = this.state.takeoff();
       const leg = legs.find(l => l.id === id);
-      return [['Type', 'Standard'], ['Position', `${r(st.x)}, ${r(st.y)} ft`],
+      // Seated in a side bracket it is not a leg: its weight is on the leg the bracket hangs on.
+      if (!this.state.isLeg(st)) {
+        return [['Type', 'Standard on a side bracket'], ['Position', `${r(st.x)}, ${r(st.y)} ft`],
+          ['Segments', st.segments.map(x => `${r(x)} ft`).join(' + ')],
+          ['Height', `${r(this.state.standardHeightFt(st))} ft`],
+          ['Foot at', `${r(this.state.standardBaseZ(st))} ft`]];
+      }
+      const rows = [['Type', 'Standard'], ['Position', `${r(st.x)}, ${r(st.y)} ft`],
         ['Segments', st.segments.map(x => `${r(x)} ft`).join(' + ')],
         ['Height', `${r(this.state.standardHeightFt(st))} ft`],
-        ['Dead', `${Math.round(leg?.deadLb ?? 0)} lb`], ['Live', `${Math.round(leg?.liveLb ?? 0)} lb`]];
+        ['Dead', `${Math.round(leg?.deadLb ?? 0) + 0} lb`], ['Live', `${Math.round(leg?.liveLb ?? 0) + 0} lb`]];
+      // A leg side brackets lever load off. Its uplift is its load as the
+      // scaffold stands; what it takes to hold it down against overturning is
+      // a separate figure with a margin in it, and each is named for what it is.
+      const pounds = leg ? wholePoundsOnLeg(leg) : 0;
+      if (pounds < 0) rows.push(['Uplift as loaded', `${-pounds} lb`, 'This leg’s load with everything placed on the scaffold at once. No safety factor: it is not what it takes to hold the scaffold down.']);
+      const over = leg?.overturning;
+      if (over) {
+        rows.push(['Overturning', `${r(over.factor)} : 1`, 'The dead load holding this leg down, against what the side brackets lift off it. Live load behind the brackets is not counted.']);
+        if (Math.round(over.holdDownLb) > 0) {
+          rows.push([`Hold-down for ${OVERTURNING_FACTOR} : 1`, `${Math.round(over.holdDownLb)} lb`,
+            `Counterweight or an anchor to add at this leg for ${OVERTURNING_FACTOR} to 1 against overturning. More than the uplift, and needed even where there is none. Wind and ties are not in it.`]);
+        }
+      }
+      return rows;
     }
     for (const [map, label] of [[this.state.ledgers, 'Ledger'], [this.state.braces, 'Brace'], [this.state.trusses, 'Truss'], [this.state.guardrails, 'Guardrail']]) {
       const m = map.get(id);
@@ -1114,11 +1179,29 @@ class Workspace {
       const number = plan?.numbers.get(leg.id);
       const leftOut = !!plan && !number && this.beamLegs.has(leg.id);
       if (!this.showLegLoads && !number && !leftOut) continue;
-      const load = `${wholePoundsOnLeg(leg)} lb`;
-      const sp = number ? labelSprite(`${number} · ${load}`, TAG_ON_BEAM) : labelSprite(load, leftOut ? TAG_LEFT_OUT : TAG_LEG);
+      // A leg picked for the beam shows what it sends there, which leaves out
+      // the live load a bracket levers off it. Any other leg shows its load as
+      // the scaffold stands, and says so when that is uplift.
+      const pounds = wholePoundsOnLeg(plan && this.beamLegs.has(leg.id) ? loadOnBeamFromLeg(leg) : leg);
+      const load = pounds < 0 ? `Uplift ${-pounds} lb` : `${pounds} lb`;
+      const sp = number ? labelSprite(`${number} · ${load}`, TAG_ON_BEAM)
+        : labelSprite(load, leftOut ? TAG_LEFT_OUT : pounds < 0 ? TAG_UPLIFT : TAG_LEG);
       sp.userData.legId = leg.id; // a click on the tag is a click on its leg
-      sp.position.set(s.x, s.y, this.state.standardTopZ(s) + 1.1);
+      const top = this.state.standardTopZ(s) + 1.1;
+      sp.position.set(s.x, s.y, top);
       this.labelGroup.add(sp);
+      // What it takes to hold this leg down against overturning: a tag of its
+      // own over the load, so that neither number is taken for the other.
+      // Not while legs are being picked for a beam, which is about loads.
+      const holdDown = plan ? 0 : Math.round(leg.overturning?.holdDownLb || 0);
+      if (holdDown > 0) {
+        const tag = labelSprite(`Hold-down ${holdDown} lb`, TAG_HOLD_DOWN);
+        tag.userData.legId = leg.id;
+        tag.userData.holdDown = true;
+        tag.center.set(0.5, TAG_SECOND_ROW);
+        tag.position.set(s.x, s.y, top);
+        this.labelGroup.add(tag);
+      }
     }
   }
 
@@ -1129,7 +1212,7 @@ class Workspace {
     const tool = this.tools?.tool;
     // Only the tools that start from a node light them up. Decks, braces and
     // load patches work off ledgers and faces, so they leave nodes neutral.
-    const nodeTool = tool === 'ledger' || tool === 'truss' || tool === 'bracket';
+    const nodeTool = tool === 'ledger' || tool === 'truss' || tool === 'bracket' || (tool === 'standard' && !!this.tools.standardsOnBrackets);
     const validFor = this._nodeValidator(tool);
     const meshes = [];
     for (const n of this.state.nodes()) {
@@ -1149,6 +1232,8 @@ class Workspace {
 
   /** Can the active tool start a placement from this node? */
   _nodeValidator(tool) {
+    // With "On side brackets" ticked: the tip rosettes whose socket can take a standard.
+    if (tool === 'standard') return n => { const seat = n.bracketId ? this.state.bracketSeat(n.bracketId) : null; return !!seat && !seat.blocked; };
     if (tool === 'ledger') return n => this.tools.ledgerTargetFor(n) !== null;
     // A rosette takes a truss when another sits the truss's own length away along a run.
     if (tool === 'truss') return n => this.tools._trussCandidates(n).length > 0;
@@ -1250,9 +1335,12 @@ class Workspace {
     const ft = v => `${round(v, 2)} ft`;
     const lb = v => `${Math.round(v).toLocaleString('en-US')} lb`;
     this.$('sfw-span').textContent = `${round(plan.span, 3)} ft`;
+    // What each leg sends, which is its load less any live load a side
+    // bracket levers off it: see loadOnBeamFromLeg.
+    const sends = r => { const s = loadOnBeamFromLeg(r.leg); return `<td>${lb(s.deadLb)}</td><td>${lb(s.liveLb)}</td>`; };
     const rows = [
-      ...plan.sent.map(r => `<tr><td>${plan.numbers.get(r.leg.id)}</td><td>${ft(r.locationFt)}</td><td>${lb(r.leg.deadLb)}</td><td>${lb(r.leg.liveLb)}</td></tr>`),
-      ...plan.leftOut.map(r => `<tr class="sfw-off"><td>–</td><td>${r.onBeam ? ft(r.locationFt) : 'Not in line'}</td><td>${lb(r.leg.deadLb)}</td><td>${lb(r.leg.liveLb)}</td></tr>`),
+      ...plan.sent.map(r => `<tr><td>${plan.numbers.get(r.leg.id)}</td><td>${ft(r.locationFt)}</td>${sends(r)}</tr>`),
+      ...plan.leftOut.map(r => `<tr class="sfw-off"><td>–</td><td>${r.onBeam ? ft(r.locationFt) : 'Not in line'}</td>${sends(r)}</tr>`),
     ];
     this.$('sfw-rows').innerHTML = rows.join('') || '<tr><td colspan="4" class="sfw-empty">Click the legs that sit on the beam.</td></tr>';
     // Whole pounds, and feet to the hundredth: what the rows above show is
@@ -1272,6 +1360,13 @@ class Workspace {
     if (offLine) out.push(`${legs(offLine)} not in line with the rest`);
     if (pastEnd) out.push(`${legs(pastEnd)} past the end of the ${round(plan.span, 2)} ft beam`);
     if (out.length) notes.push(`Left out: ${out.join(', ')}.`);
+    // A leg behind a loaded bracket shows less on the scaffold than it sends:
+    // worth a line, or the two numbers look like a mistake.
+    const relieved = plan.sent.filter(r => Math.round(r.leg.lifted?.liveLb || 0) > 0).map(r => plan.numbers.get(r.leg.id));
+    if (relieved.length) {
+      const list = relieved.length > 1 ? `${relieved.slice(0, -1).join(', ')} and ${relieved[relieved.length - 1]}` : `${relieved[0]}`;
+      notes.push(`The live load a side bracket levers off leg${relieved.length > 1 ? 's' : ''} ${list} is not counted: the bracket may be empty.`);
+    }
     // Live load is only what the Live load tool placed, so a planked scaffold
     // with none placed sends dead load alone: worth saying before it is imported.
     const planked = this.state.planks.size + this.state.plankPlacements.size > 0;

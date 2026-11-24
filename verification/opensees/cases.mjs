@@ -5,10 +5,13 @@
 // many, one planked level and two, square bays and long ones, bracing, rails,
 // brackets and trusses, a leg under the middle of a ledger, decks hung on
 // ledgers with the Plank tool, loads turned across the boards, different loads
-// side by side, and bays left unloaded.
+// side by side, and bays left unloaded. And side brackets carrying something:
+// a deck on their arms, a deck on a ledger between their tips, standards
+// seated in them with ledgers, a brace and a deck of their own, and a run two
+// bays deep, where the brackets lever against the middle row and not the back.
 
 import * as THREE from 'three';
-import { ScaffoldState } from '../../src/scaffold/workspace/state.js';
+import { ScaffoldState, ARM_PREFIX } from '../../src/scaffold/workspace/state.js';
 import { CATALOG } from '../../src/scaffold/workspace/catalog.js';
 import { analyzeBeam } from '../../src/beam.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../../src/scaffold/legloads.js';
@@ -139,7 +142,93 @@ export const CASES = {
     s.addTruss([a.x, a.y, a.z], [b.x, b.y, b.z], 'truss');
     return s;
   },
+
+  // Side brackets off the front of a three-bay run, decked from arm to arm with
+  // the boards running along the face, and loaded three times as heavily as
+  // the deck behind. A bracket is a cantilever off one standard, so every
+  // pound on it has to come down the front legs and none down the back ones;
+  // and standing outside the front legs, it levers more onto them from the
+  // back ones.
+  'brackets-decked-along-the-row': () => {
+    const { s, brackets, front } = runWithBrackets();
+    deckBrackets(s, brackets);
+    return load(s, deck => ({ psf: deck.frame.center.y < front ? 75 : 25 }));
+  },
+
+  // The same run with longer brackets, a ledger from tip to tip, and the
+  // boards laid out from the face: one end on the face ledger, the other on
+  // the ledger between the tips, which only the brackets hold up. Enough
+  // leverage here to put the back legs in uplift.
+  'bracket-bay-on-tip-ledgers': () => {
+    const { s, brackets, front } = runWithBrackets({ reachFt: 3 });
+    const tips = brackets.map(k => s.bracketTipNode(k));
+    for (let i = 0; i < tips.length - 1; i++) {
+      const l = s.addLedger([tips[i].x, tips[i].y, tips[i].z], [tips[i + 1].x, tips[i + 1].y, tips[i + 1].z]);
+      // Side +1 of a ledger drawn toward +x is the +y side: back toward the face.
+      s.addPlankOnLedger(l.id, 1);
+    }
+    return load(s, deck => ({ psf: deck.frame.center.y < front ? 60 : 25 }));
+  },
+
+  // A standard seated in each bracket, which makes an outer row: a ledger
+  // along it two lifts up, a ledger from each back to the scaffold, a brace up
+  // it from one bracket's tip rosette, and the brackets decked and loaded.
+  // None of those standards reaches the ground, so all of it comes down the
+  // legs the brackets hang on.
+  'standards-on-brackets': () => {
+    const { s, brackets, deckZ, front } = runWithBrackets();
+    const lift = s.liftAt(deckZ);
+    for (const k of brackets) s.addStandardOnBracket(k.id, 6.5625);
+    const seated = brackets.map(k => [...s.standards.values()].find(c => c.bracketId === k.id));
+    const hosts = brackets.map(k => s.standardAt(k.x, k.y));
+    const rosette = (c, level) => s.nodes().find(n => n.columnId === c.id && n.level === level);
+    const xyz = n => [n.x, n.y, n.z];
+    for (let i = 0; i < seated.length; i++) {
+      const here = rosette(seated[i], lift + 2);
+      if (i < seated.length - 1) s.addLedger(xyz(here), xyz(rosette(seated[i + 1], lift + 2)));
+      s.addLedger(xyz(rosette(hosts[i], lift + 2)), xyz(here));
+    }
+    s.addBrace(xyz(s.bracketTipNode(brackets[0])), xyz(rosette(seated[1], lift + 4)));
+    deckBrackets(s, brackets);
+    return load(s, deck => ({ psf: deck.frame.center.y < front ? 50 : 25 }));
+  },
+
+  // A run two bays deep with brackets off its front, decked and loaded. Each
+  // bracket levers against the leg next behind it, in the middle row, and the
+  // back row carries what it carried before.
+  'brackets-on-a-run-two-bays-deep': () => {
+    const { s, brackets, front } = runWithBrackets({ widthFt: 14, depthFt: 12 });
+    deckBrackets(s, brackets);
+    return load(s, deck => ({ psf: deck.frame.center.y < front ? 75 : 25 }));
+  },
 };
+
+/**
+ * A run of 7 ft bays with one planked level and a side bracket on each front
+ * standard at the deck's lift, pointing out from the face. Returns the
+ * brackets in order along the run, the deck's height and the front line.
+ */
+function runWithBrackets({ reachFt = 2, widthFt = 21, depthFt = 3 } = {}) {
+  const s = blocks([{ settings: { widthFt, depthFt, heightFt: 13 } }]);
+  const deckZ = s.plankBays()[0].z;
+  const front = Math.min(...[...s.standards.values()].map(c => c.y));
+  const nodes = s.nodes();
+  const brackets = [...s.standards.values()]
+    .filter(c => Math.abs(c.y - front) < 1e-6)
+    .sort((a, b) => a.x - b.x)
+    .map(c => s.addBracket(nodes.find(n => n.columnId === c.id && Math.abs(n.z - deckZ) < 1e-6), [0, -1], reachFt));
+  return { s, brackets, deckZ, front };
+}
+
+/** Deck every bay between two neighbouring bracket arms, the boards running from arm to arm. */
+function deckBrackets(s, brackets) {
+  const arm = k => `${ARM_PREFIX}${k.id}`;
+  // Which side of an arm the next bracket is on depends on which way the
+  // bracket points; the first arm settles it for the row.
+  const side = s.addPlankOnLedger(arm(brackets[0]), 1) ? 1 : -1;
+  if (side === -1) s.addPlankOnLedger(arm(brackets[0]), -1);
+  for (const k of brackets.slice(1, -1)) s.addPlankOnLedger(arm(k), side);
+}
 
 /**
  * A beam under the front row of a scaffold's legs, as Send to beam sets it up:

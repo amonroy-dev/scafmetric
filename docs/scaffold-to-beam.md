@@ -52,12 +52,44 @@ Tributary method, with every ledger taken as a simple span between standards:
   corner that is a quarter each; a leg under the middle of a side ledger carries
   none.
 - **Guardrails** are one tube between each pair of standards a rail runs past.
+- **Side brackets** are cantilevers off one standard, so everything a bracket
+  carries comes down the leg it hangs on and no other: a deck on its arm, the
+  live load on that deck, a standard seated in its socket, and whatever that
+  standard carries in turn. A standard seated in a bracket is not a leg: it has
+  no base, no load tag, and is not offered to Send to beam.
+- **A bracket's leverage.** That load stands outside the leg, and a leg on a
+  screw jack cannot hold the overturning by itself. The frame holds it as a pair
+  of forces: more on the leg the bracket hangs on, and the same amount less on
+  the leg behind it. Each is the load times how far out it acts, divided by the
+  distance between the two legs. The leg behind is the nearest one a ledger or
+  truss runs back to; with none, the load stays where it was. This is statics,
+  not stiffness, so it is still a takeoff and not a frame analysis.
 - **Live per leg** = only the live loads placed with the Live load tool (below).
   A planked bay carries no live load of its own.
 - The leg dead loads add up to the parts list weight.
 
 These leg loads are checked against OpenSees, leg by leg, and match to within
 0.01 lb: see [verification/opensees](../verification/opensees/README.md).
+
+### Uplift, and holding down against overturning
+
+Enough load on a bracket and the leg behind it has less than nothing on it. The
+builder shows that in two separate figures, because they are two different
+things and the first must not be read as the second:
+
+- **Uplift** is the leg's load as the scaffold stands, with everything placed on
+  it at once and no safety factor. Its tag turns red and reads "Uplift 270 lb".
+- **Hold-down** is what must be added at that leg, as counterweight or an
+  anchor, for the dead load holding the scaffold down to be 1.5 times what the
+  brackets lift. It has its own outlined tag over the leg's load, and the
+  Select card lists "Overturning" (the factor the leg has) and "Hold-down for
+  1.5 : 1". Live load on the deck behind is not counted as holding anything
+  down.
+
+The hold-down is always more than the uplift, and a leg with no uplift can still
+need one. Where the 1.5 comes from, why it is not the 4 of a scaffold's
+strength, and what the figure leaves out (wind, ties) are in
+[scaffold-overturning.md](scaffold-overturning.md).
 
 It is a tributary takeoff, not a frame analysis. Where a loaded ledger runs over
 a standard, or braces link legs carrying different loads, a frame analysis moves
@@ -90,6 +122,29 @@ ledgers whole, which is what a fine mesh converges to, so a hand check of a
 rectangular bay agrees exactly. A load sits on its deck: remove the planks and the
 load goes with them.
 
+## Side brackets that carry something
+
+- **Standards.** In the Standard tool's card, **On side brackets** makes the tool
+  stand its standard in a bracket's socket and nowhere else: point at the
+  rosette on the end of a bracket and click. Shift stands one in every free
+  socket along that row of brackets. The standard seats 3.9375 in above the
+  rosette the bracket hangs on, which puts its own rosettes exactly on the lifts
+  of the scaffold beside it (ScaffoldPro's socket shoulder at 3.925 in, plus the
+  0.0125 in its tip rosette sits below the bracket's). A second click on the
+  same socket adds a segment on top. Removing a bracket removes the standard in
+  it.
+- **Planks.** Point the Plank tool at a bracket: the boards are laid from that
+  bracket's arm to the next one's, running along the face, with no ledger
+  between the tips. Shift decks the whole row of brackets. Two arms more than
+  10.5 ft apart are not one deck. With a ledger from tip to tip, R turns the
+  boards to run out from the face instead, bearing on the face ledger and the
+  tip ledger.
+- **Braces.** The Brace tool works on the outer row: between two standards seated
+  in neighbouring brackets (from one bracket's tip rosette up the next
+  standard), and on the short face from a seated standard back to the standard
+  its bracket hangs on. A Shift fill braces the outer row but not those short
+  faces, which would otherwise get a brace at every bracket.
+
 ## Picking legs and importing
 
 **To beam** in the toolbar opens the Send to beam card. With it open, a click on a
@@ -118,6 +173,12 @@ hundredth of a foot. The takeoff works in fractions of a pound; carried over
 unrounded, a leg read "2,103.8769 lbs" on the beam diagram, which looks like a
 load a thousand times its size. Importing replaces any rows imported before;
 loads typed in by hand are left alone.
+
+A leg behind a loaded side bracket sends more than its tag on the scaffold
+shows. The live load the bracket levers off it is not counted, since the bracket
+can be empty while the deck behind is loaded, and a leg never sends a negative
+load. The card says which legs this applies to (`loadOnBeamFromLeg` in
+`src/scaffold/legloads.js`).
 
 ## The estimating-use notice
 

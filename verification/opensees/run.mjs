@@ -10,8 +10,10 @@
 // placed parts (model.mjs), has OpenSees solve it (solve.py), and sets the
 // vertical reaction at each base beside the leg load the builder reports. The
 // "pinned" solution is the load path a tributary takeoff assumes, so the
-// builder must equal it to the pound. The "braced" and "rigid" solutions show
-// how far a frame analysis moves from that.
+// builder must equal it to the pound. Where side brackets have a leg behind
+// them the builder also levers their load against that leg, and there it must
+// equal the "levered" solution, which does the same by statics. The "braced"
+// and "rigid" solutions show how far a frame analysis moves from that.
 
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +26,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, 'out');
 const save = process.argv.includes('--save');
 const python = process.env.OPENSEES_PYTHON || 'python';
-// The builder must match the pinned solution this closely, in pounds.
+// The builder must match the solution it is held to this closely, in pounds.
 const TOLERANCE_LB = 0.01;
 
 rmSync(out, { recursive: true, force: true });
@@ -50,7 +52,9 @@ const summary = [];
 
 for (const [name, { state, model }] of Object.entries(built)) {
   const result = JSON.parse(readFileSync(join(out, `${name}.reactions.json`), 'utf8'));
-  const pinned = result.variants.pinned;
+  // What the builder is held to: the levered solution where there is one.
+  const heldTo = result.variants.levered ? 'levered' : 'pinned';
+  const pinned = result.variants[heldTo];
   const takeoff = state.takeoff();
   const legs = takeoff.legs.map(l => ({ id: l.id, x: l.x, y: l.y, deadLb: l.deadLb, liveLb: l.liveLb }));
   const sum = o => Object.values(o).reduce((a, b) => a + b, 0);
@@ -59,7 +63,7 @@ for (const [name, { state, model }] of Object.entries(built)) {
   for (const note of model.notes) console.log(`  note: ${note}`);
   console.log(`  weight in the model: dead ${model.totals.deadLb.toFixed(2)} lb, live ${model.totals.liveLb.toFixed(2)} lb`
     + (model.totals.unsupportedLb ? `, NOT CARRIED ${model.totals.unsupportedLb.toFixed(2)} lb` : ''));
-  console.log(`  OpenSees reactions:  dead ${sum(pinned.dead).toFixed(2)} lb, live ${sum(pinned.live).toFixed(2)} lb`);
+  console.log(`  OpenSees reactions:  dead ${sum(pinned.dead).toFixed(2)} lb, live ${sum(pinned.live).toFixed(2)} lb (${heldTo})`);
   console.log(`  builder leg loads:   dead ${takeoff.totals.deadLb.toFixed(2)} lb, live ${takeoff.totals.liveLb.toFixed(2)} lb`);
   console.log('  leg        x      y |  dead: builder  OpenSees      diff |  live: builder  OpenSees      diff');
   let caseWorst = 0;
@@ -70,8 +74,22 @@ for (const [name, { state, model }] of Object.entries(built)) {
   }
   worst = Math.max(worst, caseWorst);
 
-  // How far the frame solutions move from the pinned one, as the largest
-  // change in any leg's total (dead + live) load.
+  // What the leverage of the brackets does, against the plain tributary answer.
+  if (heldTo === 'levered') {
+    const plain = result.variants.pinned;
+    let up = { lb: 0 }, down = { lb: 0 }, uplift = 0;
+    for (const leg of legs) {
+      const base = plain.dead[leg.id] + plain.live[leg.id];
+      const moved = pinned.dead[leg.id] + pinned.live[leg.id] - base;
+      if (moved > up.lb) up = { lb: moved, pct: 100 * moved / base, leg: leg.id };
+      if (moved < down.lb) down = { lb: moved, pct: 100 * moved / base, leg: leg.id };
+      if (pinned.dead[leg.id] + pinned.live[leg.id] < 0) uplift++;
+    }
+    console.log(`  leverage: ${up.leg} gains ${up.lb.toFixed(1)} lb (${up.pct.toFixed(1)}%), ${down.leg} loses ${(-down.lb).toFixed(1)} lb (${(-down.pct).toFixed(1)}%), ${uplift} leg(s) in uplift`);
+  }
+
+  // How far the frame solutions move from the one the builder is held to, as
+  // the largest change in any leg's total (dead + live) load.
   const frames = {};
   for (const variant of ['braced', 'rigid']) {
     const v = result.variants[variant];
@@ -85,7 +103,7 @@ for (const [name, { state, model }] of Object.entries(built)) {
     frames[variant] = most;
     console.log(`  ${variant.padEnd(6)} frame: the leg that moves most is ${most.leg}, by ${most.lb.toFixed(1)} lb (${most.pct.toFixed(1)}% of its load)`);
   }
-  summary.push({ name, legs: legs.length, worst: caseWorst, frames });
+  summary.push({ name, legs: legs.length, worst: caseWorst, frames, heldTo });
 
   if (save) {
     const ref = {
@@ -140,7 +158,7 @@ let beamMatches = false;
 console.log('\n=== summary ===');
 for (const s of summary) {
   const frames = Object.entries(s.frames).map(([k, v]) => `${k} ${v.pct >= 0 ? '+' : ''}${v.pct.toFixed(1)}%`).join(', ');
-  console.log(`  ${s.name.padEnd(26)} ${String(s.legs).padStart(3)} legs   builder vs pinned: ${s.worst < TOLERANCE_LB ? 'matches' : `OFF BY ${s.worst.toFixed(2)} lb`}${frames ? `   frames: ${frames}` : ''}`);
+  console.log(`  ${s.name.padEnd(32)} ${String(s.legs).padStart(3)} legs   builder vs ${s.heldTo.padEnd(7)}: ${s.worst < TOLERANCE_LB ? 'matches' : `OFF BY ${s.worst.toFixed(2)} lb`}${frames ? `   frames: ${frames}` : ''}`);
 }
 console.log(`  beam under the front legs      reactions, moment and deflection: ${beamMatches ? 'match' : 'DO NOT MATCH'}`);
 console.log(worst < TOLERANCE_LB

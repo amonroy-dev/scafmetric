@@ -424,6 +424,23 @@ export function sideBracketTip(node, dir, lengthFt) {
   return [node.x + ux * lengthFt, node.y + uy * lengthFt, node.z];
 }
 
+/**
+ * How far out from its standard a bracket's own weight acts: the centre of its
+ * tube, taken by length, since every member is weighed at the same pounds a
+ * foot. A little under half the reach.
+ */
+export function sideBracketCentroidOutFt(lengthFt) {
+  const { points, members } = sideBracketFrame(lengthFt);
+  let tube = 0, moment = 0;
+  for (const m of members) {
+    const [ao, au] = points[m.a], [bo, bu] = points[m.b];
+    const len = Math.hypot(bo - ao, bu - au);
+    tube += len;
+    moment += len * (ao + bo) / 2;
+  }
+  return tube > 0 ? moment / tube : 0;
+}
+
 /** Total tube in one bracket, for its self-weight. */
 export function sideBracketTubeLengthFt(lengthFt) {
   const { points, members } = sideBracketFrame(lengthFt);

@@ -1031,7 +1031,7 @@ window.__sv = (() => {
       ws().tools.bracketTurn = 0;
       const added = [...s.brackets.values()].slice(bracketsBefore);
       let members = 0;
-      for (const o of ws().contentGroup.children) for (const d of o.userData.items || []) if (d.kind === 'bracket' && added.some(k => k.id === d.id)) members++;
+      for (const o of ws().contentGroup.children) for (const d of o.userData.items || []) if (d.kind === 'bracket' && !d.proxy && added.some(k => k.id === d.id)) members++; // the invisible pick target along the arm is not a member
       const tips = s.nodes().filter(n => added.some(k => k.id === n.bracketId));
 
       // From one tip, the ledger tool runs to the next tip along the row.
@@ -1212,6 +1212,155 @@ window.__sv = (() => {
       ws()._frame();
       await raf(6);
       return { opened, hovered, picked, want, afterSecondClick, inboard, formRows, closedByImport, note, afterEsc };
+    },
+
+    // Side brackets that carry something: standards seated in their sockets
+    // with "On side brackets" ticked (SHIFT takes the row), and boards laid
+    // from arm to arm with the Plank tool. Their load must come down the legs
+    // the brackets hang on.
+    async onSideBrackets() {
+      const s = ws().state, t = ws().tools;
+      // A run of its own, clear of the rest of the model: two bays, one deck.
+      const before = { ...t.blockSettings };
+      t.setBlockSettings({ widthFt: 14, depthFt: 3, heightFt: 13, plankedLevelsCount: 1, includeBaseDeck: false, guardrails: false, braceFrontBack: 'off', braceLeftRight: 'off' });
+      const existing = new Set(s.standards.keys());
+      t.placeBlockAt({ plan: t._blockPlan(), center: { x: 90, y: 0 }, snapped: false, rotationSteps: 0 });
+      t.setBlockSettings(before);
+      const mine = [...s.standards.values()].filter(c => !existing.has(c.id));
+      const front = Math.min(...mine.map(c => c.y));
+      const deckZ = Math.max(...s.plankBays().filter(d => d.frame.center.x > 80).map(d => d.z));
+      const nodes = s.nodes();
+      const hosts = mine.filter(c => Math.abs(c.y - front) < 1e-6).sort((a, b) => a.x - b.x);
+      const ks = hosts.map(c => s.addBracket(nodes.find(n => n.columnId === c.id && Math.abs(n.z - deckZ) < 1e-6), [0, -1], 2));
+      // Framed on this run alone: the whole model is far wider by now.
+      const box = ws()._modelBox();
+      box.min.set(80, -6, 0);
+      box.max.set(100, 4, 16);
+      ws().engine.setView('home');
+      ws().engine.frame(box);
+      await raf(8);
+      const legLoad = () => Object.fromEntries(s.takeoff().legs.filter(l => l.x > 80).map(l => [`${l.x},${l.y}`, Math.round(l.deadLb * 100) / 100]));
+      const legsBefore = s.takeoff().legs.length;
+
+      // Standards: tick the box, SHIFT over one socket, click.
+      tool('standard');
+      await raf(3);
+      const tick = ws().$('sfw-std-brackets');
+      const label = tick.closest('label').textContent.trim();
+      tick.click();
+      await raf(3);
+      const socket = [ks[1].x, ks[1].y - 2, ks[1].z];
+      await hover(socket, { shift: true });
+      const standardPreview = { hint: hint(), ghosts: t.ghostGroup.children.length, pending: t._pendingBatch ? t._pendingBatch.count : 0 };
+      const standardsBefore = s.standards.size;
+      await click(socket, { shift: true });
+      const seated = [...s.standards.values()].filter(c => c.bracketId);
+      // On open ground the tool stands nothing while the box is ticked.
+      await click([90, -14, 0]);
+      const stood = {
+        added: s.standards.size - standardsBefore, seated: seated.length, legs: s.takeoff().legs.length - legsBefore,
+        onLifts: seated.every(c => s.nodes().filter(n => n.columnId === c.id && !n.bracketId).every(n => Math.abs(n.z - s.liftZ(n.level)) < 1e-9)),
+        footAboveBracket: Math.round((s.standardBaseZ(seated[0]) - ks[0].z) * 12 * 10000) / 10000,
+        bases: ws().contentGroup.children.reduce((n, o) => n + (o.userData.items || []).filter(d => d.kind === 'base' && seated.some(c => c.id === d.id)).length, 0),
+      };
+      tick.click();
+      await raf(2);
+
+      // Decks: the Plank tool pointed at a bracket's arm, SHIFT for the row.
+      const before2 = legLoad();
+      tool('plank');
+      await raf(3);
+      const onArm = [ks[1].x, ks[1].y - 1, ks[1].z];
+      await hover(onArm, { shift: true });
+      const deckPreview = { hint: hint(), ghosts: t.ghostGroup.children.length, pending: t._pendingBatch ? t._pendingBatch.count : 0 };
+      const decksBefore = s.plankBays().length;
+      await click(onArm, { shift: true });
+      const decks = s.plankBays().filter(d => d.frame.center.x > 80 && d.frame.center.y < front);
+      const after2 = legLoad();
+      const moved = Object.fromEntries(Object.keys(after2).map(k => [k, Math.round((after2[k] - before2[k]) * 100) / 100]));
+      const frontKeys = hosts.map(c => `${c.x},${c.y}`);
+      const backMoved = Object.keys(moved).filter(k => !frontKeys.includes(k)).map(k => moved[k]);
+      const psf = s.components.plank.areaWeightLbPerFt2;
+      const decked = {
+        added: s.plankBays().length - decksBefore,
+        alongFace: decks.every(d => Math.abs(d.frame.along.x) > 0.99),
+        boards: decks.map(d => d.boards.length).join(),
+        onFrontLegs: frontKeys.every(k => moved[k] > 0),
+        // Out past the front legs, the decks lever a little off the back ones.
+        offBackLegs: backMoved.length === 3 && backMoved.every(v => v < 0),
+        net: Math.round(Object.values(moved).reduce((a, b) => a + b, 0) * 10) / 10,
+        deckLb: Math.round(decks.reduce((sum, d) => sum + d.boards.reduce((w, b) => w + b.widthIn / 12 * b.lengthFt * psf, 0), 0) * 10) / 10,
+        ledgersAdded: 0,
+      };
+      tool('select');
+      ws()._frame();
+      await raf(6);
+      return { label, standardPreview, stood, deckPreview, decked };
+    },
+
+    // A loaded bracket levers load off the leg behind it. Enough of it and that
+    // leg is in uplift, and its tag says so. What it takes to hold the leg
+    // down against overturning is a second tag with a larger number on it,
+    // named for what it is, so that the uplift is never read as that. And a
+    // beam under those legs is given no credit for the live load levered off.
+    async bracketUplift() {
+      const s = ws().state;
+      const run = [...s.standards.values()].filter(c => !c.bracketId && c.x > 80);
+      const front = Math.min(...run.map(c => c.y));
+      const backs = run.filter(c => c.y > front + 1).sort((a, b) => a.x - b.x);
+      const middle = backs[1];
+      const tagsOf = id => ws().labelGroup.children.filter(c => c.userData.legId === id).map(c => ({ text: c.userData.text, holdDown: !!c.userData.holdDown }));
+      const figures = () => {
+        const l = s.takeoff().legs.find(x => x.id === middle.id);
+        return {
+          dead: Math.round(l.deadLb), live: Math.round(l.liveLb), total: Math.round(l.deadLb) + Math.round(l.liveLb),
+          holdDown: Math.round(l.overturning ? l.overturning.holdDownLb : 0),
+          factor: l.overturning ? Math.round(l.overturning.factor * 100) / 100 : null,
+          liftedLive: Math.round(l.lifted ? l.lifted.liveLb : 0),
+        };
+      };
+      const unloaded = { leg: figures(), tags: tagsOf(middle.id) };
+
+      // 100 psf on the two decks the brackets carry, and nothing behind them.
+      for (const d of s.plankBays().filter(d => d.frame.center.x > 80 && d.frame.center.y < front)) s.setDeckLiveLoad(d.id, 100);
+      await raf(4);
+      const loaded = { leg: figures(), tags: tagsOf(middle.id) };
+
+      // Selected, the card names each figure.
+      ws().selection = [middle.id];
+      ws()._rebuildContent();
+      ws()._refreshProps();
+      await raf(3);
+      const props = Object.fromEntries([...ws().$('sfw-props').querySelectorAll('.sfw-proplist > div')].map(d => [d.children[0].textContent, d.children[1].textContent]));
+      ws().selection = [];
+      ws()._rebuildContent();
+      ws()._refreshProps();
+
+      // On a beam: the back legs, picked in place of whatever was picked before.
+      const kept = [...ws().beamLegs];
+      ws().root.querySelector('.sfw-tool[data-tool="beam"]').click();
+      await raf(3);
+      ws().beamLegs.clear();
+      for (const c of backs) ws().beamLegs.add(c.id);
+      ws()._beamChanged();
+      await raf(3);
+      const onBeam = {
+        rows: [...ws().$('sfw-rows').querySelectorAll('tr')].map(r => [...r.children].map(c => c.textContent)),
+        note: ws().$('sfw-warn').hidden ? '' : ws().$('sfw-warn').textContent,
+        tags: tagsOf(middle.id),
+      };
+      ws().beamLegs.clear();
+      for (const id of kept) ws().beamLegs.add(id);
+      ws()._beamChanged();
+      tool('select');
+      // Framed on this run from overhead, where the two tags must still read apart.
+      const box = ws()._modelBox();
+      box.min.set(80, -6, 0);
+      box.max.set(100, 6, 16);
+      ws().engine.setView('top');
+      ws().engine.frame(box);
+      await raf(8);
+      return { unloaded, loaded, props, onBeam };
     },
 
     // A sideways wheel press arrives as the browser's Back, which the page

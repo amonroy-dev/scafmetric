@@ -7,6 +7,10 @@
 // holds the builder's leg loads to those reactions, so the comparison runs on
 // every test run without needing Python. To refresh the reference after a
 // deliberate change: node verification/opensees/run.mjs --save
+//
+// A scaffold with side brackets that have a leg behind them is held to the
+// "levered" solution, in which the frame under each bracket holds its
+// overturning as a pair of forces; every other scaffold to "pinned".
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,7 +29,7 @@ for (const name of Object.keys(CASES)) {
   test(`${name}: every leg matches OpenSees, dead and live`, () => {
     const state = CASES[name]();
     const ref = reference(name);
-    const pinned = ref.variants.pinned;
+    const pinned = ref.variants.levered ?? ref.variants.pinned;
     const { legs, totals } = state.takeoff();
 
     assert.deepEqual(legs.map(l => l.id).sort(), ref.legs.map(l => l.id).sort(), 'the same legs');

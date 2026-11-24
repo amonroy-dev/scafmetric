@@ -43,11 +43,12 @@ export function buildCenterlineModel(state) {
     addJoint(a); addJoint(b);
   };
 
-  const base = state.baseOffsetFt();
   for (const s of state.standards.values()) {
+    const base = state.standardBaseZ(s);
     // The base assembly, ground to the standard's foot, as ScaffoldPro's
-    // centerlines draw it: a ledger on the collar's rosette lands on this.
-    addSegment([s.x, s.y, 0], [s.x, s.y, base], LAYERS.jack, s.id);
+    // centerlines draw it: a ledger on the collar's rosette lands on this. A
+    // standard seated in a side bracket has none: it starts in the socket.
+    if (state.isLeg(s)) addSegment([s.x, s.y, 0], [s.x, s.y, base], LAYERS.jack, s.id);
     // One segment per stacked lift, so joints land at each splice.
     let z = base;
     for (const len of s.segments) {

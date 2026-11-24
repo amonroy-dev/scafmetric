@@ -89,8 +89,9 @@ export function deriveBom(state) {
     }
   }
 
-  // Base assembly: one per standard column.
-  const legCount = state.standards.size;
+  // Base assembly: one under each standard that stands on the ground. A
+  // standard seated in a side bracket has none.
+  const legCount = [...state.standards.values()].filter(s => state.isLeg(s)).length;
   if (legCount > 0) {
     add('Bases', 'jack', 'Screw jack',
       legCount, screwJackWeightLb(state.base.jackExtensionIn));

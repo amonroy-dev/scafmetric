@@ -5,7 +5,7 @@
 import { tubeWeightPerFoot, resolveComponents } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
 import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
-import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip } from './parts.js';
+import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip, sideBracketCentroidOutFt } from './parts.js';
 import {
   buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadMemberLoad, forEachStripMemberLoad,
   distributeLedgerPointLoad, liveLoadsByDeck, DEFAULT_BAY_LIVE_LOAD_PSF,
@@ -21,6 +21,35 @@ export const NODE_SPACING_IN = 19.6875;
 // How near a rail's line a standard must stand to be one the rail runs past.
 const RAIL_ON_LINE_FT = 0.05;
 
+// A standard set in a side bracket's socket seats this far above the rosette
+// the bracket hangs on. That puts its own first rosette exactly one spacing
+// up, on the next lift of the scaffold beside it, and every rosette above on
+// a lift too. As ScaffoldPro seats one: its socket shoulder is 3.925 in above
+// the bracket's rosette and its tip rosette 0.0125 in below it, and the two
+// together are this.
+export const BRACKET_SEAT_UP_IN = NODE_SPACING_IN - FIRST_NODE_OFFSET_IN;
+// The longest plank is ten feet, so two bracket arms further apart than this
+// are not the two ends of one deck (ScaffoldPro's limit).
+export const MAX_BRACKET_DECK_SPAN_FT = 10.5;
+// Brackets in one row: at one lift, facing one way, tips in one line.
+const ROW_SAME_LIFT_FT = 1 / 12;
+const ROW_SAME_HEADING_COS = 0.999;
+const ROW_SAME_LINE_FT = 2 / 12;
+// A deck that bears on a bracket's arm names it by the bracket, with this in front.
+export const ARM_PREFIX = 'arm:';
+// A bracket's leverage is taken against the leg a ledger runs back to from the
+// leg it hangs on: back within this of dead opposite the bracket (about ten
+// degrees), and far enough away to be another leg.
+const LEVER_BACK_COS = 0.985;
+const LEVER_MIN_ARM_FT = 0.5;
+// A brace stands a couple of inches off its face, so its end is near a
+// standard or a bracket's tip, not on it: within this it is taken to be on it.
+const NEAR_COLUMN_FT = 0.6;
+// Against overturning, the dead load that holds a scaffold down has to be this
+// many times what tries to turn it over. It is not the 4 of a scaffold's
+// strength: docs/scaffold-overturning.md has where each number comes from.
+export const OVERTURNING_FACTOR = 1.5;
+
 const key = (x, y) => `${round(x)},${round(y)}`;
 function round(v, d = 3) { const f = 10 ** d; return Math.round(v * f) / f; }
 
@@ -33,7 +62,9 @@ export class ScaffoldState {
       showWoodSill: opts.showWoodSill ?? true,
       showBaseCollar: opts.showBaseCollar ?? true,
     };
-    this.standards = new Map(); // id -> { id, x, y, segments:[lengthFt] }
+    // id -> { id, x, y, segments:[lengthFt] }, standing on the ground; with a
+    // bracketId as well, standing in that side bracket's socket instead.
+    this.standards = new Map();
     this.ledgers = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.braces = new Map();    // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.planks = new Map();    // id -> { id, x0,y0,x1,y1,z }  (rect decks, e.g. from the block tool)
@@ -152,7 +183,20 @@ export class ScaffoldState {
   setBase(patch) { this._pushHistory(); Object.assign(this.base, patch); this._emit(); }
 
   standardHeightFt(s) { return s.segments.reduce((a, b) => a + b, 0); }
-  standardTopZ(s) { return this.baseOffsetFt() + this.standardHeightFt(s); }
+  /** The side bracket a standard stands in, or null for one that stands on the ground. */
+  standardBracket(s) { return s.bracketId ? this.brackets.get(s.bracketId) || null : null; }
+  /**
+   * True for a standard that stands on the ground, which is what a leg is. One
+   * set in a side bracket is carried by the bracket, and so by the leg the
+   * bracket hangs on: it has no base, no load tag, and is not sent to a beam.
+   */
+  isLeg(s) { return !this.standardBracket(s); }
+  /** Bottom of a standard's tube: above its base assembly, or seated in its bracket. */
+  standardBaseZ(s) {
+    const k = this.standardBracket(s);
+    return k ? k.z + inchesToFeet(BRACKET_SEAT_UP_IN) : this.baseOffsetFt();
+  }
+  standardTopZ(s) { return this.standardBaseZ(s) + this.standardHeightFt(s); }
 
   // --- placement -----------------------------------------------------------
   /**
@@ -181,6 +225,74 @@ export class ScaffoldState {
     if (s.segments.length <= 1) this.standards.delete(id);
     else s.segments.pop();
     this._emit();
+  }
+
+  // --- standards on side brackets -----------------------------------------
+  // A side bracket ends in a rosette with a socket over it, and a standard can
+  // be stood in the socket: the outer row of a wider platform, a guardrail
+  // post. As in ScaffoldPro, it has no base assembly and takes its height from
+  // the bracket.
+
+  /**
+   * Where a standard would seat in this bracket: { bracketId, x, y, z,
+   * standard, blocked }.
+   *
+   *   standard  the one already standing at that spot, from this bracket or
+   *             from one below it: another segment goes on top of it
+   *   blocked   true when the spot is taken by something this socket cannot
+   *             add to: a standard up from the ground, or one seated in a
+   *             bracket higher up
+   *   z         where the new tube's bottom would be
+   */
+  bracketSeat(bracketId) {
+    const k = this.brackets.get(bracketId);
+    if (!k) return null;
+    const [x, y] = sideBracketTip(k, k.dir, k.lengthFt);
+    const seatZ = k.z + inchesToFeet(BRACKET_SEAT_UP_IN);
+    const there = this.standardAt(x, y);
+    if (!there) return { bracketId, x, y, z: seatZ, standard: null, blocked: false };
+    const under = this.standardBracket(there);
+    if (!under || under.z > k.z + 1e-6) return { bracketId, x, y, z: seatZ, standard: null, blocked: true };
+    return { bracketId, x, y, z: this.standardTopZ(there), standard: there, blocked: false };
+  }
+
+  /**
+   * Stand a standard in a side bracket's socket, or put another segment on the
+   * one already standing there. Returns the standard, or null when the socket
+   * cannot take one (see bracketSeat).
+   */
+  addStandardOnBracket(bracketId, lengthFt) {
+    const seat = this.bracketSeat(bracketId);
+    if (!seat || seat.blocked) return null;
+    this._pushHistory();
+    if (seat.standard) { seat.standard.segments.push(lengthFt); this._emit(); return seat.standard; }
+    const s = { id: this._id('S'), x: seat.x, y: seat.y, segments: [lengthFt], bracketId };
+    this.standards.set(s.id, s);
+    this._emit();
+    return s;
+  }
+
+  /**
+   * The row a side bracket is in: every bracket at its lift that faces the
+   * same way with its tip in the same line, in order along the face. It is
+   * what SHIFT takes with the Standard tool, and the run a deck is laid along.
+   */
+  bracketRow(bracketId) {
+    const k = this.brackets.get(bracketId);
+    if (!k) return [];
+    const len = Math.hypot(k.dir[0], k.dir[1]) || 1;
+    const ox = k.dir[0] / len, oy = k.dir[1] / len;
+    const tipOut = b => { const [x, y] = sideBracketTip(b, b.dir, b.lengthFt); return x * ox + y * oy; };
+    const along = b => b.y * ox - b.x * oy;
+    const line = tipOut(k);
+    return [...this.brackets.values()]
+      .filter(b => {
+        if (Math.abs(b.z - k.z) > ROW_SAME_LIFT_FT) return false;
+        const bl = Math.hypot(b.dir[0], b.dir[1]) || 1;
+        if ((b.dir[0] * ox + b.dir[1] * oy) / bl < ROW_SAME_HEADING_COS) return false;
+        return Math.abs(tipOut(b) - line) <= ROW_SAME_LINE_FT;
+      })
+      .sort((p, q) => along(p) - along(q));
   }
 
   addLedger(a, b) { this._pushHistory(); const l = { id: this._id('L'), a: [...a], b: [...b] }; this.ledgers.set(l.id, l); this._emit(); return l; }
@@ -286,9 +398,37 @@ export class ScaffoldState {
 
   ledgerList() { return [...this.ledgers.values()]; }
 
+  // --- what a deck can bear on ---------------------------------------------
+  // Boards on side brackets sit straight on the brackets' arms, two arms
+  // carrying a deck between them as two ledgers would; no ledger is run from
+  // tip to tip first. So each arm is offered to the deck code as a span of its
+  // own, as ScaffoldPro does (its bracketPlankSupports.ts). These are for
+  // finding and carrying decks only: an arm is never a ledger in the parts
+  // list, and never drawn as one.
+
+  /** Each side bracket's arm, from the rosette it hangs on to its tip, shaped as a ledger is. */
+  bracketArms() {
+    return [...this.brackets.values()].map(k => {
+      const [x, y] = sideBracketTip(k, k.dir, k.lengthFt);
+      return { id: `${ARM_PREFIX}${k.id}`, a: [k.x, k.y, k.z], b: [x, y, k.z], bracketId: k.id, maxSpanFt: MAX_BRACKET_DECK_SPAN_FT };
+    });
+  }
+
+  _supports() {
+    if (!this._supportCache || this._supportCache.version !== this.version) {
+      const list = [...this.ledgers.values(), ...this.bracketArms()];
+      this._supportCache = { version: this.version, list, byId: new Map(list.map(m => [m.id, m])) };
+    }
+    return this._supportCache;
+  }
+  /** Everything a deck can bear on: the ledgers, and the arms of the side brackets. */
+  supportList() { return this._supports().list; }
+  /** A ledger, or a bracket's arm, by the id a deck names it by. */
+  supportById(id) { return this._supports().byId.get(id) || null; }
+
   /** Which load sits on each deck: Map of deckId to placement. */
   liveLoadsByDeck(decks = this.plankBays()) {
-    return liveLoadsByDeck([...this.liveLoads.values()], this.ledgerList(), decks);
+    return liveLoadsByDeck([...this.liveLoads.values()], this.supportList(), decks);
   }
 
   /**
@@ -398,7 +538,7 @@ export class ScaffoldState {
     const placements = [...this.liveLoads.values()];
     // Decks are only worth resolving when a load sits on one.
     const decks = placements.some(p => p.deckId) ? this.plankBays() : [];
-    return buildLiveLoadInstances(placements, this.ledgerList(), decks);
+    return buildLiveLoadInstances(placements, this.supportList(), decks);
   }
 
   // --- ledger-anchored decks ----------------------------------------------
@@ -407,13 +547,14 @@ export class ScaffoldState {
 
   /** Deck the bay on one side of a ledger. Returns the placement, or null. */
   addPlankOnLedger(ledgerId, sideSign) {
-    if (!this.ledgers.has(ledgerId)) return null;
+    // A ledger, or a side bracket's arm (see supportList).
+    if (!this.supportById(ledgerId)) return null;
     const side = sideSign >= 0 ? 1 : -1;
     for (const p of this.plankPlacements.values()) {
       if (p.ledgerId === ledgerId && p.sideSign === side) return null; // already decked
     }
     const probe = { id: 'probe', ledgerId, sideSign: side };
-    if (!resolvePlankPlacement(probe, this.ledgerList())) return null; // no bay on that side
+    if (!resolvePlankPlacement(probe, this.supportList())) return null; // no bay on that side
     this._pushHistory();
     const p = { id: this._id('D'), ledgerId, sideSign: side };
     this.plankPlacements.set(p.id, p);
@@ -427,7 +568,7 @@ export class ScaffoldState {
    * This is the single accessor the renderer, BOM, guardrails and takeoff use.
    */
   plankBays() {
-    const out = buildPlankDecks([...this.plankPlacements.values()], this.ledgerList());
+    const out = buildPlankDecks([...this.plankPlacements.values()], this.supportList());
     for (const p of this.planks.values()) {
       out.push({
         id: p.id,
@@ -444,8 +585,17 @@ export class ScaffoldState {
 
   /** Drop placements whose anchor ledger is gone. */
   _pruneOrphans() {
+    // A standard goes with the bracket it stood in.
+    for (const [id, s] of [...this.standards]) {
+      if (s.bracketId && !this.brackets.has(s.bracketId)) this.standards.delete(id);
+    }
+    // A deck goes with the ledger, or the bracket arm, it was hung on. Asked
+    // of the parts themselves: this runs before the change is announced, when
+    // the list of supports kept for the last version still has the old one.
+    const stillThere = id => this.ledgers.has(id)
+      || (typeof id === 'string' && id.startsWith(ARM_PREFIX) && this.brackets.has(id.slice(ARM_PREFIX.length)));
     for (const [id, p] of [...this.plankPlacements]) {
-      if (!this.ledgers.has(p.ledgerId)) this.plankPlacements.delete(id);
+      if (!stillThere(p.ledgerId)) this.plankPlacements.delete(id);
     }
     // After the decks, so a load goes with the deck it sat on.
     this._pruneOrphanLiveLoads();
@@ -457,7 +607,8 @@ export class ScaffoldState {
     const out = [];
     for (const id of ids) {
       const st = this.standards.get(id);
-      if (!st) continue;
+      // One standing in a bracket stays with its bracket.
+      if (!st || st.bracketId) continue;
       if (copy) {
         const n = { id: this._id('S'), x: this.snap(st.x + dx), y: this.snap(st.y + dy), segments: st.segments.slice() };
         this.standards.set(n.id, n);
@@ -518,14 +669,40 @@ export class ScaffoldState {
    */
   nodes() {
     const out = [];
+    // Standards seated in brackets, by where they stand, and the lifts each
+    // has a rosette of its own at.
+    const seated = new Map();
+    const seatedLifts = new Set();
     for (const s of this.standards.values()) {
       const top = this.standardTopZ(s);
+      const under = this.standardBracket(s);
+      if (under) {
+        seated.set(key(s.x, s.y), s);
+        // Its rosettes start one lift above the bracket's, on the lifts of the
+        // scaffold beside it.
+        for (let level = this.liftAt(under.z) + 1; this.liftZ(level) <= top + 1e-6; level++) {
+          out.push({ x: s.x, y: s.y, z: this.liftZ(level), level, columnId: s.id });
+          seatedLifts.add(`${s.id}@${level}`);
+        }
+        continue;
+      }
       if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: this.liftZ(0), level: 0, columnId: s.id });
       for (let level = 1; this.liftZ(level) <= top + 1e-6; level++) {
         out.push({ x: s.x, y: s.y, z: this.liftZ(level), level, columnId: s.id });
       }
     }
-    for (const k of this.brackets.values()) out.push(this.bracketTipNode(k));
+    for (const k of this.brackets.values()) {
+      const tip = this.bracketTipNode(k);
+      const s = seated.get(key(tip.x, tip.y));
+      if (s) {
+        // A tip the standard has grown up past is one of the standard's own
+        // rosettes already. Any other tip there, the one it stands in first of
+        // all, is a rosette of the same column, so a brace can run from it.
+        if (seatedLifts.has(`${s.id}@${tip.level}`)) continue;
+        tip.columnId = s.id;
+      }
+      out.push(tip);
+    }
     return out;
   }
 
@@ -582,11 +759,11 @@ export class ScaffoldState {
 
   // Geometry description for the scene builder (plain data, no three.js).
   geometry() {
-    const base = this.baseOffsetFt();
+    // `leg` is false for a standard seated in a side bracket: it has no base.
     const standards = [...this.standards.values()].map(s => ({
-      id: s.id, x: s.x, y: s.y, baseZ: base, topZ: this.standardTopZ(s), segments: s.segments.slice(),
+      id: s.id, x: s.x, y: s.y, baseZ: this.standardBaseZ(s), topZ: this.standardTopZ(s), segments: s.segments.slice(), leg: this.isLeg(s),
     }));
-    const bases = [...this.standards.values()].map(s => ({ id: s.id, x: s.x, y: s.y }));
+    const bases = [...this.standards.values()].filter(s => this.isLeg(s)).map(s => ({ id: s.id, x: s.x, y: s.y }));
     const ledgers = [...this.ledgers.values()].map(l => ({ id: l.id, a: l.a, b: l.b }));
     const braces = [...this.braces.values()].map(b => ({ id: b.id, a: b.a, b: b.b }));
     const planks = this.plankBays();
@@ -603,7 +780,10 @@ export class ScaffoldState {
   // Every pound in the parts list reaches a leg, by the path it really takes:
   //   a standard and its base hardware   straight down its own leg
   //   a ledger, brace, truss or rail     half to the leg at each end
-  //   a side bracket                     the standard it hangs on
+  //   a side bracket                     the standard it hangs on, and with it
+  //                                      whatever the bracket carries; being
+  //                                      out from that standard, it also levers
+  //                                      load onto it from the leg behind
   //   a plank                            the two ledgers it bears on, then
   //                                      along each ledger to its legs
   //   a live load                        the same way as the planks under it,
@@ -611,6 +791,23 @@ export class ScaffoldState {
   // Ledgers are taken as simple spans between standards, which is what makes
   // this a tributary takeoff rather than a frame analysis. It is checked
   // against OpenSees, leg by leg: see verification/opensees.
+  //
+  // Each leg comes back as { id, x, y, deadLb, liveLb }: its load as the
+  // scaffold stands, everything placed on it at once. A leg whose total is
+  // negative is in uplift. A leg that side brackets lever load off has two
+  // more things on it:
+  //   lifted       { deadLb, liveLb } taken off it by those brackets, which
+  //                deadLb and liveLb already leave out
+  //   overturning  how it stands against being lifted right off the ground,
+  //                which is a different question from its load:
+  //                  turningLb    what the brackets lift, dead and live
+  //                  resistingLb  the dead load holding it down
+  //                  factor       resistingLb / turningLb
+  //                  holdDownLb   what must be added here, as counterweight
+  //                               or an anchor, for resistingLb to be
+  //                               OVERTURNING_FACTOR times turningLb
+  //                Live load on the deck behind is left out of resistingLb:
+  //                it may not be there when the bracket is loaded.
   takeoff() {
     const perFootStandard = tubeWeightPerFoot(this.components.standard);
     const perFootLedger = tubeWeightPerFoot(this.components.ledger);
@@ -621,18 +818,79 @@ export class ScaffoldState {
     // The jack, collar and sill are on the leg too: they were in the parts
     // list but not in the leg loads, which read about 14 lb a leg light.
     const hardwareLb = this.baseHardwareLb();
+    // A leg is a standard that stands on the ground.
     for (const s of this.standards.values()) {
+      if (!this.isLeg(s)) continue;
       legs.set(s.id, { id: s.id, x: s.x, y: s.y, deadLb: perFootStandard * this.standardHeightFt(s) + hardwareLb, liveLb: 0 });
     }
     const byCol = new Map();
-    for (const l of legs.values()) byCol.set(key(l.x, l.y), l);
+    // Every spot a load can come down at: a leg, or a bracket's tip.
+    const spots = [];
+    for (const l of legs.values()) { byCol.set(key(l.x, l.y), l); spots.push({ k: key(l.x, l.y), x: l.x, y: l.y }); }
+    // A side bracket is a cantilever off one standard, so whatever bears on it
+    // goes down the leg it is attached to and no other: a standard in its
+    // socket, a deck on its arm, a ledger or a brace on its tip rosette. Here
+    // each tip is tied to that leg. A bracket hung on a standard that itself
+    // stands in a bracket passes its load on down, so the walk repeats until
+    // it finds nothing new. `reach` is how far out from the leg each tip is:
+    // one step for each bracket on the way, which way it points and how long.
+    const reach = new Map();
+    const brackets = [...this.brackets.values()];
+    const unit = k => { const len = Math.hypot(k.dir[0], k.dir[1]) || 1; return [k.dir[0] / len, k.dir[1] / len]; };
+    for (let pass = 0, found = true; found && pass <= brackets.length; pass++) {
+      found = false;
+      for (const k of brackets) {
+        const [tx, ty] = sideBracketTip(k, k.dir, k.lengthFt);
+        const tip = key(tx, ty);
+        if (byCol.has(tip)) continue;
+        const host = key(k.x, k.y);
+        const carrier = byCol.get(host);
+        if (!carrier) continue;
+        const [ux, uy] = unit(k);
+        byCol.set(tip, carrier);
+        spots.push({ k: tip, x: tx, y: ty });
+        reach.set(tip, [...(reach.get(host) || []), { ux, uy, armFt: k.lengthFt }]);
+        found = true;
+      }
+    }
     const nearest = (x, y) => {
       let best = null, bd = Infinity;
       for (const l of legs.values()) { const d = (l.x - x) ** 2 + (l.y - y) ** 2; if (d < bd) { bd = d; best = l; } }
       return best;
     };
-    const attribute = (x, y, w) => { const l = byCol.get(key(x, y)) || nearest(x, y); if (l) l.deadLb += w; };
-    const attributeLive = (x, y, w) => { const l = byCol.get(key(x, y)) || nearest(x, y); if (l) l.liveLb += w; };
+    /** The spot a load at (x, y) comes down at: that very spot, or one it stands just beside. */
+    const spotAt = (x, y) => {
+      const k = key(x, y);
+      if (byCol.has(k)) return k;
+      let best = null, bd = NEAR_COLUMN_FT ** 2;
+      for (const p of spots) { const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d <= bd) { bd = d; best = p.k; } }
+      return best;
+    };
+    // What a bracket's load does besides weigh on its leg. It stands out from
+    // the leg, so it also tries to turn the scaffold over about it. Kept for
+    // each leg and each way a bracket points from it, in lb ft, dead and live.
+    const turning = new Map(); // leg id -> Map(direction -> { ux, uy, deadLbFt, liveLbFt })
+    const turn = (leg, ux, uy, lbFt, kase) => {
+      let ways = turning.get(leg.id);
+      if (!ways) turning.set(leg.id, ways = new Map());
+      const way = Math.round(Math.atan2(uy, ux) * 1000);
+      let t = ways.get(way);
+      if (!t) ways.set(way, t = { ux, uy, deadLbFt: 0, liveLbFt: 0 });
+      t[kase] += lbFt;
+    };
+    const land = (x, y, w, load, kase) => {
+      const k = spotAt(x, y);
+      const l = (k && byCol.get(k)) || nearest(x, y);
+      if (!l) return;
+      l[load] += w;
+      for (const step of (k && reach.get(k)) || []) turn(l, step.ux, step.uy, w * step.armFt, kase);
+    };
+    const attribute = (x, y, w) => land(x, y, w, 'deadLb', 'deadLbFt');
+    const attributeLive = (x, y, w) => land(x, y, w, 'liveLb', 'liveLbFt');
+    // A standard seated in a bracket: its tube, with no base under it.
+    for (const s of this.standards.values()) {
+      if (!this.isLeg(s)) attribute(s.x, s.y, perFootStandard * this.standardHeightFt(s));
+    }
 
     for (const l of this.ledgers.values()) {
       const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1], l.b[2] - l.a[2]);
@@ -645,8 +903,13 @@ export class ScaffoldState {
       attribute(b.a[0], b.a[1], w / 2); attribute(b.b[0], b.b[1], w / 2);
     }
     for (const b of this.brackets.values()) {
-      // The whole frame (chord, post, diagonal, socket) hangs on its standard.
-      attribute(b.x, b.y, perFootLedger * sideBracketTubeLengthFt(b.lengthFt));
+      // The whole frame (chord, post, diagonal, socket) hangs on its standard,
+      // and out from it: its weight acts at the middle of its tube.
+      const w = perFootLedger * sideBracketTubeLengthFt(b.lengthFt);
+      attribute(b.x, b.y, w);
+      const carrier = byCol.get(key(b.x, b.y));
+      const [ux, uy] = unit(b);
+      if (carrier) turn(carrier, ux, uy, w * sideBracketCentroidOutFt(b.lengthFt), 'deadLbFt');
     }
     for (const t of this.trusses.values()) {
       const len = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]);
@@ -666,7 +929,9 @@ export class ScaffoldState {
     // A deck brings no live load with it: that is only ever what was placed on
     // it with the Live load tool.
     const decks = this.plankBays();
-    const ledgerList = this.ledgerList();
+    // The ledgers and the bracket arms: a deck on brackets bears on the arms,
+    // and an arm's two ends both lead to the leg its bracket hangs on.
+    const ledgerList = this.supportList();
     for (const deck of decks) {
       for (const board of deck.boards) {
         forEachStripMemberLoad(
@@ -690,6 +955,65 @@ export class ScaffoldState {
         (ledger, point, lb) => distributeLedgerPointLoad(ledger, point, lb, attributeLive),
         // A piece with no ledger anywhere under it still weighs on the nearest leg.
         (point, lb) => attributeLive(point.x, point.y, lb));
+    }
+
+    // The leverage of the side brackets. Everything above put a bracket's
+    // load on the leg it hangs on, which is where its weight goes. But the
+    // load stands outside that leg, and a leg on a screw jack cannot hold the
+    // overturning by itself. The frame holds it, as a pair of forces: more on
+    // the leg the bracket hangs on, and the same amount less on the leg behind
+    // it, the one a ledger runs back to. Each is the overturning divided by
+    // the distance between the two legs, which is plain statics and needs no
+    // stiffness. Where it comes to more than the leg behind carries, that leg
+    // is in uplift and its load is negative. With no leg behind there is
+    // nothing to lever against, and the load stays where it was.
+    const legAt = new Map([...legs.values()].map(l => [key(l.x, l.y), l]));
+    const joined = new Map(); // leg id -> the legs a ledger or truss runs to from it
+    for (const map of [this.ledgers, this.trusses]) {
+      for (const m of map.values()) {
+        const a = legAt.get(key(m.a[0], m.a[1])), b = legAt.get(key(m.b[0], m.b[1]));
+        if (!a || !b || a === b) continue;
+        for (const [from, to] of [[a, b], [b, a]]) {
+          if (!joined.has(from.id)) joined.set(from.id, new Set());
+          joined.get(from.id).add(to);
+        }
+      }
+    }
+    for (const [id, ways] of turning) {
+      const leg = legs.get(id);
+      for (const t of ways.values()) {
+        let behind = null, armFt = Infinity;
+        for (const other of joined.get(id) || []) {
+          const dx = other.x - leg.x, dy = other.y - leg.y;
+          const back = -(dx * t.ux + dy * t.uy);
+          if (back < LEVER_MIN_ARM_FT || back < LEVER_BACK_COS * Math.hypot(dx, dy) || back >= armFt) continue;
+          behind = other; armFt = back;
+        }
+        if (!behind) continue;
+        const dead = t.deadLbFt / armFt, live = t.liveLbFt / armFt;
+        leg.deadLb += dead; behind.deadLb -= dead;
+        leg.liveLb += live; behind.liveLb -= live;
+        if (!behind.lifted) behind.lifted = { deadLb: 0, liveLb: 0 };
+        behind.lifted.deadLb += dead; behind.lifted.liveLb += live;
+      }
+    }
+    // A leg in uplift and a scaffold safe against overturning are not the
+    // same thing. The first is this leg's load as everything stands, which
+    // can be a few pounds either side of nothing. The second asks for a
+    // margin: the dead load on the leg must be OVERTURNING_FACTOR times what
+    // the brackets lift off it, and the live load behind does not count,
+    // since it comes and goes. So the hold-down a leg needs is always more
+    // than its uplift, and a leg with no uplift at all can still need one.
+    for (const leg of legs.values()) {
+      if (!leg.lifted) continue;
+      const turningLb = leg.lifted.deadLb + leg.lifted.liveLb;
+      if (!(turningLb > 0)) { delete leg.lifted; continue; }
+      const resistingLb = leg.deadLb + leg.lifted.deadLb;
+      leg.overturning = {
+        turningLb, resistingLb,
+        factor: resistingLb / turningLb,
+        holdDownLb: Math.max(0, OVERTURNING_FACTOR * turningLb - resistingLb),
+      };
     }
 
     const list = [...legs.values()];
