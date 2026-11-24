@@ -39,9 +39,11 @@ function drawSchematic() {
  drawBeamSchematic({analysis:record?.analysis ?? null});
  $('model-section').textContent = $('section').value || 'Choose a section';
  $('model-span').textContent = `${$('span').value || '—'} ft span`;
+ // This line speaks only when the brace positions cannot be read. The longest
+ // unbraced length is not shown here: the steel check works it out and uses it.
  try {
-  const bracing = readBracing();
-  $('bracing-summary').textContent = `Max. unbraced length · Top ${fmt(Math.max(...bracing.top.segments))} ft · Bottom ${fmt(Math.max(...bracing.bottom.segments))} ft`;
+  readBracing();
+  $('bracing-summary').textContent = '';
  } catch (error) { $('bracing-summary').textContent = error.message; }
 }
 function revealField(field) {
