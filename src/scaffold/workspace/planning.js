@@ -4,6 +4,7 @@
 //  - adjacency scale + principal lift axes (handles rotated / irregular grids)
 //  - nearest-neighbour targeting that never skips an intermediate standard
 //  - one-click ledger targeting and the shift batch plan
+//  - which bay edges of a lift are on the outside (perimeter handrails)
 //  - bay layout and standard-segment stacking for the Block tool
 
 // Perpendicular tolerance for "colinear" checks (~6 in sideways).
@@ -170,6 +171,141 @@ export function computeBatchPlan(nodesAtLift, canUse) {
     }
   }
   return plan;
+}
+
+// --- the outside of a lift -----------------------------------------------------
+// ScaffoldPro's ledgerPlacementPlanning.ts, which its Ledger tool uses for
+// "Perimeter handrails": the bay edges of a lift, which of them are on the
+// outside of the scaffold, and which scaffold each one belongs to.
+
+// How nearly two sides of a bay have to line up for it to be one (15 degrees).
+const CELL_ALIGNMENT_COS = Math.cos((15 * Math.PI) / 180);
+const CELL_SIDE_EPS_FT = 1e-4;
+
+/** Order-free key for the bay edge between two nodes of one lift. */
+export function bayEdgeKey(a, b) {
+  return a.columnId < b.columnId ? `${a.columnId}|${b.columnId}` : `${b.columnId}|${a.columnId}`;
+}
+
+/**
+ * Every bay edge at a lift, each once: [{ key, a, b, lengthFt }]. These are the
+ * pairs a SHIFT fill of the lift joins, whether or not a ledger is there yet.
+ *
+ * `isBay(a, b)` can turn a pair down. Standing next to each other is all the
+ * geometry knows, and it is too generous once a scaffold is framed: two runs a
+ * few feet apart get "edges" across the open air between them.
+ */
+export function liftBayEdges(nodesAtLift, frame = liftFrame(nodesAtLift), isBay = null) {
+  if (!frame) return [];
+  const edges = new Map();
+  for (const source of nodesAtLift) {
+    for (const c of getAdjacentCandidates(source, nodesAtLift, frame.axes, frame.maxProj, null)) {
+      const key = bayEdgeKey(source, c);
+      if (edges.has(key)) continue;
+      if (isBay && !isBay(source, c)) continue;
+      edges.set(key, { key, a: source, b: c, lengthFt: Math.hypot(c.x - source.x, c.y - source.y) });
+    }
+  }
+  return [...edges.values()];
+}
+
+function edgesByColumn(edges) {
+  const byColumn = new Map();
+  const add = (id, e) => { let list = byColumn.get(id); if (!list) byColumn.set(id, list = []); list.push(e); };
+  for (const e of edges) { add(e.a.columnId, e); add(e.b.columnId, e); }
+  return byColumn;
+}
+
+function cosBetween(ax, ay, bx, by) {
+  const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+  return la < 1e-6 || lb < 1e-6 ? -1 : (ax * bx + ay * by) / (la * lb);
+}
+
+/**
+ * The keys of the bay edges on the outside of the scaffold.
+ *
+ * An edge is inside when a bay stands on each side of it: four edges round
+ * four nodes, the two that leave this edge's ends running the same way and the
+ * far one running along it. Any other edge is outside, which takes in a single
+ * row (no bays at all, every edge exposed).
+ *
+ * Judged from the bays round each edge and not from a bounding box, so it
+ * holds for a scaffold turned in plan, for one with a corner cut out of it,
+ * and for a row of standards seated in side brackets one row out from a face.
+ *
+ * Give it every edge, with or without a ledger on it: leaving out the ones
+ * already built would make a finished rail look like a missing bay and turn
+ * the edge behind it into an outside one.
+ */
+export function outsideEdgeKeys(edges) {
+  const byColumn = edgesByColumn(edges);
+  const keys = new Set(edges.map(e => e.key));
+  const other = (e, id) => (e.a.columnId === id ? e.b : e.a);
+  const outside = new Set();
+  for (const edge of edges) {
+    const { a, b } = edge;
+    const ex = b.x - a.x, ey = b.y - a.y;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-6) continue;
+    const ux = ex / len, uy = ey / len;
+    let sides = 0; // bit 1: a bay on the left of a->b; bit 2: one on the right
+    for (const fromA of byColumn.get(a.columnId) || []) {
+      const c = other(fromA, a.columnId);
+      if (c.columnId === b.columnId) continue;
+      const cx = c.x - a.x, cy = c.y - a.y;
+      const sideC = ux * cy - uy * cx;
+      if (Math.abs(sideC) <= CELL_SIDE_EPS_FT) continue;
+      const bit = sideC > 0 ? 1 : 2;
+      if (sides & bit) continue;
+      for (const fromB of byColumn.get(b.columnId) || []) {
+        const d = other(fromB, b.columnId);
+        if (d.columnId === a.columnId || d.columnId === c.columnId) continue;
+        const dx = d.x - b.x, dy = d.y - b.y;
+        const sideD = ux * dy - uy * dx;
+        if (Math.abs(sideD) <= CELL_SIDE_EPS_FT || sideC * sideD <= 0) continue;
+        if (!keys.has(bayEdgeKey(c, d))) continue;
+        // Not a bow-tie, and not four edges that merely happen to close.
+        if (cosBetween(cx, cy, dx, dy) < CELL_ALIGNMENT_COS) continue;
+        if (cosBetween(ex, ey, d.x - c.x, d.y - c.y) < CELL_ALIGNMENT_COS) continue;
+        sides |= bit;
+        break;
+      }
+      if (sides === 3) break;
+    }
+    if (sides !== 3) outside.add(edge.key);
+  }
+  return outside;
+}
+
+/**
+ * A lift read for its outline: { edges, outside, byColumn, group }.
+ *
+ *   edges     every bay edge (liftBayEdges)
+ *   outside   the keys of those on the outside (outsideEdgeKeys)
+ *   byColumn  columnId -> the edges that meet at that node
+ *   group     columnId -> a label shared by every node a walk along bay edges
+ *             reaches: one scaffold. Two that stand apart have two labels, so
+ *             a fill started on one stays on it.
+ */
+export function planLiftOutline(nodesAtLift, frame = liftFrame(nodesAtLift), isBay = null) {
+  const edges = liftBayEdges(nodesAtLift, frame, isBay);
+  const byColumn = edgesByColumn(edges);
+  const group = new Map();
+  for (const start of byColumn.keys()) {
+    if (group.has(start)) continue;
+    group.set(start, start);
+    const queue = [start];
+    while (queue.length) {
+      const id = queue.pop();
+      for (const e of byColumn.get(id)) {
+        const next = e.a.columnId === id ? e.b.columnId : e.a.columnId;
+        if (group.has(next)) continue;
+        group.set(next, start);
+        queue.push(next);
+      }
+    }
+  }
+  return { edges, outside: outsideEdgeKeys(edges), byColumn, group };
 }
 
 /**

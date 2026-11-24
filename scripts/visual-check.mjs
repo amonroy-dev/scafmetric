@@ -326,6 +326,27 @@ const CHECKS = {
     !(r.onBeam.tags.length === 1 && /^2 · \d+ lb$/.test(r.onBeam.tags[0].text))
       && `picked for the beam the leg shows what it sends and no hold-down tag: ${JSON.stringify(r.onBeam.tags)}`,
   ],
+  perimeterHandrails: r => [
+    !(r.card.shown && r.card.title === 'Ledger' && r.card.label === 'Perimeter handrails')
+      && `the Ledger tool's card should offer "Perimeter handrails": ${JSON.stringify(r.card)}`,
+    !(r.everyBay.here === 9 && r.everyBay.pending >= 9 && /ledgers to fill this level/.test(r.everyBay.hint))
+      && `without the tick SHIFT should offer every open bay edge of the level, nine of them on this run with the block's rails left alone: ${JSON.stringify(r.everyBay)}`,
+    !(r.ticked.on && r.ticked.lit === 6 && /outside/.test(r.ticked.hint))
+      && `ticked, the rosettes that can start a handrail are the four on the bracket standards and the two the returns run to: ${JSON.stringify(r.ticked)}`,
+    !/Click to add this handrail/.test(r.oneHint) && `over the end standard the hint should offer one handrail, said: ${r.oneHint}`,
+    !(r.afterClick.returns === 1 && r.afterClick.row === 0 && r.afterClick.elsewhere === 0)
+      && `a click on the end standard of the row should add the short return to the scaffold: ${JSON.stringify(r.afterClick)}`,
+    !(r.preview.pending === 4 && r.preview.here === 4 && /4 handrails round the outside of this level/.test(r.preview.hint))
+      && `SHIFT should preview the four handrails still missing round the outside of this run, and none on another: ${JSON.stringify(r.preview)}`,
+    !(r.filled.row === 3 && r.filled.returns === 2 && r.filled.elsewhere === 0 && /already has its rails/.test(r.filled.hint))
+      && `the fill should rail the row of bracket standards and its two ends, with nothing across the decks: ${JSON.stringify(r.filled)}`,
+    !(r.top.pending === 5 && r.top.row === 3 && r.top.returns === 2 && r.top.elsewhere === 0 && /Added 5 handrails round the outside of that level/.test(r.top.hint))
+      && `one lift up, Enter should add the same five with the rails below already in, and say so: ${JSON.stringify(r.top)}`,
+    !(r.inside.ghosts <= 1 && /No outside face runs from this rosette/.test(r.inside.hint))
+      && `a rosette between the two decks should offer no handrail: ${JSON.stringify(r.inside)}`,
+    !(r.again.pending === 0 && /already has its rails/.test(r.again.hint)) && `a second SHIFT should find the outside railed: ${JSON.stringify(r.again)}`,
+    r.rails !== 8 && `the block's own eight rails should be left as they were, there are ${r.rails}`,
+  ],
   backGuard: r => [
     !r.guarded && 'opening the builder should arm the Back guard',
     !(r.stillOpen && r.sameUrl) && `Back (a sideways wheel press) left the builder: open ${r.stillOpen}, same page ${r.sameUrl}`,

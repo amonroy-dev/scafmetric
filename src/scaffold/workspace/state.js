@@ -327,7 +327,9 @@ export class ScaffoldState {
    * the rosettes one and two lifts above the deck, along the outside edge of
    * every deck at that height taken together. Replaces the rails a block laid
    * there before, so two blocks side by side share one perimeter and get no
-   * rail down the face between them.
+   * rail down the face between them. Where a ledger already runs along an
+   * edge at a rail's height (a handrail put on with the Ledger tool), that
+   * ledger is the rail and none is laid over it.
    */
   setDeckGuardrails(deckZ, railHeights) {
     this._pushHistory();
@@ -337,14 +339,47 @@ export class ScaffoldState {
     let n = 0;
     for (const s of computeRectUnionBoundarySegments(rects)) {
       for (const z of railHeights) {
-        const [a, b] = s.kind === 'H' ? [[s.x0, s.y, z], [s.x1, s.y, z]] : [[s.x, s.y0, z], [s.x, s.y1, z]];
-        const g = { id: this._id('G'), a, b, kind: 'rail', deckTag: tag };
-        this.guardrails.set(g.id, g);
-        n++;
+        for (const [from, to] of this._openRailStretches(s, z)) {
+          const [a, b] = s.kind === 'H' ? [[from, s.y, z], [to, s.y, z]] : [[s.x, from, z], [s.x, to, z]];
+          const g = { id: this._id('G'), a, b, kind: 'rail', deckTag: tag };
+          this.guardrails.set(g.id, g);
+          n++;
+        }
       }
     }
     this._emit();
     return n;
+  }
+
+  /**
+   * The stretches of a deck edge that still want a rail at a height: the whole
+   * edge, less wherever a ledger already runs along it there. [[from, to]]
+   * along the edge. A second tube laid over a handrail would be listed and
+   * weighed twice.
+   */
+  _openRailStretches(edge, z) {
+    const horizontal = edge.kind === 'H';
+    const start = horizontal ? edge.x0 : edge.y0, end = horizontal ? edge.x1 : edge.y1;
+    const line = horizontal ? edge.y : edge.x;
+    const taken = [];
+    for (const l of this.ledgers.values()) {
+      if (Math.abs(l.a[2] - z) > RAIL_ON_LINE_FT || Math.abs(l.b[2] - z) > RAIL_ON_LINE_FT) continue;
+      const [offA, offB] = horizontal ? [l.a[1], l.b[1]] : [l.a[0], l.b[0]];
+      if (Math.abs(offA - line) > RAIL_ON_LINE_FT || Math.abs(offB - line) > RAIL_ON_LINE_FT) continue;
+      const [p, q] = horizontal ? [l.a[0], l.b[0]] : [l.a[1], l.b[1]];
+      taken.push([Math.min(p, q), Math.max(p, q)]);
+    }
+    taken.sort((p, q) => p[0] - q[0]);
+    const open = [];
+    let at = start;
+    for (const [from, to] of taken) {
+      if (to <= at + RAIL_ON_LINE_FT) continue;
+      if (from > at + RAIL_ON_LINE_FT) open.push([at, Math.min(from, end)]);
+      at = Math.max(at, to);
+      if (at >= end - RAIL_ON_LINE_FT) break;
+    }
+    if (at < end - RAIL_ON_LINE_FT) open.push([at, end]);
+    return open;
   }
 
   clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }

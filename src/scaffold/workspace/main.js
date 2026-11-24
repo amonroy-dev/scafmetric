@@ -47,7 +47,7 @@ const TOOL_META = {
   select: { label: 'Select', icon: ICONS.select, hint: 'Click to select, Shift+click to add. Drag left to right for a window, right to left for a crossing; Ctrl+drag adds. Delete removes.' },
   block: { label: 'Block', icon: ICONS.block, hint: 'Set the block in the card, then click the grid to place it. It snaps onto the standards beside it. R turns it 90°.' },
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
-  ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level.' },
+  ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level, or with Perimeter handrails ticked, only the outside of it.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
   truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a size in the panel, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
@@ -136,7 +136,7 @@ const TEMPLATE = `
       </div>
       <!-- One card beside the toolbar for whichever tool is in hand: its options
            and nothing else. Each control names its tools in data-for. A tool with
-           no options (ledger, plank, erase) shows no card. -->
+           no options (plank, erase) shows no card. -->
       <section class="sfw-group sfw-blockcard sfw-toolcard" id="sfw-toolcard" aria-label="Tool options">
         <h3><span id="sfw-tool-title">Standard</span><span class="sfw-card-btns">
           <button type="button" class="sfw-icon-btn" data-card-fold aria-label="Collapse the card" title="Collapse" aria-expanded="true">${ICONS.fold}</button>
@@ -148,6 +148,7 @@ const TEMPLATE = `
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
             <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
+          <label data-for="ledger" class="sfw-check"><input type="checkbox" id="sfw-ledger-outside"><span>Perimeter handrails</span></label>
           <div data-for="brace">
             <div class="sfw-grid2 sfw-mt">
               <label>Leans<select id="sfw-brace-dir"><option value="descending">Descending</option><option value="ascending">Ascending</option></select></label>
@@ -464,6 +465,8 @@ class Workspace {
               ? `Hung ${n} bracket${n === 1 ? '' : 's'} along the run. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
             : tool === 'bracket standard'
               ? `Stood ${n} standard${n === 1 ? '' : 's'} along the row of brackets. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
+            : tool === 'handrail'
+              ? (n ? `Added ${n} handrail${n === 1 ? '' : 's'} round the outside of that level. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.` : 'The outside of that level already has its rails.')
             : n
               ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
               : 'Nothing to add at that level — place more standards first.';
@@ -476,6 +479,7 @@ class Workspace {
     this.tools.braceDirection = this.$('sfw-brace-dir').value;
     this.tools.braceFaceFilter = this.$('sfw-brace-filter').value;
     this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(this.$('sfw-brace-nth').value) || 1)));
+    this.tools.perimeterHandrails = this.$('sfw-ledger-outside').checked;
     this._persist = debounce(() => {
       const snapshot = this.state.snapshot();
       saveWip(KEYS.scaffold, snapshot);
@@ -733,6 +737,14 @@ class Workspace {
       // The sockets that can take a standard light up, as rosettes do for the other tools.
       this._rebuildNodes();
     });
+    this.$('sfw-ledger-outside').addEventListener('change', e => {
+      this.tools.setPerimeterHandrails(e.target.checked);
+      this.$('sfw-hint').textContent = e.target.checked
+        ? 'A click adds a handrail along an outside face. SHIFT adds them round the outside of that level.'
+        : '';
+      // Only the rosettes on an outside face that still wants its rail stay lit.
+      this._rebuildNodes();
+    });
     this.$('sfw-brace-dir').addEventListener('change', e => { this.tools.braceDirection = e.target.value; });
     this.$('sfw-brace-filter').addEventListener('change', e => { this.tools.braceFaceFilter = e.target.value; });
     this.$('sfw-brace-nth').addEventListener('change', e => {
@@ -826,6 +838,19 @@ class Workspace {
       hint.textContent = !count
         ? (this.state.standards.size ? 'Click a leg to put it on the beam. Drag a box to take several.' : 'Build the scaffold first: the beam carries its legs.')
         : this.beamLegs.has(info.id) ? 'Click to take this leg off the beam.' : 'Click to put this leg on the beam.';
+      return;
+    }
+    if (tool === 'ledger' && info.handrails) {
+      if (!info.batch) {
+        hint.textContent = count
+          ? 'Click to add this handrail. Hold SHIFT to preview the whole outside of this level.'
+          : info.outside
+            ? 'The outside faces at this rosette have their rails. Hold SHIFT for the rest of the level.'
+            : 'No outside face runs from this rosette. Point at one on the edge of the level.';
+        return;
+      }
+      if (!count) { hint.textContent = 'The outside of this level already has its rails.'; return; }
+      hint.textContent = `SHIFT: ${count} handrail${count === 1 ? '' : 's'} round the outside of this level — click or press Enter.`;
       return;
     }
     if (tool === 'ledger') {

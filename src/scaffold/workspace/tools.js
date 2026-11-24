@@ -13,7 +13,7 @@ import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBrack
 import { legColumn } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
-  findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame,
+  findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame, planLiftOutline,
   planBlockRecipe, planStandardSegmentsForLift, rotateOffset90, snapBlockCenter, BLOCK_DEFAULTS,
 } from './planning.js';
 import { hitData, instanceMeshes, clearGroup } from './instancing.js';
@@ -54,6 +54,11 @@ const BRACKET_SEAT_SNAP_PX = 28;
 const TRUSS_AXIS_TOL_RAD = (2 * Math.PI) / 180;
 const TRUSS_SPAN_TOL_FT = 1 / 12;
 const TRUSS_LEVEL_TOL_FT = 0.05;
+// A deck rail is on a lift when it is this near the lift's rosettes, and runs
+// past a rosette that is this near its line.
+const RAIL_ON_LIFT_FT = 0.05;
+// A leg stands where a bracket hangs when it is this near in plan.
+const BRACKET_HOST_FT = 0.05;
 // In toolbar order. Block comes straight after Select: most scaffolds start as one.
 export const TOOLS = ['select', 'block', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
@@ -68,6 +73,21 @@ const pointKey = p => `${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)},${M
 function segmentKey(a, b) {
   const ka = pointKey(a), kb = pointKey(b);
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+}
+
+/** True when a deck rail runs past both of these nodes: the bay edge between them has its member. */
+function railRunsBetween(rail, a, b) {
+  const dx = rail.b[0] - rail.a[0], dy = rail.b[1] - rail.a[1];
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return false;
+  const ux = dx / len, uy = dy / len;
+  for (const p of [a, b]) {
+    const ex = p.x - rail.a[0], ey = p.y - rail.a[1];
+    if (Math.abs(ey * ux - ex * uy) > RAIL_ON_LIFT_FT) return false;
+    const along = ex * ux + ey * uy;
+    if (along < -RAIL_ON_LIFT_FT || along > len + RAIL_ON_LIFT_FT) return false;
+  }
+  return true;
 }
 
 export class Tools {
@@ -91,6 +111,11 @@ export class Tools {
     // Standard tool: when set, a standard goes in a side bracket's socket and
     // nowhere else (the card's "On side brackets").
     this.standardsOnBrackets = false;
+    // Ledger tool: when set, a ledger goes on an outside face and nowhere
+    // else, and SHIFT runs them round the outside of the scaffold at that
+    // level instead of through every bay of it (the card's "Perimeter
+    // handrails", ScaffoldPro's ledger placement mode of the same name).
+    this.perimeterHandrails = false;
     // Block tool: ScaffoldPro's block recipe (the block card edits it) and the
     // preview's quarter turns (R).
     this.blockSettings = { ...BLOCK_DEFAULTS };
@@ -203,10 +228,11 @@ export class Tools {
   }
 
   /**
-   * Nodes grouped by lift, each lift's grid frame, and the ledgers already
-   * placed, cached until the model changes. Colouring the nodes for the Ledger
-   * tool asks for every node's target; recomputing these per node made a
-   * rebuild with that tool active cost 220 ms on a 40-standard job.
+   * Nodes grouped by lift, each lift's grid frame, the ledgers already placed
+   * and the deck rails on each lift, cached until the model changes. Colouring
+   * the nodes for the Ledger tool asks for every node's target; recomputing
+   * these per node made a rebuild with that tool active cost 220 ms on a
+   * 40-standard job.
    */
   _lifts() {
     const version = this.state.version;
@@ -226,7 +252,20 @@ export class Tools {
       const tip = this.state.bracketTipNode(k);
       ledgerKeys.add(segmentKey([k.x, k.y, k.z], [tip.x, tip.y, tip.z]));
     }
-    this._liftCache = { version, byLevel, ledgerKeys, frames: new Map() };
+    // The rails a block lays round a deck are on the rosettes of the two lifts
+    // above it, one line down each side however many bays it passes. Each is
+    // already the member on those bay edges: a ledger there would be a second
+    // tube in the same place, counted and weighed twice.
+    const rails = new Map();
+    for (const g of this.state.guardrails.values()) {
+      if (g.kind !== 'rail' || Math.abs(g.a[2] - g.b[2]) > RAIL_ON_LIFT_FT) continue;
+      const level = this.state.liftAt(g.a[2]);
+      if (Math.abs(this.state.liftZ(level) - g.a[2]) > RAIL_ON_LIFT_FT) continue;
+      let list = rails.get(level);
+      if (!list) rails.set(level, list = []);
+      list.push(g);
+    }
+    this._liftCache = { version, byLevel, ledgerKeys, rails, frames: new Map(), outlines: new Map(), links: null };
     return this._liftCache;
   }
 
@@ -460,7 +499,7 @@ export class Tools {
     if (!node) return;
 
     if (this.tool === 'ledger') {
-      if (e.shiftKey) { this._batchFillLedgers(node.level); return; }
+      if (e.shiftKey) { this._batchFillLedgers(node.level, node); return; }
       const target = this.ledgerTargetFor(node);
       if (target) s.addLedger([node.x, node.y, node.z], [target.x, target.y, target.z]);
       return;
@@ -784,17 +823,119 @@ export class Tools {
 
   _nodesAtLevel(level) { return this._lifts().byLevel.get(level) || []; }
 
+  /** True when the bay edge between two nodes of a lift has its member: a ledger, a side bracket's arm, or a deck rail. */
   _ledgerExists(a, b) {
-    return this._lifts().ledgerKeys.has(segmentKey([a.x, a.y, a.z], [b.x, b.y, b.z]));
+    const lifts = this._lifts();
+    if (lifts.ledgerKeys.has(segmentKey([a.x, a.y, a.z], [b.x, b.y, b.z]))) return true;
+    const rails = lifts.rails.get(a.level);
+    return !!rails && rails.some(g => railRunsBetween(g, a, b));
   }
 
-  /** Nearest unoccupied adjacent node at the same lift. */
+  /**
+   * Nearest unoccupied adjacent node at the same lift. With "Perimeter
+   * handrails", the nearest one along an outside face.
+   */
   ledgerTargetFor(node) {
+    if (this.perimeterHandrails) return this._handrailTargetFor(node);
     const lifts = this._lifts();
     const nodes = lifts.byLevel.get(node.level) || [];
     let frame = lifts.frames.get(node.level);
     if (frame === undefined) lifts.frames.set(node.level, frame = liftFrame(nodes));
     return findClosestUnoccupiedTarget(node, nodes, c => !this._ledgerExists(node, c), frame);
+  }
+
+  // --- perimeter handrails ----------------------------------------------------
+  // With "Perimeter handrails" ticked the Ledger tool works on the outside of
+  // the scaffold only, as ScaffoldPro's does: a click adds the one ledger along
+  // an outside face from the rosette under it, and SHIFT adds every one that is
+  // missing round the outside of that scaffold at that level. Bay edges inside
+  // it are left alone: a ledger at rail height across a deck is in the way.
+
+  setPerimeterHandrails(on) {
+    this.perimeterHandrails = !!on;
+    this._clearGhost();
+    this._pendingBatch = null;
+    this._refreshGhost();
+  }
+
+  /** The side bracket a node is carried by (its bare tip, or a standard seated in it), or null for a leg's rosette. */
+  _bracketUnder(node) {
+    if (node.bracketId) return this.state.brackets.get(node.bracketId) || null;
+    const c = this.state.standards.get(node.columnId);
+    return c ? this.state.standardBracket(c) : null;
+  }
+
+  /**
+   * Whether two neighbouring nodes of a lift are the two ends of a bay edge,
+   * for telling the outside of the scaffold from the inside of it.
+   *
+   * Between two legs this is the Brace tool's rule (framedFaces): a ledger or
+   * truss joins them at some lift, or one of them has none on it yet and
+   * standing next to each other is all there is to go on. Without it two runs
+   * a few feet apart close bays across the open air between them, and the
+   * faces looking onto that gap read as inside.
+   *
+   * A standard seated in a side bracket (or a bracket's bare tip) is joined to
+   * the leg its bracket hangs on by the bracket, and to its neighbours along
+   * the row of brackets by nothing until this tool has been there: both count.
+   */
+  _isBayEdge(a, b) {
+    const lifts = this._lifts();
+    if (!lifts.links) lifts.links = this._standardLinks(this._legs());
+    const { joined, framed } = lifts.links;
+    const underA = this._bracketUnder(a), underB = this._bracketUnder(b);
+    if (underA && underB) return true;
+    if (!underA && !underB) return joined(a.columnId, b.columnId) || !framed(a.columnId) || !framed(b.columnId);
+    const leg = underA ? b : a, k = underA || underB;
+    return (Math.abs(leg.x - k.x) < BRACKET_HOST_FT && Math.abs(leg.y - k.y) < BRACKET_HOST_FT) || !framed(leg.columnId);
+  }
+
+  /** A lift's bay edges, which are outside, and which scaffold each node is part of; kept until the model changes. */
+  _outline(level) {
+    const lifts = this._lifts();
+    let outline = lifts.outlines.get(level);
+    if (outline) return outline;
+    const nodes = lifts.byLevel.get(level) || [];
+    let frame = lifts.frames.get(level);
+    if (frame === undefined) lifts.frames.set(level, frame = liftFrame(nodes));
+    outline = planLiftOutline(nodes, frame, (a, b) => this._isBayEdge(a, b));
+    lifts.outlines.set(level, outline);
+    return outline;
+  }
+
+  /** True when this node is on the outside of the scaffold at its lift. */
+  isOutsideNode(node) {
+    const outline = this._outline(node.level);
+    return (outline.byColumn.get(node.columnId) || []).some(e => outline.outside.has(e.key));
+  }
+
+  /** The node the nearest open outside edge from this one runs to, or null. */
+  _handrailTargetFor(node) {
+    const outline = this._outline(node.level);
+    let best = null, bestFt = Infinity;
+    for (const e of outline.byColumn.get(node.columnId) || []) {
+      if (!outline.outside.has(e.key) || e.lengthFt >= bestFt || this._ledgerExists(e.a, e.b)) continue;
+      best = e.a.columnId === node.columnId ? e.b : e.a;
+      bestFt = e.lengthFt;
+    }
+    return best;
+  }
+
+  /** Every open edge round the outside of the scaffold this node is part of, at its lift: [{ a, b }]. */
+  _handrailPlan(node) {
+    const outline = this._outline(node.level);
+    const group = outline.group.get(node.columnId);
+    if (group === undefined) return [];
+    return outline.edges.filter(e => outline.outside.has(e.key) && outline.group.get(e.a.columnId) === group && !this._ledgerExists(e.a, e.b));
+  }
+
+  /**
+   * What SHIFT adds from a node: a ledger on every open bay edge at its level,
+   * or with "Perimeter handrails" only round the outside of its scaffold.
+   */
+  _ledgerFillPlan(node) {
+    if (this.perimeterHandrails) return this._handrailPlan(node);
+    return computeBatchPlan(this._nodesAtLevel(node.level), (a, b) => !this._ledgerExists(a, b));
   }
 
   // --- standards -----------------------------------------------------------
@@ -1114,13 +1255,19 @@ export class Tools {
     return out;
   }
 
-  _batchFillLedgers(level) {
-    const nodes = this._nodesAtLevel(level);
-    const plan = computeBatchPlan(nodes, (a, b) => !this._ledgerExists(a, b));
+  /**
+   * SHIFT: lay the fill. Started from a node it is what the card asks for
+   * (_ledgerFillPlan); given a level alone it is every bay of that level.
+   */
+  _batchFillLedgers(level, from = null) {
+    const plan = from
+      ? this._ledgerFillPlan(from)
+      : computeBatchPlan(this._nodesAtLevel(level), (a, b) => !this._ledgerExists(a, b));
     this.state.batch(() => {
       for (const { a, b } of plan) this.state.addLedger([a.x, a.y, a.z], [b.x, b.y, b.z]);
     });
-    this.hooks.onBulkFill?.(plan.length, 'ledger');
+    this.hooks.onBulkFill?.(plan.length, from && this.perimeterHandrails ? 'handrail' : 'ledger');
+    return plan.length;
   }
 
   /** Nearest ledger under the pointer, with the world point that was hit. */
@@ -1636,19 +1783,22 @@ export class Tools {
     if (!node) return;
     // Ledger/brace preview the auto-chosen target, so one click is predictable.
     if (this.tool === 'ledger') {
+      const handrails = this.perimeterHandrails;
       if (e.shiftKey) {
-        const plan = computeBatchPlan(this._nodesAtLevel(node.level), (a, b) => !this._ledgerExists(a, b));
+        const plan = this._ledgerFillPlan(node);
         for (const { a, b } of plan) this.ghostGroup.add(tubeBetween([a.x, a.y, a.z], [b.x, b.y, b.z], 1.9, mat));
         this._pendingBatch = plan.length
-          ? { count: plan.length, label: 'ledger', apply: () => this._batchFillLedgers(node.level) }
+          ? { count: plan.length, label: handrails ? 'handrail' : 'ledger', apply: () => this._batchFillLedgers(node.level, node) }
           : null;
-        this.hooks.onPreview?.('ledger', plan.length, { batch: true, level: node.level });
+        this.hooks.onPreview?.('ledger', plan.length, { batch: true, level: node.level, handrails });
         return;
       }
       this._pendingBatch = null;
       const t = this.ledgerTargetFor(node);
       if (t) this.ghostGroup.add(tubeBetween([node.x, node.y, node.z], [t.x, t.y, t.z], 1.9, mat));
-      this.hooks.onPreview?.('ledger', t ? 1 : 0, { batch: false, level: node.level });
+      this.hooks.onPreview?.('ledger', t ? 1 : 0, {
+        batch: false, level: node.level, handrails, outside: handrails ? this.isOutsideNode(node) : null,
+      });
       return;
     }
     if (this.tool === 'bracket') {

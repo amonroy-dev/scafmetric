@@ -263,6 +263,8 @@ dialog.sfn .sfn-page h1:focus,dialog.sfn .sfn-page h1:focus-visible{outline:0;bo
 .sfw-check{flex-direction:row!important;align-items:center;gap:8px!important;margin-top:10px;cursor:pointer}
 .sfw-check input{width:15px;height:15px;margin:0;accent-color:var(--sfw-ink)}
 .sfw-check span{font-size:13px;color:var(--sfw-ink);font-weight:400}
+/* A tick box that is the whole of a tool's card sits straight under the title. */
+.sfw-toolcard-body>.sfw-check{margin-top:2px}
 
 .sfw-note{margin:10px 0 0;font-size:12px;line-height:1.5;color:var(--sfw-muted)}
 .sfw-note strong{color:var(--sfw-ink);font-weight:600}

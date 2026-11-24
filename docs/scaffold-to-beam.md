@@ -145,6 +145,38 @@ load goes with them.
   its bracket hangs on. A Shift fill braces the outer row but not those short
   faces, which would otherwise get a brace at every bracket.
 
+## Handrails
+
+A handrail is a ledger on the rosettes above a deck, so it is put on with the
+Ledger tool. Its Shift fill adds a ledger on every open bay edge of a level,
+which at rail height means ledgers across the decks. **Perimeter handrails**, in
+the Ledger tool's card, keeps the tool to the outside of the scaffold
+(ScaffoldPro's ledger placement mode of the same name):
+
+- A click adds the one ledger along an outside face from the rosette under the
+  pointer. A rosette with no outside face is not lit and takes nothing.
+- Shift adds every ledger still missing round the outside of that scaffold at
+  that level, and nothing inside it. One click a rail: once at the mid rail's
+  rosettes, once at the top rail's.
+- On a row of standards seated in side brackets that is the rail along the row
+  and the short return to the scaffold at each end of it. Nothing goes across
+  the bracket decks, or along the face between them and the scaffold's own deck.
+
+An edge is inside when a bay stands on each side of it (`outsideEdgeKeys` in
+`src/scaffold/workspace/planning.js`), read from the bays themselves, so it
+holds for a footprint with a corner cut out and for a scaffold turned in plan.
+Two legs make a bay edge when a ledger or truss joins them at some lift, the
+Brace tool's rule, so two runs standing a few feet apart are railed on the
+faces that look at each other; a bracket joins the standard seated in it to the
+leg it hangs on. Two scaffolds that no bay joins are filled one at a time.
+
+The rails a block lays round its decks are on the same rosettes and count as the
+member on those bay edges: the Ledger tool, ticked or not, lays nothing over
+them, and a block placed later lays no rail over a ledger that is already
+there. Either way a bay edge is listed and weighed once. The Ledger tool only
+adds: the block's rail down the face the brackets hang on stays until it is
+erased (one click for each of the two rails).
+
 ## Picking legs and importing
 
 **To beam** in the toolbar opens the Send to beam card. With it open, a click on a

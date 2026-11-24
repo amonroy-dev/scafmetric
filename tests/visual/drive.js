@@ -1363,6 +1363,101 @@ window.__sv = (() => {
       return { unloaded, loaded, props, onBeam };
     },
 
+    // Handrails on a row of standards seated in side brackets: the Ledger tool
+    // with "Perimeter handrails" ticked. A click adds the short return at the
+    // end of the row; SHIFT adds the rest round the outside of that level, and
+    // nothing across the decks or over the rails the block laid round its own.
+    async perimeterHandrails() {
+      const s = ws().state, t = ws().tools;
+      // A run of its own with its rails on: three bays, one deck, a bracket on each front leg.
+      const before = { ...t.blockSettings };
+      t.setBlockSettings({ widthFt: 21, depthFt: 5, heightFt: 10, plankedLevelsCount: 1, includeBaseDeck: false, guardrails: true, braceFrontBack: 'off', braceLeftRight: 'off' });
+      const existing = new Set(s.standards.keys());
+      t.placeBlockAt({ plan: t._blockPlan(), center: { x: 130.5, y: 0.5 }, snapped: false, rotationSteps: 0 });
+      t.setBlockSettings(before);
+      const mine = [...s.standards.values()].filter(c => !existing.has(c.id));
+      const front = Math.min(...mine.map(c => c.y));
+      const deckZ = Math.max(...s.plankBays().filter(d => d.frame.center.x > 115).map(d => d.z));
+      const hosts = mine.filter(c => Math.abs(c.y - front) < 1e-6).sort((a, b) => a.x - b.x);
+      const at0 = s.nodes();
+      const ks = hosts.map(c => s.addBracket(at0.find(n => n.columnId === c.id && Math.abs(n.z - deckZ) < 1e-6), [0, -1], 2));
+      for (const k of ks.slice(0, -1)) {
+        const arm = s.supportList().find(l => l.bracketId === k.id);
+        if (!s.addPlankOnLedger(arm.id, 1)) s.addPlankOnLedger(arm.id, -1);
+      }
+      for (const k of ks) s.addStandardOnBracket(k.id, 3.28125);
+      const box = ws()._modelBox();
+      box.min.set(118, -6, 0);
+      box.max.set(143, 5, 13);
+      ws().engine.setView('home');
+      ws().engine.frame(box);
+      await raf(8);
+
+      const level = s.liftAt(deckZ) + 1;
+      const z1 = s.liftZ(level), z2 = s.liftZ(level + 1);
+      const outer = front - 2;
+      const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-6;
+      const ledgersAt = z => s.ledgerList().filter(l => Math.abs(l.a[2] - z) < 1e-6 && Math.abs(l.b[2] - z) < 1e-6 && l.a[0] > 115);
+      // Where the ledgers at a height are: along the bracket row, the two returns, or anywhere else.
+      const where = z => {
+        const out = { row: 0, returns: 0, elsewhere: 0 };
+        for (const l of ledgersAt(z)) {
+          const onRow = Math.abs(l.a[1] - outer) < 1e-6 && Math.abs(l.b[1] - outer) < 1e-6;
+          const isReturn = [hosts[0], hosts[hosts.length - 1]].some(h => (near(l.a, [h.x, front]) && near(l.b, [h.x, outer])) || (near(l.b, [h.x, front]) && near(l.a, [h.x, outer])));
+          out[onRow ? 'row' : isReturn ? 'returns' : 'elsewhere']++;
+        }
+        return out;
+      };
+      const pending = () => (t._pendingBatch ? t._pendingBatch.count : 0);
+      // The previewed tubes on this run (the marker on the rosette is a sphere, unscaled).
+      const ghostsHere = () => t.ghostGroup.children.filter(m => m.scale.y !== 1 && m.position.x > 115).length;
+
+      tool('ledger');
+      await raf(3);
+      const tick = ws().$('sfw-ledger-outside');
+      const card = { shown: !ws().$('sfw-toolcard').hidden, title: ws().$('sfw-tool-title').textContent, label: tick.closest('label').textContent.trim() };
+      const middle = [hosts[1].x, outer, z1];
+      // Without the tick, SHIFT is every open bay edge of the level, on every scaffold in the model.
+      await hover(middle, { shift: true });
+      const everyBay = { pending: pending(), here: ghostsHere(), hint: hint() };
+      tick.click();
+      await raf(3);
+      const lit = s.nodes().filter(n => n.level === level && n.x > 115).filter(ws()._nodeValidator('ledger')).length;
+      const ticked = { hint: hint(), lit, on: t.perimeterHandrails };
+
+      // A click on the end standard of the row: the 2 ft return to the scaffold.
+      const end = [hosts[0].x, outer, z1];
+      await hover(end);
+      const oneHint = hint();
+      await click(end);
+      const afterClick = where(z1);
+      // SHIFT from the middle of the row: the rest of that level.
+      await hover(middle, { shift: true });
+      const preview = { pending: pending(), here: ghostsHere(), ghosts: t.ghostGroup.children.length, hint: hint() };
+      await click(middle, { shift: true });
+      const filled = { ...where(z1), hint: hint() };
+      // The top rail, one lift up, confirmed with Enter in place of a click.
+      await hover([hosts[2].x, outer, z2], { shift: true });
+      const topPending = pending();
+      key('Enter');
+      await raf(3);
+      const top = { ...where(z2), pending: topPending, hint: hint() };
+      // A rosette between the two decks is on no outside face.
+      await hover([hosts[1].x, front, z1]);
+      const inside = { hint: hint(), ghosts: t.ghostGroup.children.length };
+      // Nothing left to add; and no rail of the block's has a ledger laid over it.
+      await hover(middle, { shift: true });
+      const again = { pending: pending(), hint: hint() };
+      const rails = [...s.guardrails.values()].filter(g => g.kind === 'rail' && g.a[0] > 115).length;
+
+      tick.click();
+      await raf(2);
+      tool('select');
+      ws().engine.frame(box);
+      await raf(8);
+      return { card, everyBay, ticked, oneHint, afterClick, preview, filled, top, inside, again, rails };
+    },
+
     // A sideways wheel press arrives as the browser's Back, which the page
     // cannot cancel. While the builder is open, Back is undone (ScaffoldPro's
     // guard): same page, builder still open. Closing it removes the guard.
