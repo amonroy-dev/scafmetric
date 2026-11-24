@@ -194,6 +194,9 @@ dialog.sfn .sfn-page h1:focus,dialog.sfn .sfn-page h1:focus-visible{outline:0;bo
 .sfw-toolcard.is-folded h3{margin-bottom:0}
 .sfw-toolcard.is-folded .sfw-toolcard-body{display:none}
 .sfw-tool-beam{margin-top:8px}
+/* Send to beam: the list of legs comes first, the two buttons last, Import the wider. */
+.sfw-toolcard [data-for="beam"]>.sfw-table-wrap:first-child{margin-top:0}
+.sfw-beam-actions #sfw-import{flex:2;padding:0 12px}
 .sfw-toolcard .sfw-props{margin-bottom:10px}
 .sfw-toolcard .sfw-actions-row .sfw-btn{margin-top:0}
 /* What a click, R and Shift do. */
@@ -317,14 +320,6 @@ dialog.sfn .sfn-page h1:focus,dialog.sfn .sfn-page h1:focus-visible{outline:0;bo
 .sfw-view-x{width:30px;border:0;border-radius:6px;background:transparent;color:var(--sfw-faint);font-size:16px;line-height:1;cursor:pointer}
 .sfw-view-x:hover{background:var(--sfw-hover);color:var(--sfw-ink)}
 
-/* ---------------------------------------------------------------- */
-/* Footer                                                            */
-/* ---------------------------------------------------------------- */
-.sfw-foot{display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:12px 20px;border-top:1px solid var(--sfw-line);background:var(--sfw-bg)}
-.sfw-foot>div{display:flex;align-items:center;gap:8px}
-.sfw-foot .sfw-btn{width:auto;margin-top:0}
-.sfw-foot .sfw-btn.ghost{border-color:transparent;background:transparent}
-.sfw-foot .sfw-btn.ghost:hover{background:var(--sfw-hover)}
 .sfw-keys{display:inline-block;color:var(--sfw-muted)}
 .sfw-keys kbd{display:inline-block;min-width:18px;padding:0 5px;border:1px solid var(--sfw-line-strong);border-bottom-width:2px;border-radius:4px;background:var(--sfw-subtle);color:var(--sfw-ink-2);font:500 11px/1.6 var(--sfw-font);text-align:center}
 .sfw-retain{display:inline-block;color:var(--sfw-faint)}

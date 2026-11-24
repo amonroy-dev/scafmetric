@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
+import { legColumn } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame,
@@ -40,6 +41,11 @@ const DRAG_PX = MARQUEE_DRAG_THRESHOLD_PX;
 // A click this close to a tube on screen selects it, however thin it is drawn.
 const PICK_TOLERANCE_PX = 6;
 const PICK_BAND_PX = 3;
+// With Send to beam open only a leg can be picked, so a click may land further
+// from one and still mean it. The leg under the pointer is lit by a column
+// this wide.
+const LEG_PICK_TOLERANCE_PX = 12;
+const LEG_HOVER_OD_IN = 18;
 // Truss fits, from ScaffoldPro: two degrees off a run still counts as along it
 // (rosettes sit on a grid, so this only absorbs noise); an inch off its own
 // length still fits (the frames do not stretch); 0.05 ft is the same lift.
@@ -112,7 +118,7 @@ export class Tools {
     on('pointermove', e => this._onMove(e));
     on('pointerup', e => this._onUp(e));
     // Hover ends, preview ends (ScaffoldPro clears its hover on pointer-out).
-    on('pointerleave', () => { this._hoverAt = null; this._pendingBatch = null; this._clearGhost(); });
+    on('pointerleave', () => { this._hoverAt = null; this._pendingBatch = null; this._clearGhost(); this._setCursor(''); });
     this._onKey = e => this._key(e);
     window.addEventListener('keydown', this._onKey);
     // Shift is tracked as its own state, as ScaffoldPro does: pressing it over a
@@ -154,7 +160,13 @@ export class Tools {
     this.pending = null;
     this.liveLoadAcross = false;
     this._clearGhost();
+    this._setCursor('');
     this.hooks.onToolChange?.(name);
+  }
+  /** The pointer over the canvas: a hand while it is on something a click takes. */
+  _setCursor(name) {
+    const style = this.engine.renderer.domElement.style;
+    if (style && style.cursor !== name) style.cursor = name;
   }
   setCatalog(categoryKey, partId) {
     this.categoryKey = categoryKey;
@@ -265,6 +277,8 @@ export class Tools {
     if (marquee && dragged) {
       marquee.currentClientX = e.clientX;
       marquee.currentClientY = e.clientY;
+      // With Send to beam open, a box takes the legs inside it for the beam.
+      if (this.tool === 'beam') { this._finishLegMarquee(marquee, { ctrlKey: down.ctrl }); return; }
       // Shift adds and Ctrl toggles, as in ScaffoldPro. Outside Select a box
       // adds to what is selected rather than replacing it.
       this._finishMarquee(marquee, { shiftKey: down.shift || this.tool !== 'select', ctrlKey: down.ctrl });
@@ -318,10 +332,7 @@ export class Tools {
   /** Every part as the box tests it: tubes as segments, decks and loads as outlines. */
   _marqueeParts() {
     const s = this.state;
-    const segments = [], outlines = [];
-    const base = s.baseOffsetFt();
-    // A standard is its whole height, ground to top, so a box round any of it counts.
-    for (const c of s.standards.values()) segments.push({ id: c.id, a: [c.x, c.y, 0], b: [c.x, c.y, base + s.standardHeightFt(c)] });
+    const segments = this._standardSegments(), outlines = [];
     for (const map of [s.ledgers, s.braces, s.guardrails]) for (const m of map.values()) segments.push({ id: m.id, a: m.a, b: m.b });
     for (const k of s.brackets.values()) for (const m of sideBracketWorldMembers(k, k.dir, k.lengthFt)) segments.push({ id: k.id, a: m.a, b: m.b });
     for (const t of s.trusses.values()) for (const m of trussWorldMembers(t.a, t.b, t.family)) segments.push({ id: t.id, a: m.a, b: m.b });
@@ -342,12 +353,30 @@ export class Tools {
     this.hooks.onSelectionChange?.([...this.selection]);
   }
 
+  /** Each standard as the screen tests it: its whole height, ground to top, so a box or a click on any of it counts. */
+  _standardSegments() {
+    const s = this.state, base = s.baseOffsetFt();
+    return [...s.standards.values()].map(c => ({ id: c.id, a: [c.x, c.y, 0], b: [c.x, c.y, base + s.standardHeightFt(c)] }));
+  }
+
+  /** A box dragged with Send to beam open: the legs in it, and nothing else. */
+  _finishLegMarquee(m, modifiers) {
+    const { rect, mode, projector } = this._marqueeGeometry(m);
+    const ids = marqueeHits(projector, rect, mode, { segments: this._standardSegments(), outlines: [] });
+    this.hooks.onLegBox?.(ids, modifiers);
+  }
+
   _act(e) {
     const s = this.state;
     // Move/copy capture: ground clicks drive the anchor/destination steps.
     if (this.transformHook) {
       const g = this._groundSnap(e);
       if (g && this.transformHook(g)) return;
+    }
+    // Send to beam: a click puts the leg under it on the beam, or takes it off.
+    if (this.tool === 'beam') {
+      this.hooks.onLegPick?.(this._pickStandard(e));
+      return;
     }
     if (this.tool === 'standard') {
       const g = this._groundSnap(e);
@@ -683,6 +712,51 @@ export class Tools {
       this._cycle = { x: e.clientX, y: e.clientY, ids, index: 0 };
     }
     return ids[this._cycle.index];
+  }
+
+  // --- legs for the beam -------------------------------------------------------
+  // With Send to beam open a click picks a leg and nothing else: the standard
+  // nearest the click as it is drawn on the screen, so from above, where a leg
+  // is a dot, clicking the dot is enough. A leg's load tag stands for its leg.
+
+  /** The standard a click here would take, or null. */
+  _pickStandard(e) {
+    const { raycaster, camera, renderer } = this.engine;
+    this.engine.setPointerFromEvent(e);
+    raycaster.setFromCamera(this.engine.pointer, camera);
+    // A load tag is drawn over everything, so it is what the click lands on.
+    const tags = this.hooks.getLegTags?.() || [];
+    if (tags.length) {
+      const id = raycaster.intersectObjects(tags, false)[0]?.object.userData.legId;
+      if (id && this.state.standards.has(id)) return id;
+    }
+    const bounds = renderer.domElement.getBoundingClientRect();
+    const ray = raycaster.ray;
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), onRay = new THREE.Vector3(), onSeg = new THREE.Vector3();
+    let best = null;
+    for (const seg of this._standardSegments()) {
+      ray.distanceSqToSegment(p0.set(...seg.a), p1.set(...seg.b), onRay, onSeg);
+      const depth = onRay.distanceTo(ray.origin);
+      onSeg.project(camera);
+      if (onSeg.z < -1 || onSeg.z > 1) continue; // behind the camera or past the far plane
+      const px = Math.hypot(((onSeg.x + 1) / 2) * bounds.width - (e.clientX - bounds.left), ((1 - onSeg.y) / 2) * bounds.height - (e.clientY - bounds.top));
+      if (px > LEG_PICK_TOLERANCE_PX) continue;
+      const band = Math.floor(px / PICK_BAND_PX);
+      if (!best || band < best.band || (band === best.band && depth < best.depth)) best = { id: seg.id, band, depth };
+    }
+    return best ? best.id : null;
+  }
+
+  /** Send to beam: light up the leg a click would take, and show a hand over it. */
+  _legHoverGhost(e) {
+    const id = this._pickStandard(e);
+    const c = id ? this.state.standards.get(id) : null;
+    if (c) {
+      const top = this.state.baseOffsetFt() + this.state.standardHeightFt(c);
+      this.ghostGroup.add(legColumn(c.x, c.y, 0, top, LEG_HOVER_OD_IN, MATERIALS.legHover));
+    }
+    this._setCursor(c ? 'pointer' : '');
+    this.hooks.onPreview?.('beam', c ? 1 : 0, { id: c ? id : null });
   }
 
   _nodesAtLevel(level) { return this._lifts().byLevel.get(level) || []; }
@@ -1281,6 +1355,7 @@ export class Tools {
     this._clearGhost();
     this._pendingBatch = null;
     if (this.tool === 'select' || this.tool === 'erase') return;
+    if (this.tool === 'beam') { this._legHoverGhost(e); return; }
     if (this.tool === 'block') { this._blockGhost(e); return; }
     // Live loads: ghost the patch and its span arrows on the hovered deck, or
     // on every deck of the platform with SHIFT.

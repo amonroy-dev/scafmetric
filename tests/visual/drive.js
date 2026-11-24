@@ -1134,6 +1134,86 @@ window.__sv = (() => {
       };
     },
 
+    // Send to beam: the legs are picked by clicking them (from above, where a
+    // leg is a dot under its load tag), the beam is drawn under the picks, the
+    // Import button is in the card, and the beam form gets whole pounds.
+    async sendToBeam() {
+      const s = ws().state;
+      ws().engine.setView('top');
+      ws()._frame();
+      await raf(8);
+      ws().root.querySelector('.sfw-tool[data-tool="beam"]').click();
+      await raf(4);
+      const rows = () => [...ws().$('sfw-rows').querySelectorAll('tr')].map(r => [...r.children].map(c => c.textContent));
+      const drawn = () => ws().beamGroup.children.length;
+      const opened = {
+        tool: ws().tools.tool,
+        active: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
+        title: ws().$('sfw-tool-title').textContent,
+        rows: rows(),
+        importInCard: !!ws().$('sfw-toolcard').querySelector('#sfw-import'),
+        importDisabled: ws().$('sfw-import').disabled,
+        footer: !!ws().root.querySelector('.sfw-foot'),
+        oldControls: ['sfw-axis', 'sfw-pos', 'sfw-pick'].filter(id => ws().$(id)).length,
+        drawn: drawn(),
+      };
+      // The longest row of legs running left to right, and the first three of it.
+      const byRow = new Map();
+      for (const c of s.standards.values()) {
+        const k = Math.round(c.y * 100);
+        if (!byRow.has(k)) byRow.set(k, []);
+        byRow.get(k).push(c);
+      }
+      const row = [...byRow.values()].sort((a, b) => b.length - a.length)[0].sort((a, b) => a.x - b.x);
+      const three = row.slice(0, 3);
+      const topOf = c => [c.x, c.y, s.standardTopZ(c)];
+      await hover(topOf(three[1]));
+      const hovered = { cursor: canvas().style.cursor, hint: hint(), lit: ws().tools.ghostGroup.children.length };
+      // Clicked out of order: the beam still starts under the leftmost.
+      for (const c of [three[1], three[0], three[2]]) await click(topOf(c));
+      const takeoff = new Map(s.takeoff().legs.map(l => [l.id, l]));
+      const want = three.map((c, i) => {
+        const l = takeoff.get(c.id);
+        return { n: String(i + 1), dead: Math.round(l.deadLb), live: Math.round(l.liveLb), at: Math.round((c.x - three[0].x) * 100) / 100 };
+      });
+      const picked = {
+        ids: [...ws().beamLegs].sort().join(), wanted: three.map(c => c.id).sort().join(),
+        rows: rows(), drawn: drawn(), importDisabled: ws().$('sfw-import').disabled,
+        selected: ws().selection.length,
+      };
+      // A second click takes a leg off; a third puts it back.
+      await click(topOf(three[2]));
+      const afterSecondClick = ws().beamLegs.size;
+      await click(topOf(three[2]));
+      // Moving the first leg in from the support moves every distance with it.
+      const first = ws().$('sfw-first');
+      first.value = '2';
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      await raf(3);
+      const inboard = rows().map(r => r[1]);
+      first.value = '0';
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      await raf(3);
+      // Over to the beam form.
+      ws().$('sfw-import').click();
+      await sleep(300);
+      const formRows = [...document.querySelectorAll('.load-row[data-scaffold-import]')].map(r => ({
+        dead: r.querySelector('.point-dead').value, live: r.querySelector('.point-live').value, at: r.querySelector('.point-location').value,
+      }));
+      const closedByImport = ws().root.hidden;
+      const note = (document.querySelector('[data-scaffold-note]') || {}).textContent || null;
+      ws().open();
+      await raf(6);
+      // Esc puts Select back in hand: the beam goes with the card, the picks are kept.
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+      await raf(4);
+      const afterEsc = { tool: ws().tools.tool, drawn: drawn(), kept: ws().beamLegs.size, cardHidden: ws().$('sfw-toolcard').hidden };
+      ws().engine.setView('home');
+      ws()._frame();
+      await raf(6);
+      return { opened, hovered, picked, want, afterSecondClick, inboard, formRows, closedByImport, note, afterEsc };
+    },
+
     // A sideways wheel press arrives as the browser's Back, which the page
     // cannot cancel. While the builder is open, Back is undone (ScaffoldPro's
     // guard): same page, builder still open. Closing it removes the guard.

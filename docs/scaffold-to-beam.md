@@ -1,9 +1,9 @@
 # Scaffold-to-beam workflow
 
-A modal in the beam workspace (**Loads → Import loads from scaffold**) that lets you
-configure a scaffold in a 3D canvas, pick the legs resting on a beam, and import
-their reactions into the beam analysis as point loads — with **dead and live kept
-separate** and each load placed at its **exact distance from the left support**.
+The scaffold builder, opened from the beam workspace (**Loads → Scaffold builder**),
+lets you model a scaffold in a 3D canvas, click the legs resting on a beam, and import
+their loads into the beam analysis as point loads, with **dead and live kept
+separate** and each load placed at its distance from the left support.
 
 ## What was reused vs. rebuilt
 
@@ -90,14 +90,34 @@ ledgers whole, which is what a fine mesh converges to, so a hand check of a
 rectangular bay agrees exactly. A load sits on its deck: remove the planks and the
 load goes with them.
 
-## Beam placement & import
+## Picking legs and importing
 
-The beam is positioned along a chosen grid line (X or Y); its span is read from the
-beam workspace, with the left support at the first leg on that line. Each selected
-leg's distance from the left support is preserved at full precision. Legs that fall
-off the beam line or past the span are **flagged and excluded** from import (not
-silently clamped). Importing replaces any prior scaffold-imported rows; manually
-entered loads are left untouched.
+**To beam** in the toolbar opens the Send to beam card. With it open, a click on a
+leg puts that leg on the beam and a second click takes it off. A box dragged round
+several legs takes them all (Ctrl+drag takes them off). A leg's load tag counts as
+the leg, which is what there is to click in the view from above.
+
+The beam is laid under the picks (`beamUnderPickedLegs` in
+`src/scaffold/legloads.js`):
+
+- Its line is the line through the most picked legs. Two legs make a line. A
+  picked leg more than 6 in off that line is **flagged and left out**, not sent.
+- Its left end is the end further left in plan, or further to the front for a
+  beam running front to back. The first leg on the line stands over the left
+  support unless **First leg from left support** says how far in it is.
+- Its span is read from the beam form. A leg past the end of the beam is flagged
+  and left out.
+
+While the card is open the beam is drawn on the ground under the legs, with its
+left support tagged. The legs on it turn blue and are numbered from that support,
+and picked legs that are left out are drawn in the warning colour.
+
+**Import to beam**, in the same card, sends each leg as a point load in whole
+pounds, dead and live kept apart, at its distance from the left support to a
+hundredth of a foot. The takeoff works in fractions of a pound; carried over
+unrounded, a leg read "2,103.8769 lbs" on the beam diagram, which looks like a
+load a thousand times its size. Importing replaces any rows imported before;
+loads typed in by hand are left alone.
 
 ## The estimating-use notice
 

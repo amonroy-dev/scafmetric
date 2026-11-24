@@ -64,6 +64,9 @@ export const MATERIALS = {
   // The whole-perimeter preview is a little quieter, there being many of them.
   braceGhost: new THREE.MeshStandardMaterial({ color: 0x16a34a, emissive: 0x22c55e, emissiveIntensity: 0.55, transparent: true, opacity: 0.9, depthWrite: false, metalness: 0.2, roughness: 0.4 }),
   braceGhostRun: new THREE.MeshStandardMaterial({ color: 0x16a34a, emissive: 0x22c55e, emissiveIntensity: 0.45, transparent: true, opacity: 0.75, depthWrite: false, metalness: 0.2, roughness: 0.4 }),
+  // Send to beam: the leg a click would take. Drawn over everything, so it
+  // shows from above, where a leg is a dot under its deck.
+  legHover: new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: 0.38, depthTest: false, depthWrite: false }),
 };
 
 // Shared geometries (never disposed; scaled per instance).
@@ -123,6 +126,16 @@ export function verticalTube(x, y, z0, z1, odIn, material) {
   const r = inchesToFeet(odIn) / 2;
   const h = Math.max(z1 - z0, 1e-6);
   return mesh(UNIT_TUBE_Z, material, [x, y, z0 + h / 2], [r, r, h]);
+}
+
+// A solid column round a leg, to light it up: `odIn` across, from z0 to z1.
+export function legColumn(x, y, z0, z1, odIn, material) {
+  const r = inchesToFeet(odIn) / 2;
+  const h = Math.max(z1 - z0, 1e-6);
+  const m = mesh(UNIT_CYL_Z, material, [x, y, z0 + h / 2], [r, r, h]);
+  m.castShadow = false;
+  m.receiveShadow = false;
+  return m;
 }
 
 // Tube between two arbitrary world points (ledgers, braces).

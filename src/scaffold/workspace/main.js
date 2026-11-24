@@ -13,10 +13,10 @@ import {
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, liveLoadArrows, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
 import { BLOCK_DEFAULTS } from './planning.js';
-import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
+import { beamUnderPickedLegs, toBeamPointLoads, forBeamForm, wholePoundsOnLeg } from '../legloads.js';
 import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
-import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
+import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN, SHARED_GEO } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
@@ -54,8 +54,28 @@ const TOOL_META = {
   plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
   liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a planked bay to load it. The load runs along the planks; R turns it across them. Shift+click loads the whole platform.' },
   erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
+  // Not in the run of placing tools (TOOLS): its button stands apart at the foot of the bar.
+  beam: { label: 'Send to beam', icon: ICONS.beam, hint: 'Click the legs that sit on the beam.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
+
+// Send to beam, as drawn. The beam is a flat bar on the ground under the legs
+// picked for it, drawn over the model (no depth test) so that it shows from
+// above, through the decks. A picked leg the beam cannot take is the warning
+// colour.
+const BEAM_BAR = new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false });
+const BEAM_BAR_WIDTH_FT = 0.5;
+const BEAM_BAR_Z_FT = 0.02;
+const BEAM_END_TICK_FT = { along: 0.2, across: 1.6 };
+// The left support's tag stands this far out past the end, clear of the first leg's own tag.
+const BEAM_TAG_OUT_FT = 2.1;
+const BEAM_LEG_OUT = new THREE.MeshStandardMaterial({ color: 0xc2410c, emissive: 0x9a3412, emissiveIntensity: 0.35, metalness: 0.2, roughness: 0.4 });
+// Leg-load tags: dark as a rule; blue and numbered on the beam; the warning
+// colour for a picked leg left off it.
+const TAG_LEG = { fill: '#18181b', tick: '#fb923c' };
+const TAG_ON_BEAM = { fill: '#2563eb', tick: '#ffffff' };
+const TAG_LEFT_OUT = { fill: '#c2410c', tick: '#ffffff' };
+const TAG_BEAM_END = { fill: '#2563eb', tick: null };
 
 // As ScaffoldPro's App.tsx: typing in a field keeps the field's own undo.
 function isTextInputTarget(target) {
@@ -138,15 +158,15 @@ const TEMPLATE = `
             </div>
           </div>
           <div data-for="beam">
-            <div class="sfw-grid2">
-              <label>Beam runs<select id="sfw-axis"><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
-              <label>Beam line at<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
-            </div>
-            <p class="sfw-note">Beam span: <strong id="sfw-span">—</strong></p>
-            <button type="button" class="sfw-btn" id="sfw-pick">Pick the legs on the beam</button>
-            <div class="sfw-totals" id="sfw-totals"></div>
             <div class="sfw-table-wrap"><table class="sfw-table"><thead><tr><th>Leg</th><th>From left</th><th>Dead</th><th>Live</th></tr></thead><tbody id="sfw-rows"></tbody></table></div>
+            <div class="sfw-totals" id="sfw-totals"></div>
+            <label class="sfw-mt">First leg from left support<span class="sfw-u"><input type="number" id="sfw-first" min="0" step="any" value="0"><i>ft</i></span></label>
+            <p class="sfw-note">Beam span: <strong id="sfw-span">—</strong></p>
             <p class="sfw-warn" id="sfw-warn" hidden></p>
+            <div class="sfw-actions-row sfw-beam-actions">
+              <button type="button" class="sfw-btn ghost" id="sfw-unpick" title="Take every leg off the beam" disabled>Clear</button>
+              <button type="button" class="sfw-btn primary" id="sfw-import" disabled>Import to beam</button>
+            </div>
           </div>
           <div data-for="block" id="sfw-blockcard">
             <div class="sfw-grid2">
@@ -205,16 +225,12 @@ const TEMPLATE = `
       </div>
     </aside>
   </div>
-  <footer class="sfw-foot">
-    <div>
-      <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
-      <button type="button" class="sfw-btn primary" id="sfw-import" disabled>Import to beam</button>
-    </div>
-  </footer>
 </div>`;
 
-// Leg-load tag: a dark label with an orange load tick, legible on the light canvas.
-function labelSprite(text) {
+// Leg-load tag: a dark label with an orange load tick, legible on the light
+// canvas. `look` recolours it (the tags of the legs on the beam) or drops the
+// tick (the tag on the beam's left support, which is not a load).
+function labelSprite(text, look = TAG_LEG) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
   const g = c.getContext('2d');
@@ -222,13 +238,14 @@ function labelSprite(text) {
   g.beginPath();
   g.moveTo(r + 2, 2); g.arcTo(254, 2, 254, 62, r); g.arcTo(254, 62, 2, 62, r); g.arcTo(2, 62, 2, 2, r); g.arcTo(2, 2, 254, 2, r);
   g.closePath();
-  g.fillStyle = '#18181b'; g.fill();
-  g.fillStyle = '#fb923c';
-  g.fillRect(18, 22, 6, 20);
+  g.fillStyle = look.fill; g.fill();
+  if (look.tick) { g.fillStyle = look.tick; g.fillRect(18, 22, 6, 20); }
   g.fillStyle = '#ffffff';
   g.font = '600 30px Inter, "Segoe UI", system-ui, sans-serif';
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(text, 138, 34);
+  // Squeezed rather than cut off when a number and a long load share the tag.
+  if (look.tick) g.fillText(text, 138, 34, 204);
+  else g.fillText(text, 128, 34, 224);
   const tex = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   sp.scale.set(1.9, 0.48, 1);
@@ -397,8 +414,9 @@ class Workspace {
 
     this.contentGroup = new THREE.Group();
     this.nodeGroup = new THREE.Group();
+    this.beamGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
-    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.labelGroup);
+    this.engine.scene.add(this.contentGroup, this.nodeGroup, this.beamGroup, this.labelGroup);
     // What navigation needs from the model: Zoom Extents fits the model box, the
     // wheel and orbit look for model surfaces under the cursor, and an orbit
     // pivot snaps to the nearest rosette.
@@ -413,6 +431,10 @@ class Workspace {
     this.tools = new Tools(this.engine, this.state, {
       getNodeMeshes: () => this.nodeGroup.children,
       getContentMeshes: () => this.contentGroup.children,
+      // Send to beam: a click or a box picks legs, and a leg's load tag stands for the leg.
+      getLegTags: () => (this.labelGroup.visible ? this.labelGroup.children : []),
+      onLegPick: id => this._toggleBeamLeg(id),
+      onLegBox: (ids, modifiers) => this._boxBeamLegs(ids, modifiers),
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); this._refreshProps(); },
       onToolChange: name => this._applyToolUi(name),
       onPreview: (tool, count, info) => this._onToolPreview(tool, count, info),
@@ -494,8 +516,8 @@ class Workspace {
     const bar = this.$('sfw-toolbar');
     bar.innerHTML =
       TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('') +
-      `<button type="button" class="sfw-tool sfw-tool-beam" data-panel="beam" title="Send to beam"><span class="sfw-tool-ico">${ICONS.beam}</span><span class="sfw-tool-lbl">To beam</span></button>`;
-    bar.querySelector('[data-panel="beam"]').addEventListener('click', () => this._showBeamCard());
+      // Send to beam is a tool too, kept apart at the foot of the bar.
+      `<button type="button" class="sfw-tool sfw-tool-beam" data-tool="beam" title="Send to beam"><span class="sfw-tool-ico">${ICONS.beam}</span><span class="sfw-tool-lbl">To beam</span></button>`;
     for (const btn of bar.querySelectorAll('[data-tool]')) {
       btn.addEventListener('click', () => {
         this.tools.setTool(btn.dataset.tool);
@@ -562,21 +584,16 @@ class Workspace {
     this.tools.setCatalog(key, this.$('sfw-part').value);
   }
 
-  /** Send to beam is a card of its own, opened from the toolbar. */
-  _showBeamCard() {
-    // Select in hand, so a stray click on the canvas places nothing.
-    this.tools.setTool('select');
-    this._cardMode = 'beam';
-    for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.remove('is-active');
-    this.$('sfw-toolbar').querySelector('[data-panel="beam"]').classList.add('is-active');
-    this.$('sfw-tool-title').textContent = 'Send to beam';
-    for (const el of this.root.querySelectorAll('#sfw-toolcard [data-for]')) el.hidden = el.dataset.for !== 'beam';
-    this.$('sfw-toolcard').hidden = false;
-  }
-
   _applyToolUi(name) {
-    this._cardMode = 'tool';
-    this.$('sfw-toolbar').querySelector('[data-panel="beam"]')?.classList.remove('is-active');
+    // Send to beam is a tool like the rest: in hand, a click picks a leg for the beam.
+    const wasBeam = !!this._beamShown;
+    this._beamShown = name === 'beam';
+    // What was selected would read as picked for the beam: both are drawn blue.
+    if (this._beamShown && (this.selection.length || this.tools.selection.size)) {
+      this.tools.selection.clear();
+      this.selection = [];
+      this._refreshProps();
+    }
     for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
     // The card says how the tool works; the bubble is for what is happening now.
     this.$('sfw-hint').textContent = '';
@@ -599,6 +616,8 @@ class Workspace {
       if (!card.hidden) this._fillBlockCard();
     }
     this._rebuildNodes();
+    // The beam, the blue of its legs and their numbered tags come and go with the card.
+    if (wasBeam !== this._beamShown) this._beamChanged();
   }
 
   // --- the block card ---------------------------------------------------------
@@ -675,9 +694,9 @@ class Workspace {
     this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
     this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
     this.$('sfw-clear').addEventListener('click', () => { this.beamLegs.clear(); this.selection = []; this.state.clear(); });
-    this.$('sfw-axis').addEventListener('change', () => this._updateBeam());
-    this.$('sfw-pos').addEventListener('input', () => this._updateBeam());
-    this.$('sfw-pick').addEventListener('click', () => this._selectLegsOnBeam());
+    // Moving the first leg along the beam slides the beam under the legs.
+    this.$('sfw-first').addEventListener('input', () => this._beamChanged());
+    this.$('sfw-unpick').addEventListener('click', () => { this.beamLegs.clear(); this._beamChanged(); });
     this.$('sfw-import').addEventListener('click', () => this._import());
     this.$('sfw-rails').addEventListener('click', () => {
       const n = this.state.generateGuardrails();
@@ -780,6 +799,12 @@ class Workspace {
         : `Click to ${info.changing ? 'change this bay to' : 'load this bay at'} ${info.psf} psf ${way}.${oneWay || ' R turns the load. SHIFT takes the whole platform.'}`;
       return;
     }
+    if (tool === 'beam') {
+      hint.textContent = !count
+        ? (this.state.standards.size ? 'Click a leg to put it on the beam. Drag a box to take several.' : 'Build the scaffold first: the beam carries its legs.')
+        : this.beamLegs.has(info.id) ? 'Click to take this leg off the beam.' : 'Click to put this leg on the beam.';
+      return;
+    }
     if (tool === 'ledger') {
       if (!info.batch) {
         hint.textContent = count
@@ -850,7 +875,7 @@ class Workspace {
     this._refreshHistory();
     this._rebuildContent();
     this._rebuildNodes();
-    this._updateBeam();
+    this._refreshTakeoff();
     this._updateCounts();
     this._refreshBom();
     this._persist();
@@ -858,7 +883,9 @@ class Workspace {
 
   _matFor(id, fallback) {
     if (this.selection.includes(id)) return MATERIALS.selected;
-    if (this.beamLegs.has(id)) return MATERIALS.selected;
+    // With Send to beam open, the legs on the beam are blue, and a picked leg
+    // the beam cannot take is the warning colour.
+    if (this._beamOpen() && this.beamLegs.has(id)) return this._beamPlan().numbers.has(id) ? MATERIALS.selected : BEAM_LEG_OUT;
     return fallback;
   }
 
@@ -873,6 +900,7 @@ class Workspace {
     this._buildLiveLoads(meshes);
     for (const m of instanceMeshes(meshes)) this.contentGroup.add(m);
     this._rebuildLabels();
+    this._rebuildBeam();
     this.engine?.invalidate({ shadows: true });
   }
 
@@ -881,13 +909,12 @@ class Workspace {
     const g = this.state.geometry();
     for (const s of g.standards) {
       const mat = this._matFor(s.id, MATERIALS.steel);
-      const sel = mat === MATERIALS.selected;
       const { meshes } = buildBaseAssembly({
         x: s.x, y: s.y, groundZ: 0,
         jackExtensionIn: this.state.base.jackExtensionIn,
         showWoodSill: this.state.base.showWoodSill,
         showBaseCollar: this.state.base.showBaseCollar,
-        material: sel ? MATERIALS.selected : null,
+        material: mat === MATERIALS.steel ? null : mat,
       });
       for (const m of meshes) add(m, { ...m.userData, id: s.id, kind: 'base' });
       add(verticalTube(s.x, s.y, s.baseZ, s.topZ, STANDARD_TUBE_OD_IN, mat), { id: s.id, kind: 'standard' });
@@ -978,7 +1005,7 @@ class Workspace {
     if (!el) return;
     const ids = this.selection;
     // With Select in hand the card comes and goes with the selection.
-    if (this.tools?.tool === 'select' && this._cardMode !== 'beam') this.$('sfw-toolcard').hidden = !ids.length;
+    if (this.tools?.tool === 'select') this.$('sfw-toolcard').hidden = !ids.length;
     if (!ids.length) { el.innerHTML = ''; return; }
     if (ids.length > 1) {
       const kinds = {};
@@ -1073,14 +1100,23 @@ class Workspace {
   _rebuildLabels() {
     if (!this.labelGroup) return;
     clearGroup(this.labelGroup);
-    this.labelGroup.visible = this.showLegLoads;
+    // With Send to beam open, the legs on the beam are tagged blue and numbered
+    // from its left support, a picked leg left off it is the warning colour,
+    // and both show whether or not Leg loads is switched on.
+    const plan = this._beamOpen() ? this._beamPlan() : null;
+    this.labelGroup.visible = this.showLegLoads || !!plan?.located.length;
     this.engine?.invalidate();
-    if (!this.showLegLoads) return;
+    if (!this.labelGroup.visible) return;
     const { legs } = this.state.takeoff();
     for (const leg of legs) {
       const s = this.state.standards.get(leg.id);
       if (!s) continue;
-      const sp = labelSprite(`${Math.round(leg.deadLb + leg.liveLb)} lb`);
+      const number = plan?.numbers.get(leg.id);
+      const leftOut = !!plan && !number && this.beamLegs.has(leg.id);
+      if (!this.showLegLoads && !number && !leftOut) continue;
+      const load = `${wholePoundsOnLeg(leg)} lb`;
+      const sp = number ? labelSprite(`${number} · ${load}`, TAG_ON_BEAM) : labelSprite(load, leftOut ? TAG_LEFT_OUT : TAG_LEG);
+      sp.userData.legId = leg.id; // a click on the tag is a click on its leg
       sp.position.set(s.x, s.y, this.state.standardTopZ(s) + 1.1);
       this.labelGroup.add(sp);
     }
@@ -1134,63 +1170,117 @@ class Workspace {
 
   _beamSpan() { return window.scafmetric?.getBeamSpanFt?.() || 20; }
 
-  _currentBeam() {
-    const axis = this.$('sfw-axis').value;
-    const pos = Number(this.$('sfw-pos').value) || 0;
+  /** True while Send to beam is the tool in hand. */
+  _beamOpen() { return this.tools?.tool === 'beam'; }
+
+  /**
+   * The beam under the legs picked for it: where it lies, and each picked leg
+   * on it. `sent` are the legs it carries, in order from its left support and
+   * numbered that way (`numbers`, by leg id). `leftOut` are picked legs that
+   * are not in line with the rest, or that stand past the end of the beam.
+   */
+  _beamPlan() {
     const span = this._beamSpan();
-    const legs = [...this.state.standards.values()];
-    const onLine = legs.filter(l => Math.abs((axis === 'x' ? l.y : l.x) - pos) <= OFF_TOLERANCE_FT);
-    const starts = onLine.map(l => (axis === 'x' ? l.x : l.y));
-    const start = starts.length ? Math.min(...starts) : 0;
-    if (axis === 'x') {
-      return { beam: beamFromSupports([start, pos], [start + span, pos], { offToleranceFt: OFF_TOLERANCE_FT }), draw: { a: [start, pos, 0], b: [start + span, pos, 0] }, span };
-    }
-    return { beam: beamFromSupports([pos, start], [pos, start + span], { offToleranceFt: OFF_TOLERANCE_FT }), draw: { a: [pos, start, 0], b: [pos, start + span, 0] }, span };
+    const firstLegFt = Math.max(0, Number(this.$('sfw-first').value) || 0);
+    const key = `${this.state.version}|${span}|${firstLegFt}|${[...this.beamLegs].join(',')}`;
+    if (this._beamPlanCache?.key === key) return this._beamPlanCache.plan;
+    const byId = new Map(this.state.takeoff().legs.map(l => [l.id, l]));
+    const picked = [...this.beamLegs].map(id => byId.get(id)).filter(Boolean);
+    const laid = beamUnderPickedLegs(picked, span, { firstLegFt, offToleranceFt: OFF_TOLERANCE_FT });
+    const sent = laid.located.filter(r => r.onBeam && r.onSpan).sort((a, b) => a.locationFt - b.locationFt);
+    const leftOut = laid.located.filter(r => !(r.onBeam && r.onSpan));
+    const plan = { ...laid, span, sent, leftOut, numbers: new Map(sent.map((r, i) => [r.leg.id, i + 1])) };
+    this._beamPlanCache = { key, plan };
+    return plan;
   }
 
-  // The beam line is not drawn in the model; it only locates legs for import.
-  _updateBeam() {
-    if (!this.engine) return;
-    const { span } = this._currentBeam();
-    this.$('sfw-span').textContent = `${round(span, 3)} ft`;
-    this._refreshTakeoff();
+  /** A click with Send to beam open: the leg goes on the beam, or comes off it. */
+  _toggleBeamLeg(id) {
+    if (!id) return;
+    if (!this.beamLegs.delete(id)) this.beamLegs.add(id);
+    this._beamChanged();
   }
 
-  _legsForImport() {
-    const { legs } = this.state.takeoff();
-    const byId = new Map(legs.map(l => [l.id, l]));
-    const { beam } = this._currentBeam();
-    const chosen = [...this.beamLegs].map(id => byId.get(id)).filter(Boolean);
-    return mapLegsToBeam(chosen, beam);
+  /** A box dragged with Send to beam open: its legs go on the beam, or with Ctrl come off it. */
+  _boxBeamLegs(ids, { ctrlKey } = {}) {
+    if (!ids.length) return;
+    for (const id of ids) { if (ctrlKey) this.beamLegs.delete(id); else this.beamLegs.add(id); }
+    this._beamChanged();
   }
 
-  _selectLegsOnBeam() {
-    const { beam } = this._currentBeam();
-    const located = mapLegsToBeam(this.state.takeoff().legs, beam);
-    this.beamLegs = new Set(located.filter(r => r.onBeam && r.onSpan).map(r => r.leg.id));
+  /** The legs on the beam changed, or where the beam lies under them. */
+  _beamChanged() {
     this._rebuildContent();
     this._refreshTakeoff();
   }
 
+  // The beam itself, drawn under the picked legs while Send to beam is open: a
+  // bar on the ground as long as the span, a tick across each end, and a tag
+  // on its left support, which is where "From left" is measured from. One leg
+  // alone gives the beam no direction, so nothing is drawn until there are two.
+  _rebuildBeam() {
+    if (!this.beamGroup) return;
+    clearGroup(this.beamGroup);
+    const plan = this._beamOpen() ? this._beamPlan() : null;
+    if (!plan?.beam || !plan.directed) return;
+    const { origin: [ox, oy], dir: [ux, uy], spanFt } = plan.beam;
+    const piece = (alongFt, lengthFt, widthFt) => {
+      const m = new THREE.Mesh(SHARED_GEO.UNIT_BOX, BEAM_BAR);
+      m.position.set(ox + ux * alongFt, oy + uy * alongFt, BEAM_BAR_Z_FT);
+      m.rotation.z = Math.atan2(uy, ux);
+      m.scale.set(lengthFt, widthFt, 0.02);
+      m.raycast = () => {}; // never picked, never in the way of a pick
+      return m;
+    };
+    this.beamGroup.add(
+      piece(spanFt / 2, spanFt, BEAM_BAR_WIDTH_FT),
+      piece(0, BEAM_END_TICK_FT.along, BEAM_END_TICK_FT.across),
+      piece(spanFt, BEAM_END_TICK_FT.along, BEAM_END_TICK_FT.across),
+    );
+    const tag = labelSprite('Left support', TAG_BEAM_END);
+    tag.position.set(ox - ux * BEAM_TAG_OUT_FT, oy - uy * BEAM_TAG_OUT_FT, BEAM_BAR_Z_FT);
+    tag.raycast = () => {};
+    this.beamGroup.add(tag);
+  }
+
+  /** The Send to beam card: the legs on the beam, what they bring, and what is left out. */
   _refreshTakeoff() {
-    const located = this._legsForImport().sort((a, b) => a.locationFt - b.locationFt);
-    this.$('sfw-rows').innerHTML = located.length
-      ? located.map(r => `<tr class="${r.onSpan && r.onBeam ? '' : 'sfw-off'}"><td>${r.leg.id}</td><td>${round(r.locationFt, 2)}</td><td>${round(r.leg.deadLb, 0)}</td><td>${round(r.leg.liveLb, 0)}</td></tr>`).join('')
-      : '<tr><td colspan="4" class="sfw-empty">No legs picked yet. Press Pick the legs on the beam.</td></tr>';
-    const { imported, skipped } = toBeamPointLoads(located);
+    if (!this.engine) return;
+    const plan = this._beamPlan();
+    const ft = v => `${round(v, 2)} ft`;
+    const lb = v => `${Math.round(v).toLocaleString('en-US')} lb`;
+    this.$('sfw-span').textContent = `${round(plan.span, 3)} ft`;
+    const rows = [
+      ...plan.sent.map(r => `<tr><td>${plan.numbers.get(r.leg.id)}</td><td>${ft(r.locationFt)}</td><td>${lb(r.leg.deadLb)}</td><td>${lb(r.leg.liveLb)}</td></tr>`),
+      ...plan.leftOut.map(r => `<tr class="sfw-off"><td>–</td><td>${r.onBeam ? ft(r.locationFt) : 'Not in line'}</td><td>${lb(r.leg.deadLb)}</td><td>${lb(r.leg.liveLb)}</td></tr>`),
+    ];
+    this.$('sfw-rows').innerHTML = rows.join('') || '<tr><td colspan="4" class="sfw-empty">Click the legs that sit on the beam.</td></tr>';
+    // Whole pounds, and feet to the hundredth: what the rows above show is
+    // exactly what the beam form is given.
+    const imported = toBeamPointLoads(plan.sent).imported.map(forBeamForm);
     this._importable = imported;
     const dead = imported.reduce((s, e) => s + e.deadLb, 0), live = imported.reduce((s, e) => s + e.liveLb, 0);
-    this.$('sfw-totals').innerHTML = `<div><dt>Legs</dt><dd>${imported.length}</dd></div><div><dt>Dead</dt><dd>${round(dead, 0)} lb</dd></div><div><dt>Live</dt><dd>${round(live, 0)} lb</dd></div>`;
-    const warn = this.$('sfw-warn');
+    // Nothing picked, nothing to total.
+    this.$('sfw-totals').innerHTML = imported.length
+      ? `<div><dt>Legs</dt><dd>${imported.length}</dd></div><div><dt>Dead</dt><dd>${lb(dead)}</dd></div><div><dt>Live</dt><dd>${lb(live)}</dd></div>`
+      : '';
     const notes = [];
-    if (skipped.length) notes.push(`${skipped.length} selected leg(s) off the beam line or past the span — excluded.`);
+    const offLine = plan.leftOut.filter(r => !r.onBeam).length;
+    const pastEnd = plan.leftOut.length - offLine;
+    const legs = n => `${n} leg${n === 1 ? '' : 's'}`;
+    const out = [];
+    if (offLine) out.push(`${legs(offLine)} not in line with the rest`);
+    if (pastEnd) out.push(`${legs(pastEnd)} past the end of the ${round(plan.span, 2)} ft beam`);
+    if (out.length) notes.push(`Left out: ${out.join(', ')}.`);
     // Live load is only what the Live load tool placed, so a planked scaffold
     // with none placed sends dead load alone: worth saying before it is imported.
     const planked = this.state.planks.size + this.state.plankPlacements.size > 0;
     if (imported.length && planked && !this.state.liveLoads.size) notes.push('No live load is placed, so these legs carry dead load only.');
+    const warn = this.$('sfw-warn');
     warn.hidden = !notes.length;
     warn.textContent = notes.join(' ');
     this.$('sfw-import').disabled = imported.length === 0;
+    this.$('sfw-unpick').disabled = plan.located.length === 0;
   }
 
   /** Move/copy: pick an anchor, then a destination, and shift the selected stacks. */

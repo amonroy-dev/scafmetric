@@ -271,6 +271,28 @@ const CHECKS = {
     r.added !== 1 && `the click should deck the bay, added ${r.added}`,
     r.placedRotation !== r.after && `the deck was laid at ${r.placedRotation}, not the way R turned it (${r.after})`,
   ],
+  sendToBeam: r => [
+    !(r.opened.tool === 'beam' && r.opened.active === 'beam' && r.opened.title === 'Send to beam')
+      && `the To beam button should put Send to beam in hand: ${JSON.stringify(r.opened)}`,
+    !(r.opened.importInCard && !r.opened.footer) && 'Import to beam belongs in the Send to beam card, with no bar left under the builder',
+    r.opened.oldControls !== 0 && 'the beam-line fields and the pick button should be gone: legs are clicked',
+    !(r.opened.importDisabled && r.opened.rows.length === 1 && /click the legs/i.test(r.opened.rows[0][0]) && r.opened.drawn === 0)
+      && `with no legs picked the card should ask for them and offer nothing to import: ${JSON.stringify(r.opened)}`,
+    !(r.hovered.cursor === 'pointer' && r.hovered.lit === 1 && /put this leg on the beam/i.test(r.hovered.hint))
+      && `a leg under the pointer should light up, under a hand: ${JSON.stringify(r.hovered)}`,
+    r.picked.ids !== r.picked.wanted && `clicking three legs should put those three on the beam: ${r.picked.ids} for ${r.picked.wanted}`,
+    r.picked.selected !== 0 && 'picking legs for the beam should select nothing',
+    !(r.picked.drawn === 4 && !r.picked.importDisabled) && `the beam should be drawn under the picked legs and Import be ready: ${JSON.stringify(r.picked)}`,
+    JSON.stringify(r.picked.rows) !== JSON.stringify(r.want.map(w => [w.n, `${w.at} ft`, `${w.dead.toLocaleString('en-US')} lb`, `${w.live.toLocaleString('en-US')} lb`]))
+      && `the card should list the legs from the beam's left support, in whole pounds: ${JSON.stringify(r.picked.rows)} for ${JSON.stringify(r.want)}`,
+    r.afterSecondClick !== 2 && `clicking a picked leg again should take it off the beam, ${r.afterSecondClick} left on it`,
+    r.inboard.join() !== r.want.map(w => `${Math.round((w.at + 2) * 100) / 100} ft`).join() && `the first-leg distance should move every leg along: ${r.inboard}`,
+    JSON.stringify(r.formRows) !== JSON.stringify(r.want.map(w => ({ dead: String(w.dead), live: String(w.live), at: String(w.at) })))
+      && `the beam form should get whole pounds at those distances: ${JSON.stringify(r.formRows)} for ${JSON.stringify(r.want)}`,
+    !(r.closedByImport && /3 leg loads imported/.test(r.note || '')) && `importing should go back to the beam form and say what came in: ${r.note}`,
+    !(r.afterEsc.tool === 'select' && r.afterEsc.drawn === 0 && r.afterEsc.kept === 3 && r.afterEsc.cardHidden)
+      && `Esc should put Select back in hand and take the beam off the canvas, keeping the picks: ${JSON.stringify(r.afterEsc)}`,
+  ],
   backGuard: r => [
     !r.guarded && 'opening the builder should arm the Back guard',
     !(r.stillOpen && r.sameUrl) && `Back (a sideways wheel press) left the builder: open ${r.stillOpen}, same page ${r.sameUrl}`,
