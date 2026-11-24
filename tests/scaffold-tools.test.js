@@ -319,11 +319,12 @@ test('a ledger-anchored deck carries dead load and feeds the BOM', () => {
   assert.ok(bay.boards.length > 0);
 });
 
-test('guardrails and the uniform live load both see ledger-anchored decks', () => {
+test('guardrails and a placed live load both see ledger-anchored decks', () => {
   const { s, l1 } = fourLegBay();
-  s.addPlankOnLedger(l1.id, 1);
-  s.liveLoadPsf = 25;
-  assert.ok(Math.abs(s.takeoff().totals.liveLb - 49 * 25) < 1e-6, 'blanket psf over the resolved bay');
+  const deck = s.addPlankOnLedger(l1.id, 1);
+  assert.equal(s.takeoff().totals.liveLb, 0, 'a deck carries no live load until one is placed on it');
+  s.setDeckLiveLoad(deck.id, 25);
+  assert.ok(Math.abs(s.takeoff().totals.liveLb - 49 * 25) < 1e-6, 'the load placed on the resolved bay');
   assert.ok(s.generateGuardrails() > 0, 'rails find the deck outline');
 });
 

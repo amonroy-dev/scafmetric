@@ -59,6 +59,11 @@ export const MATERIALS = {
   plank: new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 0.18, roughness: 0.62 }),
   selected: new THREE.MeshStandardMaterial({ color: 0x2563eb, emissive: 0x1d4ed8, emissiveIntensity: 0.35, metalness: 0.2, roughness: 0.4 }),
   ghost: new THREE.MeshStandardMaterial({ color: 0x2563eb, transparent: true, opacity: 0.4, depthWrite: false, metalness: 0.2, roughness: 0.5 }),
+  // The brace preview is green and glows, as ScaffoldPro's does: one thin
+  // diagonal in the ghost blue above was all but invisible against the grid.
+  // The whole-perimeter preview is a little quieter, there being many of them.
+  braceGhost: new THREE.MeshStandardMaterial({ color: 0x16a34a, emissive: 0x22c55e, emissiveIntensity: 0.55, transparent: true, opacity: 0.9, depthWrite: false, metalness: 0.2, roughness: 0.4 }),
+  braceGhostRun: new THREE.MeshStandardMaterial({ color: 0x16a34a, emissive: 0x22c55e, emissiveIntensity: 0.45, transparent: true, opacity: 0.75, depthWrite: false, metalness: 0.2, roughness: 0.4 }),
 };
 
 // Shared geometries (never disposed; scaled per instance).
@@ -518,46 +523,41 @@ export function buildTruss(a, b, material, family = 'truss') {
 export const GUARDRAIL_OD_IN = 1.69;
 
 // --- live load patches -------------------------------------------------------
-// A translucent slab over a bay, striped across the span so the one-way
-// direction of the distribution reads at a glance (as in the source app).
+// A translucent slab over a decked bay with span arrows on it: double-headed,
+// the way a framing plan marks a one-way deck, pointing at the two ledgers
+// that carry the load. Turn the load and the arrows turn with it.
 
 const LIVE_LOAD_VISUAL_THICKNESS_FT = inchesToFeet(0.35);
+const LOAD_ARROW_THICKNESS_FT = inchesToFeet(0.3);
+const LOAD_ARROW_SHAFT_WIDTH_FT = inchesToFeet(1.25);
+// The arrows stop this far short of the ledgers they point at.
+const LOAD_ARROW_END_GAP_FT = inchesToFeet(3);
+// One arrow for about this much of the bay, three at most.
+const LOAD_ARROW_PITCH_FT = 2.5;
+const LOAD_ARROW_MAX_HEAD_FT = 0.75;
 
-function oneWayStripeTexture(backgroundFill, stripeColor) {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = backgroundFill;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = stripeColor;
-  ctx.lineWidth = 5;
-  for (let x = 24; x < canvas.width; x += 36) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
+// A flat triangle with its tip at +X: unit length, width and thickness.
+const ARROW_HEAD_GEO = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(0.5, 0);
+  shape.lineTo(-0.5, 0.5);
+  shape.lineTo(-0.5, -0.5);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
+  geo.translate(0, 0, -0.5);
+  return geo;
+})();
 
 let _liveLoadMaterial = null;
 export function liveLoadMaterial() {
   if (_liveLoadMaterial) return _liveLoadMaterial;
   _liveLoadMaterial = new THREE.MeshStandardMaterial({
-    map: oneWayStripeTexture('rgba(34, 211, 238, 0.24)', 'rgba(236, 254, 255, 0.92)'),
     color: 0x22d3ee,
     emissive: 0x22d3ee,
     emissiveIntensity: 0.34,
     transparent: true,
-    opacity: 0.42,
+    // Light enough that the boards still read through it; the arrows carry the message.
+    opacity: 0.2,
     metalness: 0.08,
     roughness: 0.48,
     depthWrite: false,
@@ -583,9 +583,24 @@ export function liveLoadGhostMaterial() {
   return _liveLoadGhostMaterial;
 }
 
+// Unlit, so the arrows read the same from every side and in every light.
+let _liveLoadArrowMaterial = null;
+export function liveLoadArrowMaterial() {
+  if (!_liveLoadArrowMaterial) _liveLoadArrowMaterial = new THREE.MeshBasicMaterial({ color: 0x0e7490 });
+  return _liveLoadArrowMaterial;
+}
+
+let _liveLoadGhostArrowMaterial = null;
+export function liveLoadGhostArrowMaterial() {
+  if (!_liveLoadGhostArrowMaterial) {
+    _liveLoadGhostArrowMaterial = new THREE.MeshBasicMaterial({ color: 0xb45309, transparent: true, opacity: 0.9, depthWrite: false });
+  }
+  return _liveLoadGhostArrowMaterial;
+}
+
 /**
- * Slab for one resolved live load patch. `widthFt` spans between the two
- * supporting ledgers; `lengthFt` runs along them.
+ * Slab for one resolved live load patch. `widthFt` is the span, between the
+ * ledgers that carry the load; `lengthFt` runs along them.
  */
 export function liveLoadPatch(patch, material) {
   const m = new THREE.Mesh(UNIT_BOX, material || liveLoadMaterial());
@@ -593,6 +608,52 @@ export function liveLoadPatch(patch, material) {
   m.rotation.z = patch.rotationZ;
   m.scale.set(patch.widthFt, patch.lengthFt, LIVE_LOAD_VISUAL_THICKNESS_FT);
   return m;
+}
+
+/**
+ * Where the span arrows go on a patch, in plan: [{ from: [x, y], to: [x, y] }],
+ * each running along the span from just inside one supporting ledger to just
+ * inside the other, spread evenly over the bay.
+ */
+export function liveLoadArrowLayout(patch) {
+  const [sx, sy] = patch.span;
+  const half = patch.widthFt / 2 - LOAD_ARROW_END_GAP_FT;
+  if (!(half > 0.2)) return [];
+  const count = Math.max(1, Math.min(3, Math.round(patch.lengthFt / LOAD_ARROW_PITCH_FT)));
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const v = patch.lengthFt * ((i + 0.5) / count - 0.5);
+    const cx = patch.center[0] - sy * v, cy = patch.center[1] + sx * v;
+    out.push({ from: [cx - sx * half, cy - sy * half], to: [cx + sx * half, cy + sy * half] });
+  }
+  return out;
+}
+
+/** The span arrows of a patch as meshes: a shaft, and a head at each end. */
+export function liveLoadArrows(patch, material) {
+  const mat = material || liveLoadArrowMaterial();
+  const z = patch.center[2] + LIVE_LOAD_VISUAL_THICKNESS_FT / 2 + LOAD_ARROW_THICKNESS_FT / 2;
+  const out = [];
+  for (const { from, to } of liveLoadArrowLayout(patch)) {
+    const dx = to[0] - from[0], dy = to[1] - from[1];
+    const len = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const head = Math.min(LOAD_ARROW_MAX_HEAD_FT, len * 0.22);
+    const shaft = new THREE.Mesh(UNIT_BOX, mat);
+    shaft.position.set((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, z);
+    shaft.rotation.z = angle;
+    shaft.scale.set(Math.max(0.01, len - 2 * head + 0.02), LOAD_ARROW_SHAFT_WIDTH_FT, LOAD_ARROW_THICKNESS_FT);
+    out.push(shaft);
+    for (const [end, turn] of [[to, 0], [from, Math.PI]]) {
+      const tip = new THREE.Mesh(ARROW_HEAD_GEO, mat);
+      const ux = Math.cos(angle + turn), uy = Math.sin(angle + turn);
+      tip.position.set(end[0] - ux * head / 2, end[1] - uy * head / 2, z);
+      tip.rotation.z = angle + turn;
+      tip.scale.set(head, head * 0.8, LOAD_ARROW_THICKNESS_FT);
+      out.push(tip);
+    }
+  }
+  return out;
 }
 
 // --- connection node markers -------------------------------------------------

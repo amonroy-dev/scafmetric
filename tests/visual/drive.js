@@ -392,11 +392,16 @@ window.__sv = (() => {
       await raf(2);
       const released = t.ghostGroup.children.length;
       const releasedPending = !!t._pendingBatch;
-      // Shift typed into a field (a capital letter) must leave the preview alone.
+      // Shift typed into a field, with the pointer off the canvas (it is on the
+      // field being typed in), is typing: it must not start a fill. With the
+      // pointer still out on the canvas the same key IS for the tool; the brace
+      // step checks that side of it.
+      canvas().dispatchEvent(new PointerEvent('pointerleave', { pointerId: 1, pointerType: 'mouse' }));
+      await raf(1);
       const field = ws().$('sfw-stdh');
       field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true }));
       await raf(2);
-      const inField = t.ghostGroup.children.length;
+      const inField = { ghosts: t.ghostGroup.children.length, shiftHeld: t.shiftHeld, batchPending: !!t._pendingBatch };
       field.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
       await raf(1);
       return { single, held, released, drew, batchPending, releasedPending, inField, singleHint, heldHint, counts: counts() };
@@ -424,10 +429,24 @@ window.__sv = (() => {
       const p = project(at);
       const target = ws().tools.braceTargetUnderCursor(
         new PointerEvent('pointermove', { clientX: p.x, clientY: p.y }));
+      const ghosts = ws().tools.ghostGroup.children.length;
+      const hoverHint = hint();
+      // A dropdown in the Brace card keeps the keyboard focus after it is used.
+      // With the pointer still out on the face, Shift pressed then must show
+      // the perimeter at once, not wait for the mouse to move.
+      const sides = ws().$('sfw-brace-filter');
+      sides.focus();
+      sides.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', shiftKey: true, bubbles: true, cancelable: true }));
+      await raf(2);
+      const batch = ws().tools._pendingBatch;
+      const shiftFromField = { focus: document.activeElement === sides, count: batch ? batch.count : 0, hint: hint() };
+      sides.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }));
+      sides.blur();
+      await raf(2);
       return {
-        ghosts: ws().tools.ghostGroup.children.length,
+        ghosts,
         target: target ? { levelA: target.levelA, levelB: target.levelB, spanFt: +target.spanFt.toFixed(4) } : null,
-        miss: ws().tools.braceMiss, hint: hint(),
+        miss: ws().tools.braceMiss, hint: hoverHint, shiftFromField,
       };
     },
 
@@ -523,26 +542,59 @@ window.__sv = (() => {
       return { added: counts().decks - before, counts: counts(), hint: hint() };
     },
 
-    // Per-bay live load patch on a ledger side.
+    // A live load on a planked bay: point at the deck and click. R turns the
+    // load across the planks; SHIFT takes the whole platform.
     async liveLoadPatch() {
       tool('liveload');
+      const field = ws().$('sfw-bay-psf');
+      const defaults = { value: field.value, placeholder: field.placeholder, dir: ws().$('sfw-load-dir').value };
       setField('sfw-bay-psf', 75);
-      const l = frontLedgers()[0];
       const before = counts().liveLoads;
       // Look straight down at the bay so the patch, if it renders, is unmissable.
       ws().engine.setView('top');
       await raf(6);
+      // From above the pointer lands on the highest deck over that spot.
+      const decks = ws().state.plankBays();
+      const top = decks.reduce((a, b) => (b.z > a.z ? b : a));
+      const at = [top.frame.center.x, top.frame.center.y, top.z];
+      const loadOnTop = () => [...ws().state.liveLoads.values()].find(l => l.deckId === top.id) || null;
+      // Planked, but nothing placed yet: the planks carry no live load.
+      const liveBefore = Math.round(ws().state.takeoff().totals.liveLb);
       const cyanBefore = cyanFraction();
-      await click(besideLedger(l));
+      await hover(at);
+      const ghosts = ws().tools.ghostGroup.children.length;
+      const hoverHint = hint();
+      await click(at);
       await raf(8);
       const cyanAfter = cyanFraction();
+      const placed = loadOnTop();
+      const load = placed ? { psf: placed.psf, across: !!placed.across } : null;
+      const added = counts().liveLoads - before;
       const t = ws().state.takeoff();
+      const placedLiveLb = Math.round(t.placedLiveLb || 0);
+
+      // R, with the pointer still on the bay: the card and the preview follow,
+      // and a click turns the load that is already there.
+      key('r');
+      await raf(2);
+      const turned = { across: ws().tools.liveLoadAcross, dir: ws().$('sfw-load-dir').value, hint: hint(), ghosts: ws().tools.ghostGroup.children.length };
+      await click(at);
+      turned.loadAcross = !!(loadOnTop() || {}).across;
+      turned.loads = counts().liveLoads - before;
+      key('r');
+      await raf(2);
+
+      // SHIFT: every bay of that platform.
+      const level = decks.filter(d => Math.abs(d.z - top.z) < 0.1);
+      await click(at, { shift: true });
+      await raf(6);
+      const loaded = level.filter(d => [...ws().state.liveLoads.values()].some(l => l.deckId === d.id)).length;
       return {
-        added: counts().liveLoads - before,
+        defaults, ghosts, hoverHint, added, load, turned,
+        platform: { decks: level.length, loaded, hint: hint() },
         cyanBefore, cyanAfter, cyanDelta: +(cyanAfter - cyanBefore).toFixed(5),
-        mode: ws().state.liveLoadMode,
-        liveLb: Math.round(t.totals.liveLb),
-        placedLiveLb: Math.round(t.placedLiveLb || 0),
+        liveBefore,
+        placedLiveLb,
         counts: counts(),
       };
     },
@@ -972,12 +1024,18 @@ window.__sv = (() => {
       const after = t._bracketDir(node);
       const drew = ws().engine.framesRendered - f0;
       const turnedHint = hint();
+      // Shift, pointer still: a bracket on every standard along the run.
+      key('Shift', { shift: true });
+      await raf(2);
+      const run = { count: t._pendingBatch ? t._pendingBatch.count : 0, hint: hint() };
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true }));
+      await raf(2);
       const count = s.brackets.size;
       await click([node.x, node.y, node.z]);
       const placed = [...s.brackets.values()].pop();
       t.bracketTurn = 0;
       return {
-        before, after, ghostsBefore, ghostsAfter: t.ghostGroup.children.length, drew, turnedHint,
+        before, after, ghostsBefore, ghostsAfter: t.ghostGroup.children.length, drew, turnedHint, run,
         added: s.brackets.size - count, placedDir: placed ? placed.dir : null,
       };
     },

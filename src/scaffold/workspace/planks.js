@@ -82,6 +82,54 @@ export function plankRectFromPair(pair) {
   };
 }
 
+/**
+ * A deck's rectangle in plan and the way its boards run:
+ *
+ *   center            the middle of the deck
+ *   z                 the lift it sits on (the ledgers' centreline)
+ *   along, alongFt    unit vector along the boards, and the deck's size that way
+ *   across, acrossFt  square to the boards, and its size that way
+ *
+ * Whatever sits on a deck (a live load) reads its footprint and its default
+ * direction from this, so it follows the deck however the deck was laid.
+ */
+export function deckFrameFromPair(pair) {
+  const { source, signedOffsetFt, overlapMinFt, overlapMaxFt } = pair;
+  const sign = Math.sign(signedOffsetFt) || 1;
+  const mid = (overlapMinFt + overlapMaxFt) / 2;
+  return {
+    center: {
+      x: source.mid.x + source.dir.x * mid + source.perp.x * signedOffsetFt / 2,
+      y: source.mid.y + source.dir.y * mid + source.perp.y * signedOffsetFt / 2,
+    },
+    z: source.z,
+    // The boards run from the ledger they hang on to its opposite.
+    along: { x: source.perp.x * sign, y: source.perp.y * sign },
+    alongFt: Math.abs(signedOffsetFt),
+    across: { x: source.dir.x, y: source.dir.y },
+    acrossFt: overlapMaxFt - overlapMinFt,
+  };
+}
+
+/** A rectangle deck's boards run along its longer side. */
+export function rectDeckRunsAlongX(p) {
+  return Math.abs(p.x1 - p.x0) >= Math.abs(p.y1 - p.y0);
+}
+
+/** The frame of a rectangle deck (the kind the Block tool lays). */
+export function deckFrameFromRect(p) {
+  const w = Math.abs(p.x1 - p.x0), d = Math.abs(p.y1 - p.y0);
+  const alongX = rectDeckRunsAlongX(p);
+  return {
+    center: { x: (p.x0 + p.x1) / 2, y: (p.y0 + p.y1) / 2 },
+    z: p.z,
+    along: alongX ? { x: 1, y: 0 } : { x: 0, y: 1 },
+    alongFt: alongX ? w : d,
+    across: alongX ? { x: 0, y: 1 } : { x: 1, y: 0 },
+    acrossFt: alongX ? d : w,
+  };
+}
+
 /** The direction the boards run for a placement, as an axis angle in [0, PI). */
 export function plankRunAxis(ledger) {
   const a = Math.atan2(ledger.b[1] - ledger.a[1], ledger.b[0] - ledger.a[0]) + Math.PI / 2;
@@ -156,6 +204,7 @@ export function resolvePlankPlacement(placement, ledgers) {
     pair,
     boards,
     ...rect,
+    frame: deckFrameFromPair(pair),
     widthFt: Math.abs(pair.signedOffsetFt),
     lengthFt: pair.overlapLengthFt,
     areaSqFt: Math.abs(pair.signedOffsetFt) * pair.overlapLengthFt,

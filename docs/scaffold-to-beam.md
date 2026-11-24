@@ -46,12 +46,39 @@ Tributary-area method:
 
 - **Dead per leg** = its full standard self-weight + half of every ledger/brace
   framing into it + tributary plank self-weight.
-- **Live per leg** = tributary deck area × live load (lb/ft², editable; default 25).
-- Tributary area uses the quarter-bay rule, so legs' areas sum exactly to the
-  planked footprint.
+- **Live per leg** = only the live loads placed with the Live load tool (below).
+  A planked bay carries no live load of its own.
+- Tributary area for the plank weight uses the quarter-bay rule, so legs' areas
+  sum exactly to the planked footprint.
 
 This is an approximation suitable for preliminary leg-reaction estimates, not a
 rigid-frame distribution.
+
+### Placed live loads (one-way)
+
+The **Live load** tool puts a load on a planked bay: point at the deck and click
+(Shift takes every bay joined to it at that lift). Each bay has its own load in
+lb/ft², 25 unless another is typed. A bay that was not loaded this way carries no
+live load, and the Send to beam card says so when no load is placed at all.
+
+A placed load is a one-way area load, attributed the way RISA-3D attributes a
+one-way member area load:
+
+- It spans **along the planks** by default, because planks bear on the ledgers at
+  their ends. **R** turns it to span across them, onto the other pair of ledgers;
+  a bay with ledgers on two sides only cannot be turned. The arrows on the load
+  show the span.
+- Each strip of the load is carried by the nearest ledger either side of it along
+  the span, as a simply supported deck: each takes the share set by how far the
+  other is.
+- If there is no ledger one way along the span, that part of the load goes
+  two-way, to the nearest ledgers whichever way they lie, each by how near it is.
+- Each ledger then passes its load to the legs at its two ends as a simple span.
+
+RISA's result depends on its area-load mesh; this takes each stretch between two
+ledgers whole, which is what a fine mesh converges to, so a hand check of a
+rectangular bay agrees exactly. A load sits on its deck: remove the planks and the
+load goes with them.
 
 ## Beam placement & import
 

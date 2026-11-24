@@ -16,8 +16,6 @@ export const PERP_OFFSET_FT = 2.364 / 12;
 // Reject a pair (A,B) when a third standard C lies between them, closer to the
 // line AB than 55% of the span — this is what stops cross-bay diagonals.
 export const ADJACENT_SPAN_FRAC = 0.55;
-// How far to look for a parallel face when deciding perimeter vs interior.
-export const PERIMETER_PERP_SEARCH = MAX_SPAN_FT * 1.2;
 export const MAX_BATCH_BRACES = 128;
 // A diagonal climbs four rosette levels.
 export const BRACE_DELTA_LIFT = 4;
@@ -91,29 +89,102 @@ export function buildFaceGraph(standards, centroid = null) {
   return out;
 }
 
+/** The name of the face between two standards, whichever way round. */
+export function faceKey(a, b) {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 /**
- * A face is on the perimeter when it does NOT have parallel faces on both
- * sides. An interior face is sandwiched between two rows.
+ * Every bay in the model: the four-sided cells the faces enclose.
+ *
+ * This is what "perimeter" means. A face on the outside of a scaffold has a
+ * bay on one side of it and open air on the other; a face buried between two
+ * rows has a bay on both. Counting them is exact and does not care how the
+ * scaffold is shaped: a tower, an L, a zig-zag, a run with a return all come
+ * out right with no special case.
+ *
+ * It replaces a proxy: look for a roughly parallel face within thirteen feet
+ * each side and call the face interior if both are there. That holds for one
+ * straight run and nothing else. On a zig-zag every face of one leg has the
+ * other leg's faces "beside" it, however far along the run they are, so half
+ * the outside read as interior and a SHIFT fill left it unbraced.
+ *
+ * A bay is a four-cycle A-B-D-C: C beside A, D beside B, and C-D a face. As
+ * ScaffoldPro's diagonalFaces.ts.
  */
-export function isPerimeterFace(face, allFaces) {
-  let hasPos = false;
-  let hasNeg = false;
-  for (const other of allFaces) {
-    if (other.columnIdA === face.columnIdA && other.columnIdB === face.columnIdB) continue;
-    if (other.columnIdA === face.columnIdB && other.columnIdB === face.columnIdA) continue;
-    if (Math.abs(face.dirX * other.dirX + face.dirY * other.dirY) < 0.85) continue;
-    const dmX = (other.ax + other.bx - face.ax - face.bx) * 0.5;
-    const dmY = (other.ay + other.by - face.ay - face.by) * 0.5;
-    const perp = dmX * face.normX + dmY * face.normY;
-    if (perp > 0 && perp < PERIMETER_PERP_SEARCH) hasPos = true;
-    if (perp < 0 && perp > -PERIMETER_PERP_SEARCH) hasNeg = true;
+export function buildBays(allFaces) {
+  const keys = new Set();
+  const neighbours = new Map();
+  const at = new Map();
+  for (const f of allFaces) {
+    keys.add(faceKey(f.columnIdA, f.columnIdB));
+    for (const [from, to] of [[f.columnIdA, f.columnIdB], [f.columnIdB, f.columnIdA]]) {
+      let set = neighbours.get(from);
+      if (!set) neighbours.set(from, set = new Set());
+      set.add(to);
+    }
+    at.set(f.columnIdA, { x: f.ax, y: f.ay });
+    at.set(f.columnIdB, { x: f.bx, y: f.by });
+  }
+
+  const bays = [];
+  const seen = new Set();
+  for (const f of allFaces) {
+    const a = f.columnIdA, b = f.columnIdB;
+    for (const c of neighbours.get(a) || []) {
+      if (c === b) continue;
+      for (const d of neighbours.get(b) || []) {
+        if (d === a || d === c) continue;
+        if (!keys.has(faceKey(c, d))) continue;
+        const corners = [a, b, d, c];
+        const id = [...corners].sort().join('|');
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const points = corners.map(k => at.get(k));
+        bays.push({
+          faceKeys: [faceKey(a, b), faceKey(b, d), faceKey(d, c), faceKey(c, a)],
+          cx: points.reduce((sum, p) => sum + p.x, 0) / 4,
+          cy: points.reduce((sum, p) => sum + p.y, 0) / 4,
+        });
+      }
+    }
+  }
+  return bays;
+}
+
+/** True unless one of these bays lies on each side of the face. */
+function openOnOneSide(face, bays) {
+  const midX = (face.ax + face.bx) * 0.5, midY = (face.ay + face.by) * 0.5;
+  let hasPos = false, hasNeg = false;
+  for (const bay of bays) {
+    const perp = (bay.cx - midX) * face.normX + (bay.cy - midY) * face.normY;
+    if (perp > 0) hasPos = true; else hasNeg = true;
     if (hasPos && hasNeg) return false;
   }
   return true;
 }
 
+/**
+ * A face is on the perimeter unless a bay closes on both sides of it. One bay
+ * and it is on the outside of the scaffold; two and it is buried between them.
+ * A face with no bay at all (a lone pair of standards) counts as perimeter:
+ * there is nothing it could be inside of.
+ */
+export function isPerimeterFace(face, allFaces, bays = buildBays(allFaces)) {
+  const key = faceKey(face.columnIdA, face.columnIdB);
+  return openOnOneSide(face, bays.filter(bay => bay.faceKeys.includes(key)));
+}
+
 export function perimeterFaces(faces) {
-  return faces.filter(f => isPerimeterFace(f, faces));
+  const byFace = new Map();
+  for (const bay of buildBays(faces)) {
+    for (const key of bay.faceKeys) {
+      let list = byFace.get(key);
+      if (!list) byFace.set(key, list = []);
+      list.push(bay);
+    }
+  }
+  return faces.filter(f => openOnOneSide(f, byFace.get(faceKey(f.columnIdA, f.columnIdB)) || []));
 }
 
 export function footprintCentroid(standards) {

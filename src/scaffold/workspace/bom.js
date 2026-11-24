@@ -7,7 +7,7 @@
 import { tubeWeightPerFoot, STEEL_DENSITY_LB_FT3 } from '../catalog.js';
 import {
   WOOD_SILL, JACK_PLATE, JACK_STEM, HANDLE_NUT, BASE_COLLAR,
-  STANDARD_TUBE_OD_IN, PLANK, inchesToFeet, trussMemberLengthFt, sideBracketTubeLengthFt,
+  PLANK, inchesToFeet, trussMemberLengthFt, sideBracketTubeLengthFt,
 } from './parts.js';
 
 export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Trusses', 'Diagonals', 'Brackets', 'Guardrails', 'Planks'];
@@ -83,7 +83,7 @@ export function deriveBom(state) {
   for (const s of state.standards.values()) {
     for (const len of s.segments) {
       add('Standards', `len${sizeKey(len)}`,
-        `Standard tube ${STANDARD_TUBE_OD_IN} in OD · ${formatFeetInches(len)}`,
+        `Standard · ${formatFeetInches(len)}`,
         1, perFootStandard * len);
     }
   }
@@ -91,21 +91,21 @@ export function deriveBom(state) {
   // Base assembly: one per standard column.
   const legCount = state.standards.size;
   if (legCount > 0) {
-    add('Bases', 'jack', `Screw jack · ${round(state.base.jackExtensionIn, 2)} in extension`,
+    add('Bases', 'jack', 'Screw jack',
       legCount, screwJackWeightLb(state.base.jackExtensionIn));
     if (state.base.showWoodSill) {
-      add('Bases', 'sill', `Wood sill ${WOOD_SILL.widthIn} x ${WOOD_SILL.depthIn} x ${WOOD_SILL.thicknessIn} in`,
+      add('Bases', 'sill', 'Wood sill',
         legCount, woodSillWeightLb());
     }
     if (state.base.showBaseCollar) {
-      add('Bases', 'collar', `Base collar · ${formatFeetInches(inchesToFeet(BASE_COLLAR.heightIn))}`,
+      add('Bases', 'collar', 'Base collar',
         legCount, baseCollarWeightLb());
     }
   }
 
   for (const l of state.ledgers.values()) {
     const len = Math.hypot(l.b[0] - l.a[0], l.b[1] - l.a[1], l.b[2] - l.a[2]);
-    add('Ledgers', `len${sizeKey(len)}`, `Ledger tube · ${formatFeetInches(len)}`, 1, perFootLedger * len);
+    add('Ledgers', `len${sizeKey(len)}`, `Ledger · ${formatFeetInches(len)}`, 1, perFootLedger * len);
   }
 
   for (const b of state.braces.values()) {

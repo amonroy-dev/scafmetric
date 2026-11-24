@@ -123,7 +123,103 @@ export function chooseBracketDirection(node, directions, centroid, turn = 0) {
   }
   const n = directions.length;
   const index = (directions.indexOf(outward) + (((Math.round(turn) % n) + n) % n)) % n;
-  const a = directions[index].angle;
+  return unitVector(directions[index].angle);
+}
+
+/** [dx, dy] for an angle, with the rounding noise taken off. */
+function unitVector(angle) {
   const clean = v => (Math.abs(v) < 1e-9 ? 0 : Math.round(v * 1e9) / 1e9);
-  return [clean(Math.cos(a)), clean(Math.sin(a))];
+  return [clean(Math.cos(angle)), clean(Math.sin(angle))];
+}
+
+// --- SHIFT: a bracket on every standard along the run ------------------------
+// As ScaffoldPro's PlaceBracketTool: Shift widens one rosette to the whole run
+// at that height, each bracket facing the way the hovered one does.
+
+/** How far from a height a rosette may sit and still be the one at that height. */
+export const ROSETTE_LEVEL_TOLERANCE_FT = 0.8;
+// The next standard of a run is the one most nearly straight ahead, within this.
+const ROW_HEADING_TOLERANCE_RAD = Math.PI / 12;
+// A bracket along the run faces "the same way" within this of the hovered one.
+const ALIGNED_TOLERANCE_RAD = Math.PI / 4;
+
+/**
+ * The standards along the run through this one, in order, as plan points.
+ *
+ * Walked along the ledgers (at any lift) out from the standard both ways,
+ * setting off along `runAxisRad` and following the run round gentle bends, so
+ * the row is the whole run and not only the part ahead of where you pointed.
+ * It stops where the run turns a corner: the standard there belongs to it, the
+ * ones round the corner do not. As ScaffoldPro's collectBracketRunRow.
+ */
+export function bracketRunRow(node, runAxisRad, ledgers, standards) {
+  const key = (x, y) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+  const at = new Map(standards.map(s => [key(s.x, s.y), { x: s.x, y: s.y }]));
+  const start = key(node.x, node.y);
+  if (!at.has(start)) return [];
+
+  const neighbours = new Map();
+  const link = (from, to) => {
+    const p = at.get(from), q = at.get(to);
+    if (!p || !q || from === to) return; // only standards make a run
+    let list = neighbours.get(from);
+    if (!list) neighbours.set(from, list = []);
+    if (!list.some(n => n.key === to)) list.push({ key: to, bearing: Math.atan2(q.y - p.y, q.x - p.x) });
+  };
+  for (const l of ledgers) {
+    const a = key(l.a[0], l.a[1]), b = key(l.b[0], l.b[1]);
+    link(a, b);
+    link(b, a);
+  }
+
+  const visited = new Set([start]);
+  const walk = setOff => {
+    const out = [];
+    let current = start, heading = setOff;
+    for (;;) {
+      let next = null, best = ROW_HEADING_TOLERANCE_RAD;
+      for (const n of neighbours.get(current) || []) {
+        if (visited.has(n.key)) continue;
+        const gap = angleGap(n.bearing, heading);
+        if (gap <= best) { best = gap; next = n; }
+      }
+      if (!next) break;
+      visited.add(next.key);
+      out.push(at.get(next.key));
+      current = next.key;
+      heading = next.bearing;
+    }
+    return out;
+  };
+  const after = walk(runAxisRad);
+  const before = walk(runAxisRad + Math.PI);
+  return [...before.reverse(), at.get(start), ...after];
+}
+
+/**
+ * The rosette at a height among these nodes: the nearest, or null when none
+ * is within tolerance (the run steps, or that standard stops short).
+ */
+export function rosetteAtHeight(nodes, z, toleranceFt = ROSETTE_LEVEL_TOLERANCE_FT) {
+  let best = null, gap = Infinity;
+  for (const n of nodes) {
+    const d = Math.abs(n.z - z);
+    if (d < gap) { gap = d; best = n; }
+  }
+  return best && gap <= toleranceFt ? best : null;
+}
+
+/**
+ * Of a rosette's free directions, the one facing the way `referenceAngle`
+ * does, as [dx, dy]; null when none is within 45 degrees of it. A standard at
+ * the end of a run has directions square to two runs; left to choose for
+ * itself it would face down the return while the rest of the row faced out.
+ */
+export function alignedBracketDirection(directions, referenceAngle) {
+  let best = null, gap = ALIGNED_TOLERANCE_RAD;
+  for (const d of directions) {
+    const g = angleGap(d.angle, referenceAngle);
+    if (g <= gap) { gap = g; best = d; }
+  }
+  return best ? unitVector(best.angle) : null;
 }

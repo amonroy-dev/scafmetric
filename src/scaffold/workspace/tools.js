@@ -9,7 +9,7 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
+import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame,
@@ -17,7 +17,7 @@ import {
 } from './planning.js';
 import { hitData, instanceMeshes, clearGroup } from './instancing.js';
 import {
-  getLedgerSideSign, buildLiveLoadPreviewForLedger, computeLiveLoadBatchPreview,
+  getLedgerSideSign, buildDeckLoadPreview, deckSpanIsSupported, connectedDecks, pickDeckWithRay,
   DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
 import { buildSupportPair } from './supportspan.js';
@@ -29,7 +29,9 @@ import {
   bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
 } from './braces.js';
 import { marqueeFromDrag, marqueeHits, combineSelection, flatRectangleCorners, MARQUEE_DRAG_THRESHOLD_PX } from './screenmarquee.js';
-import { bracketDirections, chooseBracketDirection, runCentroid } from './bracketdirs.js';
+import {
+  bracketDirections, chooseBracketDirection, runCentroid, bracketRunRow, rosetteAtHeight, alignedBracketDirection,
+} from './bracketdirs.js';
 
 // How far from the tube the horizontal side-pick crossing may land before it
 // stops meaning "the cursor is on this side of that ledger".
@@ -81,8 +83,9 @@ export class Tools {
     // preview's quarter turns (R).
     this.blockSettings = { ...BLOCK_DEFAULTS };
     this.rotationSteps = 0;
-    // Live load tool: R puts the patch on the other side of the ledger.
-    this.sideFlipped = false;
+    // Live load tool: a load spans along the boards of the deck it sits on,
+    // until R turns it across them. Picking the tool again puts it back.
+    this.liveLoadAcross = false;
     // Bracket tool: steps round the free directions from the outward one (R).
     // Kept across tools, as ScaffoldPro keeps it, so a turn holds for the row.
     this.bracketTurn = 0;
@@ -148,7 +151,7 @@ export class Tools {
   setTool(name) {
     this.tool = name;
     this.pending = null;
-    this.sideFlipped = false;
+    this.liveLoadAcross = false;
     this._clearGhost();
     this.hooks.onToolChange?.(name);
   }
@@ -390,14 +393,13 @@ export class Tools {
       if (!this._isDecked(p)) s.addPlankOnLedger(p.ledgerId, p.sideSign);
       return;
     }
-    // Live load patches attach to a ledger, not a node: pick the ledger and the
-    // side of it the pointer landed on.
+    // A live load goes on the decked bay under the pointer; SHIFT takes the
+    // whole platform. A bay already loaded takes the new load and direction.
     if (this.tool === 'liveload') {
-      const hit = this._pickLedger(e);
-      if (!hit) return;
-      const side = this._sideFor(hit.ledger, hit.point);
-      if (e.shiftKey) { this._batchFillLiveLoads(hit.ledger, side); return; }
-      s.addLiveLoad(hit.ledger.id, side, this.liveLoadPsf);
+      const plan = this._liveLoadPlan(e);
+      if (!plan || !plan.changes.length) return;
+      const n = this._applyLiveLoads(plan);
+      if (e.shiftKey) this.hooks.onBulkFill?.(n, 'live load');
       return;
     }
     // Connect tools. Ledgers and braces are ONE CLICK: the target is found
@@ -411,10 +413,14 @@ export class Tools {
       if (target) s.addLedger([node.x, node.y, node.z], [target.x, target.y, target.z]);
       return;
     }
+    // One bracket on this rosette, or with SHIFT one on every standard along
+    // the run at this height.
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      const dir = this._bracketDir(node);
-      if (part && dir) s.addBracket(node, dir, part.lengthFt);
+      const plan = part ? this._bracketPlan(node, e.shiftKey) : null;
+      if (!plan || !plan.items.length) return;
+      const n = this._addBrackets(plan, part.lengthFt);
+      if (e.shiftKey) this.hooks.onBulkFill?.(n, 'bracket');
       return;
     }
 
@@ -531,6 +537,47 @@ export class Tools {
     const directions = bracketDirections(node, { ledgers, brackets: [...this.state.brackets.values()] });
     const centroid = runCentroid(node, ledgers, [...this.state.standards.values()]);
     return chooseBracketDirection(node, directions, centroid, this.bracketTurn);
+  }
+
+  /**
+   * What the Bracket tool would hang from this rosette: one bracket, or with
+   * `wholeRun` (SHIFT) one on every standard along the run at this height.
+   * Each of those faces the way the hovered one does rather than choosing for
+   * itself, so the standard at the end of the run does not turn down the
+   * return. A standard with no rosette at this height, or with that direction
+   * taken, is passed over: it must not stop the rest of the row.
+   *
+   * Returns { dir, items: [{ node, dir }], walked }, `walked` being how many
+   * standards the run has; null when the rosette has no free direction.
+   */
+  _bracketPlan(node, wholeRun) {
+    const dir = this._bracketDir(node);
+    if (!dir) return null;
+    if (!wholeRun) return { dir, items: [{ node, dir }], walked: 1 };
+    const ledgers = this.state.ledgerList();
+    const brackets = [...this.state.brackets.values()];
+    const angle = Math.atan2(dir[1], dir[0]);
+    // A bracket points square to its run, so the run lies a quarter turn round.
+    const row = bracketRunRow(node, angle - Math.PI / 2, ledgers, [...this.state.standards.values()]);
+    const rosettes = this.state.nodes().filter(n => !n.bracketId);
+    const onColumn = p => rosettes.filter(n => Math.hypot(n.x - p.x, n.y - p.y) < 0.01);
+    const items = [];
+    for (const p of row) {
+      if (Math.hypot(p.x - node.x, p.y - node.y) < 0.01) { items.push({ node, dir }); continue; }
+      const at = rosetteAtHeight(onColumn(p), node.z);
+      if (!at) continue;
+      const facing = alignedBracketDirection(bracketDirections(at, { ledgers, brackets }), angle);
+      if (facing) items.push({ node: at, dir: facing });
+    }
+    return { dir, items, walked: row.length };
+  }
+
+  /** Hang the brackets of a plan, as one edit. Returns how many. */
+  _addBrackets(plan, lengthFt) {
+    return this.state.batch(() => {
+      for (const b of plan.items) this.state.addBracket(b.node, b.dir, lengthFt);
+      return plan.items.length;
+    });
   }
 
   // --- decks: which way the boards run --------------------------------------
@@ -677,6 +724,10 @@ export class Tools {
    * brackets (bracketTipFaces).
    */
   _faces() {
+    // Kept until the model changes: building the graph compares every pair of
+    // standards against every third one, and a hover asks for it on each move.
+    const version = this.state.version;
+    if (this._faceCache && this._faceCache.version === version) return this._faceCache.faces;
     const standards = [...this.state.standards.values()];
     const faces = buildFaceGraph(standards);
     if (this.state.brackets.size > 1) {
@@ -685,6 +736,7 @@ export class Tools {
       for (const n of nodes) if (n.bracketId && !tips.has(n.columnId)) tips.set(n.columnId, { id: n.columnId, x: n.x, y: n.y, dir: n.dir });
       faces.push(...bracketTipFaces([...tips.values()], nodesByColumn(nodes), footprintCentroid(standards)));
     }
+    this._faceCache = { version, faces };
     return faces;
   }
 
@@ -862,20 +914,64 @@ export class Tools {
     return { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
   }
 
-  /** SHIFT: load every bay along the connected run of ledgers at this lift. */
-  _batchFillLiveLoads(ledger, sideSign) {
-    const existing = [...this.state.liveLoads.values()];
-    const previews = computeLiveLoadBatchPreview(
-      ledger, this.state.ledgerList(), sideSign, existing, this.liveLoadPsf);
-    const added = this.state.batch(() => {
-      let n = 0;
-      for (const p of previews) {
-        if (this.state.addLiveLoad(p.placement.ledgerId, p.placement.sideSign, p.placement.psf)) n++;
-      }
-      return n;
+  // --- live loads -----------------------------------------------------------
+  // A load goes on a decked bay: point at the deck and click. It spans one
+  // way, along the boards unless R turned it across them (see liveloads.js).
+
+  /** Every deck, the ledgers, and which load sits on which deck; cached until the model changes. */
+  _deckIndex() {
+    const version = this.state.version;
+    if (this._deckCache && this._deckCache.version === version) return this._deckCache;
+    const decks = this.state.plankBays().filter(d => d.frame);
+    this._deckCache = { version, decks, ledgers: this.state.ledgerList(), loads: this.state.liveLoadsByDeck(decks) };
+    return this._deckCache;
+  }
+
+  /** The deck under the pointer. */
+  _pickDeck(e) {
+    this.engine.setPointerFromEvent(e);
+    this.engine.raycaster.setFromCamera(this.engine.pointer, this.engine.camera);
+    const { decks } = this._deckIndex();
+    const hit = pickDeckWithRay(this.engine.raycaster.ray, decks);
+    if (hit) return hit.deck;
+    // Seen edge on, a deck has no surface to point at: take the board itself.
+    for (const h of this.engine.raycaster.intersectObjects(this.hooks.getContentMeshes?.() || [], false)) {
+      const d = hitData(h);
+      if (d.kind === 'plank') return decks.find(k => k.id === d.id) || null;
+    }
+    return null;
+  }
+
+  /**
+   * What a click would do here: the decks pointed at (the whole platform with
+   * SHIFT), how each load would span, and which of them that would change.
+   * Null when the pointer is on no deck.
+   */
+  _liveLoadPlan(e) {
+    const deck = this._pickDeck(e);
+    if (!deck) return null;
+    const { decks, ledgers, loads } = this._deckIndex();
+    const psf = this.liveLoadPsf;
+    const items = (e.shiftKey ? connectedDecks(deck, decks) : [deck]).map(d => {
+      // A bay with ledgers on two sides only keeps its load along its boards.
+      const across = this.liveLoadAcross && deckSpanIsSupported(d, ledgers, true);
+      const existing = loads.get(d.id) || null;
+      const same = !!existing && existing.deckId === d.id && existing.psf === psf && !!existing.across === across;
+      return { deck: d, across, existing, same };
     });
-    this.hooks.onBulkFill?.(added, 'live load');
-    return added;
+    return { deck, items, changes: items.filter(i => !i.same), psf };
+  }
+
+  /** Place or change the loads of a plan, as one edit. Returns how many. */
+  _applyLiveLoads(plan) {
+    return this.state.setDeckLiveLoads(
+      plan.changes.map(i => ({ deckId: i.deck.id, psf: plan.psf, across: i.across }))).length;
+  }
+
+  /** Which way loads span, from the card: along the boards, or across them. */
+  setLiveLoadAcross(across) {
+    this.liveLoadAcross = !!across;
+    this._refreshGhost();
   }
 
   // --- blocks ---------------------------------------------------------------
@@ -1036,21 +1132,35 @@ export class Tools {
   }
 
 
+  /**
+   * True when a key pressed while a field has the focus is still meant for the
+   * tool: the pointer is out on the canvas and the key is Shift, R, or Enter
+   * with a SHIFT fill waiting. A dropdown in the tool's card keeps the focus
+   * after it is used, and without this Shift then showed no preview until the
+   * mouse moved (which carries the Shift state with it).
+   */
+  claimsKey(e) {
+    if (!this._hoverAt) return false;
+    return e.key === 'Shift' || e.key === 'r' || e.key === 'R' || (e.key === 'Enter' && !!this._pendingBatch);
+  }
+
   _key(e) {
     const t = e.target;
     const inField = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    // Typing in a field is typing, unless the pointer says the key is for the canvas.
+    const typing = inField && !this.claimsKey(e);
     // Shift for a capital letter in a field is typing, not a fill.
-    if (e.key === 'Shift') { if (!inField && !e.repeat) this._setShift(true); return; }
+    if (e.key === 'Shift') { if (!typing && !e.repeat) this._setShift(true); return; }
     // R rotates, as in the source app; what it turns depends on the tool (see
     // rotate()). A held key does not keep turning.
-    if ((e.key === 'r' || e.key === 'R') && !inField && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if ((e.key === 'r' || e.key === 'R') && !typing && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       this.rotate();
       return;
     }
     // Enter confirms a SHIFT batch preview without a second click, which is how
     // the source app commits a run.
-    if (e.key === 'Enter' && this._pendingBatch && !inField) {
+    if (e.key === 'Enter' && this._pendingBatch && !typing) {
       e.preventDefault();
       const batch = this._pendingBatch;
       this._pendingBatch = null;
@@ -1059,7 +1169,7 @@ export class Tools {
       this._clearGhost();
       return;
     }
-    if (e.key === 'Escape') { this.pending = null; this.sideFlipped = false; this._pendingBatch = null; this._clearGhost(); }
+    if (e.key === 'Escape') { this.pending = null; this._pendingBatch = null; this._clearGhost(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection.size) {
       const target = e.target;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.isContentEditable)) return;
@@ -1076,7 +1186,7 @@ export class Tools {
    *   brace    ascending / descending
    *   bracket  the next free direction round the rosette
    *   plank    the boards run the other way across the hovered opening
-   *   liveload the patch goes on the other side of the ledger
+   *   liveload the load spans across the boards instead of along them
    */
   rotate() {
     // Redraw first, then report: what R did is the news, not the usual hover hint.
@@ -1100,9 +1210,14 @@ export class Tools {
       return done('plank', this._turnPlankRun());
     }
     if (this.tool === 'liveload') {
-      // The other side of the hovered ledger, until R again or the tool changes.
-      this.sideFlipped = !this.sideFlipped;
-      return done('liveload', this.sideFlipped ? 'flipped' : 'cursor');
+      // Across the boards or along them, until R again or the tool is picked again.
+      this.liveLoadAcross = !this.liveLoadAcross;
+      this._refreshGhost();
+      const plan = this._hoverAt ? this._liveLoadPlan({ ...this._hoverAt, shiftKey: this.shiftHeld }) : null;
+      // A hovered bay with ledgers on two sides only cannot take the turn.
+      const value = { across: this.liveLoadAcross, oneWayOnly: !!plan && this.liveLoadAcross && !plan.items[0].across };
+      this.hooks.onRotate?.('liveload', value);
+      return value;
     }
     if (this.tool === 'truss') {
       // The next rosette this truss can reach from the hovered one.
@@ -1118,13 +1233,11 @@ export class Tools {
     return null;
   }
 
-  /** Side of a ledger to use, honouring an R flip. */
+  /** Side of a ledger to use: the one the cursor is on. */
   _sideFor(ledger, point) {
-    const natural = getLedgerSideSign(ledger, point);
-    const want = this.sideFlipped ? (natural === 1 ? -1 : 1) : natural;
+    const want = getLedgerSideSign(ledger, point);
     // A side with no opposite ledger has no bay, so nothing can go there. Rather
-    // than silently doing nothing, fall back to the side that does have one; R
-    // still picks between them when both are real bays.
+    // than silently doing nothing, fall back to the side that does have one.
     const ledgers = this.state.ledgerList();
     if (buildSupportPair(ledger, ledgers, want)) return want;
     const other = want === 1 ? -1 : 1;
@@ -1145,21 +1258,33 @@ export class Tools {
     this._pendingBatch = null;
     if (this.tool === 'select' || this.tool === 'erase') return;
     if (this.tool === 'block') { this._blockGhost(e); return; }
+    // Live loads: ghost the patch and its span arrows on the hovered deck, or
+    // on every deck of the platform with SHIFT.
     if (this.tool === 'liveload') {
-      const hit = this._pickLedger(e);
-      if (!hit) return;
-      const side = this._sideFor(hit.ledger, hit.point);
-      const existing = [...this.state.liveLoads.values()];
-      const ledgers = this.state.ledgerList();
-      const previews = e.shiftKey
-        ? computeLiveLoadBatchPreview(hit.ledger, ledgers, side, existing, this.liveLoadPsf)
-        : [buildLiveLoadPreviewForLedger(hit.ledger, ledgers, side, existing, this.liveLoadPsf)].filter(Boolean);
-      const ghostMat = liveLoadGhostMaterial();
-      for (const p of previews) this.ghostGroup.add(liveLoadPatch(p.liveLoad, ghostMat));
-      this._pendingBatch = e.shiftKey && previews.length
-        ? { count: previews.length, label: 'live load', apply: () => this._batchFillLiveLoads(hit.ledger, side) }
+      const plan = this._liveLoadPlan(e);
+      if (!plan) {
+        this.hooks.onPreview?.('liveload', 0, { miss: true, decks: this._deckIndex().decks.length });
+        return;
+      }
+      const ghosts = [];
+      for (const item of plan.changes) {
+        const preview = buildDeckLoadPreview(item.deck, plan.psf, item.across);
+        if (!preview) continue;
+        ghosts.push(liveLoadPatch(preview.liveLoad, liveLoadGhostMaterial()));
+        ghosts.push(...liveLoadArrows(preview.liveLoad, liveLoadGhostArrowMaterial()));
+      }
+      // A whole platform is a lot of arrows: drawn instanced, as the block ghost is.
+      for (const m of instanceMeshes(ghosts)) this.ghostGroup.add(m);
+      this._pendingBatch = e.shiftKey && plan.changes.length
+        ? { count: plan.changes.length, label: 'live load', apply: () => this._applyLiveLoads(plan) }
         : null;
-      this.hooks.onPreview?.('liveload', previews.length, { psf: this.liveLoadPsf, batch: e.shiftKey, flipped: this.sideFlipped });
+      const first = plan.items[0];
+      this.hooks.onPreview?.('liveload', plan.changes.length, {
+        psf: plan.psf, batch: e.shiftKey, across: first.across,
+        // R asked for across, but this bay has nothing to carry it that way.
+        oneWayOnly: this.liveLoadAcross && !first.across,
+        changing: plan.changes.some(i => i.existing),
+      });
       return;
     }
     // Decks: ghost the boards that would be laid in the hovered bay.
@@ -1190,7 +1315,10 @@ export class Tools {
     // Braces: ghost the diagonal on the hovered face, or the whole perimeter run.
     if (this.tool === 'brace') {
       const plan = this.bracePreview(e, e.shiftKey);
-      for (const t of plan) this.ghostGroup.add(tubeBetween(t.a, t.b, 1.69, MATERIALS.ghost));
+      // Green, glowing and a full tube thick, so one diagonal reads against the
+      // grid; a whole perimeter of them is drawn instanced.
+      const braceMat = e.shiftKey ? MATERIALS.braceGhostRun : MATERIALS.braceGhost;
+      for (const m of instanceMeshes(plan.map(t => tubeBetween(t.a, t.b, 1.9, braceMat)))) this.ghostGroup.add(m);
       this._pendingBatch = e.shiftKey && plan.length
         ? { count: plan.length, label: 'brace', apply: () => this._addBraces(plan) }
         : null;
@@ -1251,9 +1379,17 @@ export class Tools {
     }
     if (this.tool === 'bracket') {
       const part = this.currentPart();
-      const dir = this._bracketDir(node);
-      if (part && dir) for (const m of buildSideBracket(node, dir, part.lengthFt, mat)) this.ghostGroup.add(m);
-      this.hooks.onPreview?.('bracket', dir ? 1 : 0, { dir });
+      const plan = part ? this._bracketPlan(node, e.shiftKey) : null;
+      const ghosts = [];
+      for (const b of plan ? plan.items : []) ghosts.push(...buildSideBracket(b.node, b.dir, part.lengthFt, mat));
+      // A whole run of brackets is a lot of tubes: drawn instanced.
+      for (const m of instanceMeshes(ghosts)) this.ghostGroup.add(m);
+      this._pendingBatch = e.shiftKey && plan && plan.items.length
+        ? { count: plan.items.length, label: 'bracket', apply: () => this._addBrackets(plan, part.lengthFt) }
+        : null;
+      this.hooks.onPreview?.('bracket', plan ? plan.items.length : 0, {
+        dir: plan ? plan.dir : null, batch: e.shiftKey, walked: plan ? plan.walked : 0,
+      });
       return;
     }
     if (this.tool === 'truss') {

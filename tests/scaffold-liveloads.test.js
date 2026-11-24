@@ -146,16 +146,14 @@ function fourLegBay() {
   return { s, l1, l2 };
 }
 
-test('placing a bay load switches the model off the blanket psf', () => {
+test('a bay carries live load only once one is placed on it', () => {
   const { s, l1 } = fourLegBay();
-  assert.equal(s.liveLoadMode, 'uniform');
-  assert.equal(s.usingBayLiveLoads(), false);
+  assert.equal(s.takeoff().totals.liveLb, 0, 'nothing placed, nothing carried');
 
   const ll = s.addLiveLoad(l1.id, 1, 50);
   assert.ok(ll, 'placed');
-  assert.equal(s.liveLoadMode, 'bays');
-  assert.equal(s.usingBayLiveLoads(), true);
   assert.equal(s.liveLoadPatches().length, 1);
+  assert.ok(Math.abs(s.takeoff().totals.liveLb - 49 * 50) < 1e-6, 'the placed load, and only that');
 
   // The same side cannot be loaded twice; the empty side has no bay.
   assert.equal(s.addLiveLoad(l1.id, 1, 50), null);
@@ -165,9 +163,8 @@ test('placing a bay load switches the model off the blanket psf', () => {
 test('bay live load reaches the legs and totals the placed area', () => {
   const { s, l1 } = fourLegBay();
   s.addLiveLoad(l1.id, 1, 50);
-  const { legs, totals, liveLoadMode, placedLiveLb } = s.takeoff();
+  const { legs, totals, placedLiveLb } = s.takeoff();
 
-  assert.equal(liveLoadMode, 'bays');
   assert.equal(Math.round(placedLiveLb), 49 * 50);
   assert.ok(Math.abs(totals.liveLb - 49 * 50) < 1e-6, 'nothing lost on the way to the legs');
   assert.equal(legs.length, 4);
@@ -199,25 +196,35 @@ test('two bays at different psf load their own legs', () => {
   assert.ok(live([0, 14]) > live([0, 0]), 'the heavier bay loads its legs harder');
 });
 
-test('uniform mode still applies the blanket psf, and the two never double up', () => {
+test('planks bring no live load of their own', () => {
   const { s, l1 } = fourLegBay();
   const n = s.nodes().filter(v => v.level === 1);
   const a = n.find(p => p.x === 0 && p.y === 0), d = n.find(p => p.x === 7 && p.y === 7);
   s.addPlank([a.x, a.y, a.z], [d.x, d.y, d.z]);
-  s.liveLoadPsf = 25;
 
-  const uniform = s.takeoff();
-  assert.equal(uniform.liveLoadMode, 'uniform');
-  assert.ok(Math.abs(uniform.totals.liveLb - 49 * 25) < 1e-6, 'deck area x psf');
+  const bare = s.takeoff();
+  assert.equal(bare.totals.liveLb, 0, 'a planked bay nobody loaded carries no live load');
+  assert.equal(bare.placedLiveLb, 0);
 
   s.addLiveLoad(l1.id, 1, 50);
-  const bays = s.takeoff();
-  assert.ok(Math.abs(bays.totals.liveLb - 49 * 50) < 1e-6, 'patches only — the blanket psf is dropped');
+  assert.ok(Math.abs(s.takeoff().totals.liveLb - 49 * 50) < 1e-6, 'only what was placed');
 
-  s.setLiveLoadMode('uniform');
-  const back = s.takeoff();
-  assert.ok(Math.abs(back.totals.liveLb - 49 * 25) < 1e-6, 'switching back restores the blanket');
-  assert.equal(back.placedLiveLb, 0);
+  s.clearLiveLoads();
+  assert.equal(s.takeoff().totals.liveLb, 0, 'and none again once it is taken off');
+});
+
+test('an older save that leaned on a blanket deck load opens with no live load', () => {
+  const { s } = fourLegBay();
+  const n = s.nodes().filter(v => v.level === 1);
+  const a = n.find(p => p.x === 0 && p.y === 0), d = n.find(p => p.x === 7 && p.y === 7);
+  s.addPlank([a.x, a.y, a.z], [d.x, d.y, d.z]);
+  const saved = JSON.parse(s.snapshot());
+  saved.liveLoadMode = 'uniform'; // what such a save recorded
+
+  const fresh = new ScaffoldState({ snapStep: 1, liveLoadPsf: 25 });
+  fresh.restore(JSON.stringify(saved));
+  assert.equal(fresh.plankBays().length, 1, 'the planks are there');
+  assert.equal(fresh.takeoff().totals.liveLb, 0, 'but nothing loads them until the Live load tool does');
 });
 
 test('patches survive undo/redo and a snapshot round trip', () => {
@@ -227,14 +234,13 @@ test('patches survive undo/redo and a snapshot round trip', () => {
 
   s.undo();
   assert.equal(s.liveLoads.size, 0, 'undo removes the patch');
-  assert.equal(s.liveLoadMode, 'uniform');
+  assert.equal(s.takeoff().totals.liveLb, 0);
   s.redo();
   assert.equal(s.liveLoads.size, 1, 'redo brings it back');
 
   const fresh = new ScaffoldState({ snapStep: 1 });
   fresh.restore(snap);
   assert.equal(fresh.liveLoads.size, 1);
-  assert.equal(fresh.liveLoadMode, 'bays');
   assert.equal([...fresh.liveLoads.values()][0].psf, 60);
   assert.equal(fresh.liveLoadPatches().length, 1, 'resolves against the restored ledgers');
 });
@@ -253,7 +259,6 @@ test('removing a supporting ledger drops its patch instead of leaving a ghost', 
   // Losing its own ledger prunes it outright.
   s.remove(l1.id);
   assert.equal(s.liveLoads.size, 0);
-  assert.equal(s.liveLoadMode, 'uniform', 'falls back to the blanket psf');
 });
 
 test('psf is editable per patch and clamped to zero', () => {
@@ -266,12 +271,12 @@ test('psf is editable per patch and clamped to zero', () => {
   assert.equal(s.setLiveLoadPsf('nope', 10), false);
 });
 
-test('clear all and clear bay loads both reset the live load model', () => {
+test('clear all and clear bay loads both take the live loads off', () => {
   const { s, l1 } = fourLegBay();
   s.addLiveLoad(l1.id, 1, 50);
   s.clearLiveLoads();
   assert.equal(s.liveLoads.size, 0);
-  assert.equal(s.liveLoadMode, 'uniform');
+  assert.equal(s.takeoff().totals.liveLb, 0);
 
   s.addLiveLoad(l1.id, 1, 50);
   s.clear();

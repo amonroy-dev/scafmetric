@@ -10,10 +10,9 @@ import { BRACE_DELTA_LIFT } from './braces.js';
 import { ScaffoldState, stateBounds } from './state.js';
 import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
-  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
+  STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, liveLoadArrows, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
 import { BLOCK_DEFAULTS } from './planning.js';
-import { DEFAULT_COMPONENTS, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
 import { beamFromSupports, mapLegsToBeam, toBeamPointLoads } from '../legloads.js';
 import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
@@ -24,6 +23,7 @@ import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 // Line icons, 20px grid, drawn in currentColor.
 const svg = d => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICONS = {
+  beam: svg('<path d="M3 13.5h14M3 16.5h14M10 13.5v3M10 3v7M7.5 7.5L10 10l2.5-2.5"/>'),
   select: svg('<path d="M5 3.5l10 6.2-4.4 1.2-2.3 4.3L5 3.5z"/>'),
   standard: svg('<path d="M10 3v12.5M6.5 16.5h7M8.2 3h3.6M7.8 8h4.4M7.8 12h4.4"/>'),
   block: svg('<rect x="3.5" y="3.5" width="13" height="13" rx="1.5"/><path d="M3.5 10h13M10 3.5v13"/>'),
@@ -51,7 +51,7 @@ const TOOL_META = {
   truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a size in the panel, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
   plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
-  liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a ledger to load the bay on that side at the bay patch psf. R flips the side. Shift+click loads every bay along the run.' },
+  liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a planked bay to load it. The load runs along the planks; R turns it across them. Shift+click loads the whole platform.' },
   erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
@@ -126,7 +126,8 @@ const TEMPLATE = `
             <label class="sfw-mt">Shift fills<select id="sfw-brace-nth"><option value="1">Every bay</option><option value="2">Every 2nd bay</option><option value="3">Every 3rd bay</option></select></label>
           </div>
           <div data-for="liveload">
-            <label>Load on each bay<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
+            <label>Load on each bay<span class="sfw-u"><input type="number" id="sfw-bay-psf" min="0" step="any" value="${DEFAULT_BAY_LIVE_LOAD_PSF}" placeholder="${DEFAULT_BAY_LIVE_LOAD_PSF}"><i>psf</i></span></label>
+            <label class="sfw-mt">Direction<select id="sfw-load-dir"><option value="along">Along the planks</option><option value="across">Across the planks</option></select></label>
           </div>
           <div data-for="select">
             <div id="sfw-props" class="sfw-props"></div>
@@ -134,6 +135,17 @@ const TEMPLATE = `
               <button type="button" class="sfw-btn ghost" id="sfw-move">Move</button>
               <button type="button" class="sfw-btn ghost" id="sfw-copy">Copy</button>
             </div>
+          </div>
+          <div data-for="beam">
+            <div class="sfw-grid2">
+              <label>Beam runs<select id="sfw-axis"><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
+              <label>Beam line at<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
+            </div>
+            <p class="sfw-note">Beam span: <strong id="sfw-span">—</strong></p>
+            <button type="button" class="sfw-btn" id="sfw-pick">Pick the legs on the beam</button>
+            <div class="sfw-totals" id="sfw-totals"></div>
+            <div class="sfw-table-wrap"><table class="sfw-table"><thead><tr><th>Leg</th><th>From left</th><th>Dead</th><th>Live</th></tr></thead><tbody id="sfw-rows"></tbody></table></div>
+            <p class="sfw-warn" id="sfw-warn" hidden></p>
           </div>
           <div data-for="block" id="sfw-blockcard">
             <div class="sfw-grid2">
@@ -158,31 +170,6 @@ const TEMPLATE = `
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
     <aside class="sfw-side">
-      <div class="sfw-group">
-        <h3>Send to beam</h3>
-        <div class="sfw-grid2">
-          <label>Beam runs<select id="sfw-axis"><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
-          <label>Beam line at<span class="sfw-u"><input type="number" id="sfw-pos" step="any" value="0"><i>ft</i></span></label>
-        </div>
-        <p class="sfw-note">Beam span: <strong id="sfw-span">—</strong>. The first leg on the line sits over the left support.</p>
-        <button type="button" class="sfw-btn" id="sfw-pick">Pick the legs on the beam</button>
-        <div class="sfw-totals" id="sfw-totals"></div>
-        <div class="sfw-table-wrap"><table class="sfw-table"><thead><tr><th>Leg</th><th>From left</th><th>Dead</th><th>Live</th></tr></thead><tbody id="sfw-rows"></tbody></table></div>
-        <p class="sfw-warn" id="sfw-warn" hidden></p>
-      </div>
-      <div class="sfw-group">
-        <h3>Loads</h3>
-        <label>Live load on decks<span class="sfw-u"><input type="number" id="sfw-live" min="0" step="any" value="${DEFAULT_LIVE_LOAD_PSF}"><i>psf</i></span></label>
-        <p class="sfw-note" id="sfw-live-note"></p>
-        <details class="sfw-fold">
-          <summary>More load settings</summary>
-          <div class="sfw-grid2 sfw-mt">
-            <label>Plank weight<span class="sfw-u"><input type="number" id="sfw-plank" min="0" step="any" value="${DEFAULT_COMPONENTS.plank.areaWeightLbPerFt2}"><i>psf</i></span></label>
-            <label>Live load from<select id="sfw-live-mode"><option value="uniform">Every deck</option><option value="bays">Loaded bays only</option></select></label>
-          </div>
-          <button type="button" class="sfw-btn ghost" id="sfw-live-clear">Clear loaded bays</button>
-        </details>
-      </div>
       <details class="sfw-group sfw-fold">
         <summary>Base</summary>
         <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
@@ -207,7 +194,7 @@ const TEMPLATE = `
           <button type="button" class="sfw-btn ghost" id="sfw-dxf">Export DXF</button>
         </div>
       </details>
-      <details class="sfw-group sfw-fold">
+      <details class="sfw-group sfw-fold" hidden>
         <summary>Saved views</summary>
         <button type="button" class="sfw-btn ghost" id="sfw-view-save">Save this view</button>
         <div id="sfw-views" class="sfw-views-list"></div>
@@ -218,9 +205,6 @@ const TEMPLATE = `
     </aside>
   </div>
   <footer class="sfw-foot">
-    <p class="sfw-disclaimer">Preliminary tributary takeoff with dead and live load kept separate, using generic tubes.<br>
-      <span class="sfw-keys"><kbd>Shift</kbd>+click fills a run · <kbd>Enter</kbd> confirms · <kbd>R</kbd> rotates · <kbd>Esc</kbd> Select · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo · Middle-drag pans · <kbd>Shift</kbd>+middle-drag orbits · Double middle-click fits · Wheel zooms</span><br>
-      <span class="sfw-retain" id="sfw-retain"></span></p>
     <div>
       <button type="button" class="sfw-btn ghost" data-sfw-close>Cancel</button>
       <button type="button" class="sfw-btn primary" id="sfw-import" disabled>Import to beam</button>
@@ -406,8 +390,6 @@ class Workspace {
 
     this.state = new ScaffoldState({
       snapStep: 1,
-      liveLoadPsf: Number(this.$('sfw-live').value) || DEFAULT_LIVE_LOAD_PSF,
-      components: { plank: { areaWeightLbPerFt2: Number(this.$('sfw-plank').value) || 3 } },
       jackExtensionIn: Number(this.$('sfw-jack').value) || 0,
       onChange: () => this._sync(),
     });
@@ -440,9 +422,13 @@ class Workspace {
             ? `Block placed: ${n} new standard${n === 1 ? '' : 's'}, with its ledgers, decks and bracing. Ctrl+Z takes it back.`
             : 'Block placed onto the standards already there, with its ledgers, decks and bracing.';
         } else {
-          this.$('sfw-hint').textContent = n
-            ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
-            : 'Nothing to add at that level — place more standards first.';
+          this.$('sfw-hint').textContent = tool === 'live load'
+            ? `Loaded ${n} bay${n === 1 ? '' : 's'} at ${this.tools.liveLoadPsf} psf. Ctrl+Z takes it back.`
+            : tool === 'bracket'
+              ? `Hung ${n} bracket${n === 1 ? '' : 's'} along the run. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
+            : n
+              ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
+              : 'Nothing to add at that level — place more standards first.';
         }
       },
     });
@@ -504,7 +490,9 @@ class Workspace {
   _buildToolbar() {
     const bar = this.$('sfw-toolbar');
     bar.innerHTML =
-      TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('');
+      TOOLS.map(t => `<button type="button" class="sfw-tool" data-tool="${t}" title="${TOOL_META[t].label}"><span class="sfw-tool-ico">${TOOL_META[t].icon}</span><span class="sfw-tool-lbl">${TOOL_META[t].label}</span></button>`).join('') +
+      `<button type="button" class="sfw-tool sfw-tool-beam" data-panel="beam" title="Send to beam"><span class="sfw-tool-ico">${ICONS.beam}</span><span class="sfw-tool-lbl">To beam</span></button>`;
+    bar.querySelector('[data-panel="beam"]').addEventListener('click', () => this._showBeamCard());
     for (const btn of bar.querySelectorAll('[data-tool]')) {
       btn.addEventListener('click', () => {
         this.tools.setTool(btn.dataset.tool);
@@ -571,7 +559,21 @@ class Workspace {
     this.tools.setCatalog(key, this.$('sfw-part').value);
   }
 
+  /** Send to beam is a card of its own, opened from the toolbar. */
+  _showBeamCard() {
+    // Select in hand, so a stray click on the canvas places nothing.
+    this.tools.setTool('select');
+    this._cardMode = 'beam';
+    for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.remove('is-active');
+    this.$('sfw-toolbar').querySelector('[data-panel="beam"]').classList.add('is-active');
+    this.$('sfw-tool-title').textContent = 'Send to beam';
+    for (const el of this.root.querySelectorAll('#sfw-toolcard [data-for]')) el.hidden = el.dataset.for !== 'beam';
+    this.$('sfw-toolcard').hidden = false;
+  }
+
   _applyToolUi(name) {
+    this._cardMode = 'tool';
+    this.$('sfw-toolbar').querySelector('[data-panel="beam"]')?.classList.remove('is-active');
     for (const b of this.$('sfw-toolbar').querySelectorAll('[data-tool]')) b.classList.toggle('is-active', b.dataset.tool === name);
     // The card says how the tool works; the bubble is for what is happening now.
     this.$('sfw-hint').textContent = '';
@@ -580,9 +582,13 @@ class Workspace {
     for (const el of this.root.querySelectorAll('#sfw-toolcard [data-for]')) el.hidden = !el.dataset.for.split(' ').includes(name);
     // Picking a tool brings its card back if it was hidden.
     // ...unless the tool has nothing to set: an empty card is only clutter.
-    this.$('sfw-toolcard').hidden = ![...this.root.querySelectorAll('#sfw-toolcard [data-for]')].some(el => !el.hidden);
+    // Select has a card only while something is selected.
+    this.$('sfw-toolcard').hidden = name === 'select' ? !this.selection.length
+      : ![...this.root.querySelectorAll('#sfw-toolcard [data-for]')].some(el => !el.hidden);
     // With the Truss tool, Type offers the three truss families and nothing else.
     for (const o of this.$('sfw-cat').options) o.hidden = CATEGORY_TOOL[o.value] !== 'truss';
+    // Picking the Live load tool puts its loads back along the planks.
+    this.$('sfw-load-dir').value = this.tools?.liveLoadAcross ? 'across' : 'along';
     // The block card comes up with the Block tool, as ScaffoldPro's does.
     const card = this.$('sfw-blockcard');
     if (card) {
@@ -632,7 +638,9 @@ class Workspace {
       fold.title = folded ? 'Expand' : 'Collapse';
     });
     // Typing in the card must not reach the canvas shortcuts (R, Delete...).
-    toolCard.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
+    // ...except Shift, R and Enter while the pointer is out on the canvas: those
+    // are for the tool in hand even if a dropdown here still has the focus.
+    toolCard.addEventListener('keydown', e => { if (e.key !== 'Escape' && !this.tools.claimsKey(e)) e.stopPropagation(); });
   }
 
   _fillBlockCard() {
@@ -663,8 +671,6 @@ class Workspace {
     this.$('sfw-jack').addEventListener('input', e => this.state.setBase({ jackExtensionIn: Math.max(0, Number(e.target.value) || 0) }));
     this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
     this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
-    this.$('sfw-live').addEventListener('input', e => { this.state.liveLoadPsf = Math.max(0, Number(e.target.value) || 0); this._sync(); });
-    this.$('sfw-plank').addEventListener('input', e => { this.state.components.plank.areaWeightLbPerFt2 = Math.max(0, Number(e.target.value) || 0); this._sync(); });
     this.$('sfw-clear').addEventListener('click', () => { this.beamLegs.clear(); this.selection = []; this.state.clear(); });
     this.$('sfw-axis').addEventListener('change', () => this._updateBeam());
     this.$('sfw-pos').addEventListener('input', () => this._updateBeam());
@@ -688,8 +694,11 @@ class Workspace {
       // The source offers 1, 2 or 3 only.
       this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(e.target.value) || 1)));
     });
+    this.$('sfw-load-dir').addEventListener('change', e => this.tools.setLiveLoadAcross(e.target.value === 'across'));
     this.$('sfw-bay-psf').addEventListener('input', e => {
-      this.tools.liveLoadPsf = Math.max(0, Number(e.target.value) || 0);
+      // Left empty, the field shows the default greyed out and that is the load placed.
+      const typed = e.target.value.trim();
+      this.tools.liveLoadPsf = typed === '' ? DEFAULT_BAY_LIVE_LOAD_PSF : Math.max(0, Number(typed) || 0);
       // Retag any selected patches so the field doubles as an editor.
       const changed = this.state.batch(() => {
         let n = 0;
@@ -699,15 +708,6 @@ class Workspace {
         return n;
       });
       if (changed) this._refreshProps();
-      this._updateLiveLoadNote();
-    });
-    this.$('sfw-live-mode').addEventListener('change', e => {
-      this.state.setLiveLoadMode(e.target.value);
-      this._sync();
-    });
-    this.$('sfw-live-clear').addEventListener('click', () => {
-      this.state.clearLiveLoads();
-      this.$('sfw-hint').textContent = 'Bay live loads cleared; back to the uniform psf over every deck.';
     });
   }
 
@@ -749,16 +749,32 @@ class Workspace {
       return;
     }
     if (tool === 'bracket') {
-      hint.textContent = info.dir
-        ? `Click to hang the bracket pointing ${compassOf(info.dir)}. R turns it to the next free direction.`
-        : 'Every direction on this rosette is taken by a ledger or another bracket.';
+      if (!info.dir) { hint.textContent = 'Every direction on this rosette is taken by a ledger or another bracket.'; return; }
+      if (info.batch) {
+        // A run can come out shorter than it is: say so rather than trim it quietly.
+        const short = count < info.walked ? ` Only ${count} of the ${info.walked} standards along it have that rosette free.` : '';
+        hint.textContent = `SHIFT: ${count} bracket${count === 1 ? '' : 's'} along this run, pointing ${compassOf(info.dir)} — click or press Enter.${short}`;
+        return;
+      }
+      hint.textContent = `Click to hang the bracket pointing ${compassOf(info.dir)}. R turns it to the next free direction. SHIFT fills the run.`;
       return;
     }
     if (tool === 'liveload') {
-      if (!count) return;
+      if (info.miss) {
+        hint.textContent = info.decks ? 'Point at a planked bay to load it.' : 'Plank a bay first: a load sits on its planks.';
+        return;
+      }
+      const way = info.across ? 'across the planks' : 'along the planks';
+      const oneWay = info.oneWayOnly ? ' This bay has ledgers on two sides only, so its load stays along the planks.' : '';
+      if (!count) {
+        hint.textContent = info.batch
+          ? `Every bay of this platform carries ${info.psf} psf ${way}.`
+          : `This bay carries ${info.psf} psf ${way}.${oneWay || ' Type another load, or press R to turn it.'}`;
+        return;
+      }
       hint.textContent = info.batch
-        ? `SHIFT: load ${count} bay${count === 1 ? '' : 's'} along this run at ${info.psf} psf — click or press Enter.`
-        : `Click to load this bay at ${info.psf} psf${info.flipped ? ' (side flipped with R)' : ''}. SHIFT fills the run.`;
+        ? `SHIFT: ${info.changing ? 'set' : 'load'} ${count} bay${count === 1 ? '' : 's'} of this platform ${info.changing ? 'to' : 'at'} ${info.psf} psf ${way} — click or press Enter.`
+        : `Click to ${info.changing ? 'change this bay to' : 'load this bay at'} ${info.psf} psf ${way}.${oneWay || ' R turns the load. SHIFT takes the whole platform.'}`;
       return;
     }
     if (tool === 'ledger') {
@@ -806,34 +822,14 @@ class Workspace {
       return;
     }
     if (tool === 'liveload') {
-      hint.textContent = value === 'flipped'
-        ? 'Side flipped — the bay on the other side of the ledger is targeted.'
-        : 'Side follows the cursor again.';
+      const sel = this.$('sfw-load-dir');
+      if (sel) sel.value = value.across ? 'across' : 'along';
+      hint.textContent = value.oneWayOnly
+        ? 'This bay has ledgers on two sides only, so its load stays along the planks.'
+        : value.across ? 'Loads now run across the planks. R turns them back.' : 'Loads now run along the planks.';
       return;
     }
     hint.textContent = 'Nothing to rotate with this tool.';
-  }
-
-  /** Explain which live load model is in force, and what it adds up to. */
-  _updateLiveLoadNote() {
-    const el = this.$('sfw-live-note');
-    if (!el) return;
-    const sel = this.$('sfw-live-mode');
-    if (sel) sel.value = this.state.liveLoadMode;
-    const placed = this.state.liveLoads.size;
-    const patches = this.state.liveLoadPatches();
-    const orphans = placed - patches.length;
-    const totalLb = patches.reduce((a, x) => a + x.totalLb, 0);
-    if (!placed) {
-      el.textContent = `Uniform: ${this.state.liveLoadPsf} psf over every decked bay. Use the Live load tool to load bays individually instead.`;
-      return;
-    }
-    const bits = [`${patches.length} bay patch${patches.length === 1 ? '' : 'es'} · ${Math.round(totalLb)} lb total`];
-    if (orphans > 0) bits.push(`${orphans} no longer enclosed by two ledgers (ignored)`);
-    bits.push(this.state.usingBayLiveLoads()
-      ? 'Patches are driving live load; the uniform psf is not applied.'
-      : `Uniform ${this.state.liveLoadPsf} psf is in force; switch the mode to use the patches.`);
-    el.textContent = bits.join(' · ');
   }
 
   _modelBox() {
@@ -854,7 +850,6 @@ class Workspace {
     this._updateBeam();
     this._updateCounts();
     this._refreshBom();
-    this._updateLiveLoadNote();
     this._persist();
   }
 
@@ -926,12 +921,15 @@ class Workspace {
     }
   }
 
-  // Live load patches sit above the deck, striped across the one-way span.
+  // Live load patches sit just above the deck, with arrows along the one-way span.
   _buildLiveLoads(out) {
     for (const patch of this.state.liveLoadPatches()) {
+      const data = { id: patch.id, kind: 'liveload' };
       const m = liveLoadPatch(patch, this.selection.includes(patch.id) ? MATERIALS.selected : null);
-      m.userData = { id: patch.id, kind: 'liveload' };
+      m.userData = data;
       out.push(m);
+      // Picking an arrow picks its load.
+      for (const arrow of liveLoadArrows(patch)) { arrow.userData = data; out.push(arrow); }
     }
   }
 
@@ -976,7 +974,9 @@ class Workspace {
     const el = this.$('sfw-props');
     if (!el) return;
     const ids = this.selection;
-    if (!ids.length) { el.innerHTML = '<p class="sfw-note">Nothing selected. Click a member, or drag a marquee.</p>'; return; }
+    // With Select in hand the card comes and goes with the selection.
+    if (this.tools?.tool === 'select' && this._cardMode !== 'beam') this.$('sfw-toolcard').hidden = !ids.length;
+    if (!ids.length) { el.innerHTML = ''; return; }
     if (ids.length > 1) {
       const kinds = {};
       for (const id of ids) { const k = this._kindOf(id); kinds[k] = (kinds[k] || 0) + 1; }
@@ -1039,9 +1039,12 @@ class Workspace {
     const ll = this.state.liveLoads.get(id);
     if (ll) {
       const patch = this.state.liveLoadPatches().find(x => x.id === id);
-      if (!patch) return [['Type', 'Live load'], ['Status', 'bay no longer closed'], ['Magnitude', `${r(ll.psf)} psf`]];
-      return [['Type', 'Live load patch'],
+      if (!patch) return [['Type', 'Live load'], ['Status', ll.deckId ? 'its planks are no longer carried' : 'bay no longer closed'], ['Magnitude', `${r(ll.psf)} psf`]];
+      // Older patches hang between two ledgers rather than sitting on planks.
+      const way = patch.deckId ? (patch.across ? 'Across the planks' : 'Along the planks') : 'Between its two ledgers';
+      return [['Type', 'Live load'],
         ['Magnitude', `${r(patch.psf)} psf`],
+        ['Direction', way],
         ['Bay', `${r(patch.widthFt)} x ${r(patch.lengthFt)} ft`],
         ['Area', `${r(patch.areaSqFt)} sq ft`],
         ['Total', `${Math.round(patch.totalLb)} lb`],
@@ -1176,8 +1179,14 @@ class Workspace {
     const dead = imported.reduce((s, e) => s + e.deadLb, 0), live = imported.reduce((s, e) => s + e.liveLb, 0);
     this.$('sfw-totals').innerHTML = `<div><dt>Legs</dt><dd>${imported.length}</dd></div><div><dt>Dead</dt><dd>${round(dead, 0)} lb</dd></div><div><dt>Live</dt><dd>${round(live, 0)} lb</dd></div>`;
     const warn = this.$('sfw-warn');
-    if (skipped.length) { warn.hidden = false; warn.textContent = `${skipped.length} selected leg(s) off the beam line or past the span — excluded.`; }
-    else warn.hidden = true;
+    const notes = [];
+    if (skipped.length) notes.push(`${skipped.length} selected leg(s) off the beam line or past the span — excluded.`);
+    // Live load is only what the Live load tool placed, so a planked scaffold
+    // with none placed sends dead load alone: worth saying before it is imported.
+    const planked = this.state.planks.size + this.state.plankPlacements.size > 0;
+    if (imported.length && planked && !this.state.liveLoads.size) notes.push('No live load is placed, so these legs carry dead load only.');
+    warn.hidden = !notes.length;
+    warn.textContent = notes.join(' ');
     this.$('sfw-import').disabled = imported.length === 0;
   }
 

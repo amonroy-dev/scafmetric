@@ -77,13 +77,15 @@ test('plank boards span the long side and lay across the short side', () => {
   for (const bd of boards) assert.ok(Math.abs(bd.lengthFt - 7) < 1e-9);
 });
 
-test('takeoff keeps dead and live separate; live = planked area x psf', () => {
-  const s = new ScaffoldState({ snapStep: 1, liveLoadPsf: 25, components: { plank: { areaWeightLbPerFt2: 3 } } });
+test('takeoff keeps dead and live separate; live is only the load placed', () => {
+  const s = new ScaffoldState({ snapStep: 1, components: { plank: { areaWeightLbPerFt2: 3 } } });
   const b = 7;
   for (const [x, y] of [[0, 0], [b, 0], [0, b], [b, b]]) s.addStandard(x, y, SEG);
   const n0 = s.nodes().find(n => n.x === 0 && n.y === 0 && n.level === 0);
   const n1 = s.nodes().find(n => n.x === b && n.y === b && n.level === 0);
-  s.addPlank([n0.x, n0.y, n0.z], [n1.x, n1.y, n1.z]);
+  const deck = s.addPlank([n0.x, n0.y, n0.z], [n1.x, n1.y, n1.z]);
+  assert.equal(s.takeoff().totals.liveLb, 0, 'planks alone carry no live load');
+  s.setDeckLiveLoad(deck.id, 25);
   const { legs, totals } = s.takeoff();
   assert.equal(legs.length, 4);
   assert.ok(Math.abs(totals.liveLb - 49 * 25) < 1e-6, `live ${totals.liveLb}`);

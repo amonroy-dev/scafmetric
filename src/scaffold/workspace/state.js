@@ -2,15 +2,15 @@
 // ledgers, braces and planks, the derived connection nodes, and the per-leg
 // dead/live load takeoff. Pure data + math (no three.js) so it is unit-testable.
 
-import { tubeWeightPerFoot, resolveComponents, DEFAULT_LIVE_LOAD_PSF } from '../catalog.js';
+import { tubeWeightPerFoot, resolveComponents } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
 import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
 import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip } from './parts.js';
 import {
-  buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadContribution,
-  distributeLedgerPointLoad, DEFAULT_BAY_LIVE_LOAD_PSF,
+  buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadMemberLoad,
+  distributeLedgerPointLoad, liveLoadsByDeck, DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
-import { buildPlankDecks, resolvePlankPlacement, plankSeatOffsetFt } from './planks.js';
+import { buildPlankDecks, resolvePlankPlacement, plankSeatOffsetFt, deckFrameFromRect, rectDeckRunsAlongX } from './planks.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
@@ -24,7 +24,6 @@ export class ScaffoldState {
   constructor(opts = {}) {
     this.snapStep = opts.snapStep ?? 1;
     this.components = resolveComponents(opts.components);
-    this.liveLoadPsf = opts.liveLoadPsf ?? DEFAULT_LIVE_LOAD_PSF;
     this.base = {
       jackExtensionIn: opts.jackExtensionIn ?? 6,
       showWoodSill: opts.showWoodSill ?? true,
@@ -40,10 +39,11 @@ export class ScaffoldState {
     this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
     this.trusses = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.guardrails = new Map();// id -> { id, a:[x,y,z], b:[x,y,z], kind }
-    this.liveLoads = new Map(); // id -> { id, ledgerId, sideSign, psf }
-    // 'uniform' spreads liveLoadPsf over every decked bay; 'bays' uses only the
-    // placed per-bay patches. Placing the first patch switches the mode.
-    this.liveLoadMode = opts.liveLoadMode ?? 'uniform';
+    // A live load sits on a deck: id -> { id, deckId, psf, across }. Models
+    // saved before that hold ledger-anchored patches, { id, ledgerId, sideSign, psf }.
+    // These are ALL the live load there is: a deck carries none of its own, so
+    // a bay nobody loaded with the Live load tool is unloaded.
+    this.liveLoads = new Map();
     this._seq = 0;
     this._history = [];
     this._future = [];
@@ -87,7 +87,7 @@ export class ScaffoldState {
       standards: [...this.standards], ledgers: [...this.ledgers],
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       trusses: [...this.trusses], guardrails: [...this.guardrails],
-      liveLoads: [...this.liveLoads], liveLoadMode: this.liveLoadMode,
+      liveLoads: [...this.liveLoads],
       plankPlacements: [...this.plankPlacements],
       seq: this._seq, base: { ...this.base },
     });
@@ -103,7 +103,8 @@ export class ScaffoldState {
     this.guardrails = new Map(d.guardrails || []);
     this.liveLoads = new Map(d.liveLoads || []);
     this.plankPlacements = new Map(d.plankPlacements || []);
-    this.liveLoadMode = d.liveLoadMode || 'uniform';
+    // Older saves also carry a liveLoadMode ('uniform' put a blanket load on
+    // every deck). There is no blanket any more, so it is not read.
     this._seq = d.seq;
     Object.assign(this.base, d.base);
     this._emit();
@@ -233,12 +234,73 @@ export class ScaffoldState {
   clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }
 
   // --- per-bay live loads --------------------------------------------------
-  // A placement names a supporting ledger and the side the load sits on; the
-  // bay is resolved against the current ledgers each time it is read.
+  // A load is placed on a decked bay and spans one way: along the boards, or
+  // across them (see liveloads.js). The bay is read from the deck each time.
 
   ledgerList() { return [...this.ledgers.values()]; }
 
-  /** Add a live load patch to one side of a ledger. Returns it, or null. */
+  /** Which load sits on each deck: Map of deckId to placement. */
+  liveLoadsByDeck(decks = this.plankBays()) {
+    return liveLoadsByDeck([...this.liveLoads.values()], this.ledgerList(), decks);
+  }
+
+  /**
+   * Put a live load on each of these decked bays, or change the one already
+   * there: items are { deckId, psf, across }. One undo step for the lot.
+   * Returns the loads placed or changed; a bay already loaded that way, or one
+   * with no deck, is left alone.
+   */
+  setDeckLiveLoads(items) {
+    const decks = this.plankBays();
+    const byDeck = this.liveLoadsByDeck(decks);
+    const plan = [];
+    for (const item of items) {
+      if (!decks.some(d => d.id === item.deckId)) continue; // a load needs a deck to sit on
+      const psf = Math.max(0, Number(item.psf ?? DEFAULT_BAY_LIVE_LOAD_PSF) || 0);
+      const across = !!item.across;
+      const existing = byDeck.get(item.deckId) || null;
+      if (existing && existing.deckId === item.deckId && existing.psf === psf && !!existing.across === across) continue;
+      plan.push({ deckId: item.deckId, psf, across, existing });
+    }
+    if (!plan.length) return [];
+    this._pushHistory();
+    const out = [];
+    for (const { deckId, psf, across, existing } of plan) {
+      if (existing && existing.deckId === deckId) {
+        existing.psf = psf;
+        existing.across = across;
+        out.push(existing);
+        continue;
+      }
+      // An older ledger-anchored patch over this bay is replaced, not doubled.
+      if (existing) this.liveLoads.delete(existing.id);
+      const ll = { id: this._id('LL'), deckId, psf, across };
+      this.liveLoads.set(ll.id, ll);
+      out.push(ll);
+    }
+    this._emit();
+    return out;
+  }
+
+  /** One decked bay: see setDeckLiveLoads. Returns the load, or null. */
+  setDeckLiveLoad(deckId, psf = DEFAULT_BAY_LIVE_LOAD_PSF, across = false) {
+    return this.setDeckLiveLoads([{ deckId, psf, across }])[0] || null;
+  }
+
+  /** Turn a load on a deck to span along the boards (false) or across them. */
+  setLiveLoadAcross(id, across) {
+    const ll = this.liveLoads.get(id);
+    if (!ll || !ll.deckId || !!ll.across === !!across) return false;
+    this._pushHistory();
+    ll.across = !!across;
+    this._emit();
+    return true;
+  }
+
+  /**
+   * Add a ledger-anchored patch to one side of a ledger: how loads were placed
+   * before they sat on decks. Kept for models and callers that still use it.
+   */
   addLiveLoad(ledgerId, sideSign, psf = DEFAULT_BAY_LIVE_LOAD_PSF) {
     if (!this.ledgers.has(ledgerId)) return null;
     const side = sideSign >= 0 ? 1 : -1;
@@ -251,7 +313,6 @@ export class ScaffoldState {
     this._pushHistory();
     const ll = { id: this._id('LL'), ledgerId, sideSign: side, psf: magnitude };
     this.liveLoads.set(ll.id, ll);
-    this.liveLoadMode = 'bays';
     this._emit();
     return ll;
   }
@@ -265,37 +326,33 @@ export class ScaffoldState {
     return true;
   }
 
-  setLiveLoadMode(mode) {
-    const next = mode === 'bays' ? 'bays' : 'uniform';
-    if (next === this.liveLoadMode) return;
-    this._pushHistory();
-    this.liveLoadMode = next;
-    this._emit();
-  }
-
+  /** Take every live load off the model. */
   clearLiveLoads() {
     if (!this.liveLoads.size) return;
     this._pushHistory();
     this.liveLoads.clear();
-    this.liveLoadMode = 'uniform';
     this._emit();
   }
 
-  /** Drop placements whose supporting ledger is gone. */
+  /** Drop loads whose deck is gone, and older patches whose ledger is gone. */
   _pruneOrphanLiveLoads() {
     let dropped = 0;
     for (const [id, ll] of [...this.liveLoads]) {
-      if (!this.ledgers.has(ll.ledgerId)) { this.liveLoads.delete(id); dropped++; }
+      const kept = ll.deckId
+        ? this.planks.has(ll.deckId) || this.plankPlacements.has(ll.deckId)
+        : this.ledgers.has(ll.ledgerId);
+      if (!kept) { this.liveLoads.delete(id); dropped++; }
     }
-    if (dropped && !this.liveLoads.size) this.liveLoadMode = 'uniform';
     return dropped;
   }
 
   /** Drawable patches for the placements that still resolve to a bay. */
-  liveLoadPatches() { return buildLiveLoadInstances([...this.liveLoads.values()], this.ledgerList()); }
-
-  /** True when per-bay patches are driving the live load. */
-  usingBayLiveLoads() { return this.liveLoadMode === 'bays' && this.liveLoads.size > 0; }
+  liveLoadPatches() {
+    const placements = [...this.liveLoads.values()];
+    // Decks are only worth resolving when a load sits on one.
+    const decks = placements.some(p => p.deckId) ? this.plankBays() : [];
+    return buildLiveLoadInstances(placements, this.ledgerList(), decks);
+  }
 
   // --- ledger-anchored decks ----------------------------------------------
   // As in the source app: a deck is anchored to a supporting ledger and a side,
@@ -329,6 +386,7 @@ export class ScaffoldState {
         id: p.id,
         x0: p.x0, x1: p.x1, y0: p.y0, y1: p.y1, z: p.z,
         boards: this.plankBoards(p),
+        frame: deckFrameFromRect(p),
         widthFt: Math.abs(p.x1 - p.x0),
         lengthFt: Math.abs(p.y1 - p.y0),
         areaSqFt: Math.abs(p.x1 - p.x0) * Math.abs(p.y1 - p.y0),
@@ -339,10 +397,11 @@ export class ScaffoldState {
 
   /** Drop placements whose anchor ledger is gone. */
   _pruneOrphans() {
-    this._pruneOrphanLiveLoads();
     for (const [id, p] of [...this.plankPlacements]) {
       if (!this.ledgers.has(p.ledgerId)) this.plankPlacements.delete(id);
     }
+    // After the decks, so a load goes with the deck it sat on.
+    this._pruneOrphanLiveLoads();
   }
 
   /** Move or copy whole standard stacks by a delta. Returns the new/moved ids. */
@@ -456,7 +515,7 @@ export class ScaffoldState {
     const d = Math.abs(p.y1 - p.y0);
     if (w < 1e-6 || d < 1e-6) return [];
     const cx = (p.x0 + p.x1) / 2, cy = (p.y0 + p.y1) / 2;
-    const runAlongX = w >= d;
+    const runAlongX = rectDeckRunsAlongX(p);
     const lengthFt = runAlongX ? w : d;
     const crossSpanIn = (runAlongX ? d : w) * 12;
     const slots = buildBestFitPlankLayout(crossSpanIn);
@@ -536,37 +595,35 @@ export class ScaffoldState {
       const w = perFootLedger * len;
       attribute(g.a[0], g.a[1], w / 2); attribute(g.b[0], g.b[1], w / 2);
     }
-    // Deck self weight, and - in uniform mode - the blanket live load with it.
-    const bayLive = this.usingBayLiveLoads();
-    for (const p of this.plankBays()) {
-      const area = p.areaSqFt;
-      const dead = area * plankPsf;
-      const live = bayLive ? 0 : area * this.liveLoadPsf;
+    // Deck self weight. A deck brings no live load with it: that is only ever
+    // what was placed on it with the Live load tool.
+    const decks = this.plankBays();
+    for (const p of decks) {
+      const dead = p.areaSqFt * plankPsf;
       const inside = [...legs.values()].filter(l =>
         l.x >= p.x0 - 1e-6 && l.x <= p.x1 + 1e-6 && l.y >= p.y0 - 1e-6 && l.y <= p.y1 + 1e-6);
       const targets = inside.length ? inside : [nearest((p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2)].filter(Boolean);
-      for (const l of targets) { l.deadLb += dead / targets.length; l.liveLb += live / targets.length; }
+      for (const l of targets) l.deadLb += dead / targets.length;
     }
 
-    // Per-bay live load: one-way distribution onto the two supporting ledgers,
-    // then each ledger point load split between the legs at its ends.
+    // Placed live loads: one-way onto the ledgers either side of the span (as
+    // RISA-3D attributes a one-way area load), then each ledger point load
+    // split between the legs at its ends.
     let placedLiveLb = 0;
-    if (bayLive) {
-      const ledgerList = this.ledgerList();
-      for (const placement of this.liveLoads.values()) {
-        const resolved = resolveLiveLoadPlacement(placement, ledgerList);
-        if (!resolved) continue;
-        placedLiveLb += resolved.areaSqFt * placement.psf;
-        forEachLiveLoadContribution(resolved, c => {
-          distributeLedgerPointLoad(c.sourceLedger, c.sourcePoint, c.sourceLoadLb, attributeLive);
-          distributeLedgerPointLoad(c.targetLedger, c.targetPoint, c.targetLoadLb, attributeLive);
-        });
-      }
+    const ledgerList = this.ledgerList();
+    for (const placement of this.liveLoads.values()) {
+      const resolved = resolveLiveLoadPlacement(placement, ledgerList, decks);
+      if (!resolved) continue;
+      placedLiveLb += resolved.areaSqFt * placement.psf;
+      forEachLiveLoadMemberLoad(resolved, ledgerList,
+        (ledger, point, lb) => distributeLedgerPointLoad(ledger, point, lb, attributeLive),
+        // A piece with no ledger anywhere under it still weighs on the nearest leg.
+        (point, lb) => attributeLive(point.x, point.y, lb));
     }
 
     const list = [...legs.values()];
     const totals = list.reduce((a, l) => ({ deadLb: a.deadLb + l.deadLb, liveLb: a.liveLb + l.liveLb }), { deadLb: 0, liveLb: 0 });
-    return { legs: list, totals, liveLoadMode: bayLive ? 'bays' : 'uniform', placedLiveLb };
+    return { legs: list, totals, placedLiveLb };
   }
 }
 
