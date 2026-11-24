@@ -46,7 +46,8 @@ const PICK_BAND_PX = 3;
 const TRUSS_AXIS_TOL_RAD = (2 * Math.PI) / 180;
 const TRUSS_SPAN_TOL_FT = 1 / 12;
 const TRUSS_LEVEL_TOL_FT = 0.05;
-export const TOOLS = ['select', 'standard', 'block', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
+// In toolbar order. Block comes straight after Select: most scaffolds start as one.
+export const TOOLS = ['select', 'block', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 // The block ghost's footprint: blue, and green once snapped (ScaffoldPro's cue).

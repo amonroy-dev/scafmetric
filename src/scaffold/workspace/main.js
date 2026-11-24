@@ -453,12 +453,14 @@ class Workspace {
     this._buildCatalogUi();
     this._bindInputs();
     this.tools.setCatalog('standards', DEFAULT_PART.standards);
+    // The Block tool is the one in hand on open: most scaffolds start as a block.
+    this.tools.setTool('block');
     // Restore work in progress if it is still within the retention window.
     purgeExpired();
     const wip = loadWip(KEYS.scaffold);
     const el = this.$('sfw-retain');
-    // A fresh builder starts empty, looking straight down, with the standard
-    // tool ready to place the first leg.
+    // A fresh builder starts empty, looking straight down, with the Block tool
+    // ready to place the first block.
     if (wip && wip.data) {
       try { this.state.restore(wip.data); } catch { this.state.clear(); }
       if (el) el.textContent = `${RETENTION_NOTICE} Restored from this device, ${formatSavedAt(wip.savedAt)}.`;

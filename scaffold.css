@@ -101,8 +101,23 @@
 .sfw-toggle:focus-visible{outline:2px solid var(--sfw-ink);outline-offset:1px}
 
 .sfw-viewcube{position:absolute;top:10px;right:12px;z-index:4;display:flex;flex-direction:column;align-items:center;gap:6px}
-.sfw-viewcube-home{height:24px;padding:0 10px;border:1px solid var(--sfw-line);border-radius:999px;background:var(--sfw-bg);color:var(--sfw-ink-2);font:500 11.5px/1 var(--sfw-font);cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.sfw-viewcube-home{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;min-width:28px;padding:0 6px;border:1px solid var(--sfw-line);border-radius:999px;background:var(--sfw-bg);color:var(--sfw-ink-2);font:500 11.5px/1 var(--sfw-font);white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.sfw-viewcube-home svg{width:16px;height:16px;flex:none}
 .sfw-viewcube-home:hover{color:var(--sfw-ink);border-color:var(--sfw-line-strong)}
+.sfw-viewcube-home:focus-visible{outline:2px solid var(--sfw-ink);outline-offset:2px}
+.sfw-viewcube-home-label{display:none}
+/* In a flat view (Top, Front, a side) the button is the way back to 3D: it
+   darkens, says so, and pulses a few times as the view arrives. It then stays
+   dark and named, but still: a pulse that never stops is one people learn to
+   stop seeing, and Top is a view people work in. */
+.sfw-viewcube-home.is-flat{padding:0 11px 0 8px;border-color:var(--sfw-ink);background:var(--sfw-ink);color:#fff;animation:sfw-home-pulse 1.5s ease-out 4}
+.sfw-viewcube-home.is-flat:hover{color:#fff;border-color:var(--sfw-ink)}
+.sfw-viewcube-home.is-flat .sfw-viewcube-home-label{display:inline}
+@keyframes sfw-home-pulse{
+  0%{box-shadow:0 0 0 0 rgba(24,24,27,.5)}
+  70%,100%{box-shadow:0 0 0 12px rgba(24,24,27,0)}
+}
+@media (prefers-reduced-motion:reduce){.sfw-viewcube-home.is-flat{animation:none}}
 
 .sfw-hint{position:absolute;left:50%;bottom:14px;z-index:3;transform:translateX(-50%);max-width:min(640px,calc(100% - 32px));padding:7px 12px;
   background:var(--sfw-bg);border:1px solid var(--sfw-line);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06);

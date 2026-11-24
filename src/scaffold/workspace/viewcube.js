@@ -30,6 +30,13 @@ function labelTexture(text) {
   return tex;
 }
 
+// A house, as a view cube's home control usually is. Same line style as the
+// toolbar icons: 20px grid, drawn in currentColor.
+const HOME_ICON = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<path d="M3 9.6 10 3.4l7 6.2"/><path d="M5 8.2v8.3h10V8.2"/><path d="M8.4 16.5v-4.4h3.2v4.4"/></svg>';
+// The view counts as flat when it looks this squarely along one axis (about two degrees).
+const FLAT_VIEW_COS = 0.9995;
+
 export class ViewCube {
   constructor(engine, size = 92, opts = {}) {
     this.engine = engine;
@@ -43,9 +50,10 @@ export class ViewCube {
     const home = document.createElement('button');
     home.type = 'button';
     home.className = 'sfw-viewcube-home';
-    home.title = 'Home view (fit model)';
-    home.setAttribute('aria-label', 'Home view');
-    home.textContent = 'Home';
+    home.title = 'Home: back to the 3D view';
+    home.setAttribute('aria-label', 'Home: back to the 3D view');
+    // The words show only in a flat view, where the way back needs spelling out.
+    home.innerHTML = `${HOME_ICON}<span class="sfw-viewcube-home-label">3D view</span>`;
     home.addEventListener('click', ev => {
       ev.stopPropagation();
       if (this.onHome) this.onHome();
@@ -100,6 +108,14 @@ export class ViewCube {
     const key = [offset.x, offset.y, offset.z, up.x, up.y, up.z].map(v => v.toFixed(5)).join(',');
     if (key === this._lastKey) return;
     this._lastKey = key;
+    // Looking square at one face (Top, Front, a side) the scaffold reads as a
+    // flat drawing, and it is not obvious how to get the 3D view back. The
+    // home button says so there: it darkens, names itself and pulses.
+    const flat = Math.max(Math.abs(offset.x), Math.abs(offset.y), Math.abs(offset.z)) / this._R > FLAT_VIEW_COS;
+    if (flat !== this.flat) {
+      this.flat = flat;
+      this.homeButton.classList.toggle('is-flat', flat);
+    }
     this.camera.position.copy(offset);
     this.camera.up.copy(up);
     this.camera.lookAt(0, 0, 0);

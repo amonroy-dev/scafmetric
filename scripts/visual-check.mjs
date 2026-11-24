@@ -136,9 +136,14 @@ const CHECKS = {
     r.counts.ledgers !== 0 && `a fresh builder should start empty, got ${r.counts.ledgers} ledgers`,
     r.initial.projection !== 'orthographic' && `a fresh builder should open in the top view, got ${r.initial.projection}`,
     Math.abs(r.initial.camDir[2]) < 0.999 && `the opening view must look straight down, camera is at ${JSON.stringify(r.initial.camDir)}`,
-    r.initial.tool !== 'standard' && `the standard tool should be active on open, got ${r.initial.tool}`,
+    r.initial.tool !== 'block' && `the Block tool should be in hand on open, got ${r.initial.tool}`,
+    r.initial.toolOrder.join() !== 'select,block,standard' && `the toolbar should run Select, Block, Standard; it runs ${r.initial.toolOrder}`,
+    !r.initial.blockCard && 'the block card should be up on open, the Block tool being in hand',
+    !r.initial.home.icon && 'the home button should be a house icon',
+    !(r.initial.home.flat && r.initial.home.label === '3D view' && r.initial.home.pulsing)
+      && `in the top view the home button should name the way back and pulse: ${JSON.stringify(r.initial.home)}`,
     r.initial.undoDisabled !== 'true' && 'Undo should show "Nothing to undo" on a fresh builder',
-    r.initial.activeButton !== 'standard' && `the toolbar should highlight Standard on open, got ${r.initial.activeButton}`,
+    r.initial.activeButton !== 'block' && `the toolbar should highlight Block on open, got ${r.initial.activeButton}`,
     r.initial.coverage > 0.002 && `an empty model should draw nothing teal (no beam line), coverage ${r.initial.coverage}`,
   ],
   escToSelect: r => [
@@ -146,6 +151,7 @@ const CHECKS = {
     r.fromStandard !== 'select' && `Esc from the standard tool should switch to Select, got ${r.fromStandard}`,
     r.activeButton !== 'select' && `the toolbar should highlight Select after Esc, got ${r.activeButton}`,
     !r.open && 'Esc must not close the builder',
+    (r.homeIn3d.flat || r.homeIn3d.label || r.homeIn3d.pulsing) && `in the 3D view the home button should be a plain house: ${JSON.stringify(r.homeIn3d)}`,
   ],
   marqueeSelect: r => [
     r.selected !== 4 && `a marquee over the four placed stacks should select 4 standards, selected ${r.selected}`,

@@ -88,6 +88,18 @@ window.__sv = (() => {
     await raf(2);
   }
 
+  /** The view cube's home button: its state, and whether its words are showing. */
+  function homeButton() {
+    const b = ws().root.querySelector('.sfw-viewcube-home');
+    const label = b.querySelector('.sfw-viewcube-home-label');
+    return {
+      icon: !!b.querySelector('svg'),
+      flat: b.classList.contains('is-flat'),
+      label: !!label && getComputedStyle(label).display !== 'none' ? label.textContent : null,
+      pulsing: getComputedStyle(b).animationName !== 'none',
+    };
+  }
+
   function key(k, opts) {
     const o = opts || {};
     window.dispatchEvent(new KeyboardEvent('keydown', {
@@ -307,6 +319,9 @@ window.__sv = (() => {
       const initial = {
         projection: ws().engine.projection, camDir: camDir(), tool: ws().tools.tool,
         activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
+        toolOrder: [...ws().root.querySelectorAll('.sfw-tool[data-tool]')].slice(0, 3).map(b => b.dataset.tool),
+        blockCard: !ws().$('sfw-blockcard').hidden && !ws().$('sfw-toolcard').hidden,
+        home: homeButton(),
         // Teal pixels on an empty model: the old beam line drew a teal bar here.
         coverage: tealOnEmpty,
         undoDisabled: ws().root.querySelector('.sfw-history [data-act="undo"]').getAttribute('aria-disabled'),
@@ -319,6 +334,7 @@ window.__sv = (() => {
       // The rest of the walkthrough builds from the home view.
       ws().engine.setView('home');
       await raf(8);
+      const homeIn3d = homeButton();
       tool('brace');
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
       await raf(2);
@@ -327,7 +343,7 @@ window.__sv = (() => {
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
       await raf(2);
       return {
-        fromBrace, fromStandard: ws().tools.tool,
+        fromBrace, fromStandard: ws().tools.tool, homeIn3d,
         activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
         open: !ws().root.hidden, hint: hint(),
       };
