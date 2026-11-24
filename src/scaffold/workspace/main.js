@@ -19,6 +19,7 @@ import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired,
 import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
+import { createUseNotice } from './usenotice.js';
 
 // Line icons, 20px grid, drawn in currentColor.
 const svg = d => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -472,7 +473,7 @@ class Workspace {
     // If the account holds a newer copy, take it instead.
     loadServerWorkspace().then(server => {
       if (!server?.scaffold) return;
-      const winner = pickNewer(wip, server);
+      const winner = pickNewer(wip, server, 'scaffold');
       if (!winner || winner.source !== 'account') return;
       try {
         this.state.restore(server.scaffold);
@@ -1281,7 +1282,7 @@ class Workspace {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'scaffold-centerlines.dxf';
+    a.download = 'scaffold-centerlines-estimate.dxf';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -1292,7 +1293,7 @@ class Workspace {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'scaffold-bom.csv';
+    a.download = 'scaffold-parts-estimate.csv';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -1341,9 +1342,20 @@ if (root) {
   // Handle for the headless WebGL harness (scripts/visual-check.mjs) and for
   // debugging a live page from the console. Read-only as far as the app cares.
   window.scaffoldWorkspace = ws;
-  for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.addEventListener('click', () => ws.open());
+  // The builder opens only once its notice has been agreed to, which is asked
+  // once per account (usenotice.js). Looked up now so the click does not wait.
+  const notice = createUseNotice();
+  notice.prefetch();
+  for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.addEventListener('click', () => notice.request(() => ws.open()));
   window.addEventListener('scafmetric:loads-imported', e => {
     const n = e.detail?.count ?? 0;
-    for (const btn of document.querySelectorAll('[data-open-scaffold]')) btn.dataset.imported = String(n);
+    for (const btn of document.querySelectorAll('[data-open-scaffold]')) {
+      btn.dataset.imported = String(n);
+      // The line under the button's name says what came in.
+      const note = btn.querySelector('[data-scaffold-note]');
+      if (!note) continue;
+      note.dataset.idle ||= note.textContent;
+      note.textContent = n ? `${n} leg load${n === 1 ? '' : 's'} imported` : note.dataset.idle;
+    }
   });
 }

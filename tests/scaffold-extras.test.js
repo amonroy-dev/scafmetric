@@ -110,6 +110,32 @@ test('DXF output is well formed and carries the members', () => {
   assert.equal(dxf.trimEnd().split('\r\n').length % 2, 0, 'group codes come in pairs');
 });
 
+test('the exported DXF carries the estimate note, drawn beside the model on its own layer', async () => {
+  const { exportScaffoldDxf } = await import('../src/scaffold/workspace/dxf.js');
+  const { SCAFFOLD_EXPORT_NOTE } = await import('../src/scaffold-notice.js');
+  const s = new ScaffoldState({ snapStep: 1 });
+  s.addStandard(0, 0, SEG);
+  s.addStandard(7, 0, SEG);
+  const lines = exportScaffoldDxf(s).trimEnd().split('\r\n');
+  assert.equal(lines.length % 2, 0, 'group codes still come in pairs');
+
+  const texts = lines.map((v, i) => (v === 'TEXT' && lines[i - 1] === '0' ? i : -1)).filter(i => i >= 0);
+  assert.equal(texts.length, SCAFFOLD_EXPORT_NOTE.length, 'one line of text per line of the note');
+  for (const [n, i] of texts.entries()) {
+    const entity = lines.slice(i, i + 13);
+    assert.equal(entity[entity.indexOf('8') + 1], LAYERS.notes);
+    assert.equal(entity[entity.indexOf('1') + 1], SCAFFOLD_EXPORT_NOTE[n].toUpperCase());
+    assert.ok(Number(entity[entity.indexOf('20') + 1]) < 0, 'below the front of the model, not on top of it');
+  }
+  assert.ok(lines.includes(LAYERS.notes));
+  // And as comments, for anyone reading the file itself.
+  for (const text of SCAFFOLD_EXPORT_NOTE) assert.ok(lines.some((v, i) => v === text && lines[i - 1] === '999'));
+  assert.match(SCAFFOLD_EXPORT_NOTE[0], /Not an engineered design/);
+
+  // The bare writer adds nothing unless asked.
+  assert.equal(buildDxf(buildCenterlineModel(s)).includes('TEXT'), false);
+});
+
 test('DXF axis mapping can swap to Y-up', () => {
   const model = { segments: [{ start: [1, 2, 3], end: [4, 5, 6], layer: LAYERS.ledger }], points: [] };
   const yup = buildDxf(model, { includeJoints: false, axis: 'yup' });

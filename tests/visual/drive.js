@@ -303,9 +303,34 @@ window.__sv = (() => {
       for (const k of Object.keys(localStorage)) {
         if (k.indexOf('scafmetric:wip:') === 0) localStorage.removeItem(k);
       }
-      document.querySelector('[data-open-scaffold]').click();
+      // The first click brings up the notice, not the builder: it has to be
+      // read and both statements ticked before the builder will open.
+      const trigger = document.querySelector('[data-open-scaffold]');
+      const button = { name: trigger.querySelector('strong')?.textContent || null, note: trigger.querySelector('small')?.textContent || null };
+      trigger.click();
+      for (let i = 0; i < 120 && !document.querySelector('dialog.sfn[open]'); i++) await raf(1);
+      const page = document.querySelector('dialog.sfn[open]');
+      if (!page) throw new Error('the scaffold builder notice never came up');
+      const agree = page.querySelector('.sfn-agree');
+      const boxes = [...page.querySelectorAll('input[type="checkbox"]')];
+      const notice = {
+        title: page.querySelector('h1').textContent,
+        boxes: boxes.length,
+        builderHeldBack: !(ws() && ws().engine) && document.getElementById('scaffold-modal').hidden,
+        agreeLockedAtFirst: agree.disabled,
+      };
+      boxes[0].click();
+      notice.agreeLockedWithOneTick = agree.disabled;
+      boxes[1].click();
+      notice.agreeOpenWithBoth = !agree.disabled;
+      agree.click();
       for (let i = 0; i < 300 && !(ws() && ws().engine); i++) await raf(1);
       if (!(ws() && ws().engine)) throw new Error('engine never started');
+      notice.goneAfterAgreeing = !document.querySelector('dialog.sfn');
+      // Asked once: the button now goes straight to the builder.
+      trigger.click();
+      await raf(4);
+      notice.askedAgain = !!document.querySelector('dialog.sfn');
       await raf(30);
       // Measure teal with the grid hidden: its thin centre axes are teal too.
       // The canvas draws on demand: a change made from outside asks for a frame.
@@ -326,7 +351,7 @@ window.__sv = (() => {
         coverage: tealOnEmpty,
         undoDisabled: ws().root.querySelector('.sfw-history [data-act="undo"]').getAttribute('aria-disabled'),
       };
-      return { gl: glInfo(), counts: counts(), coverage: coverage(), hint: hint(), initial };
+      return { gl: glInfo(), counts: counts(), coverage: coverage(), hint: hint(), initial, notice, button };
     },
 
     // Esc drops any tool back to Select, through a real document-level keypress.

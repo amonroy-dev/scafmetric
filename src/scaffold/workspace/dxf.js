@@ -4,6 +4,7 @@
 // LINE -> members. Pure string building — unit-testable.
 
 import { trussWorldMembers, sideBracketWorldMembers } from './parts.js';
+import { SCAFFOLD_EXPORT_NOTE } from '../../scaffold-notice.js';
 
 export const LAYERS = {
   jack: 'SCF_JACK',
@@ -14,6 +15,8 @@ export const LAYERS = {
   guardrail: 'SCF_GUARDRAIL',
   truss: 'SCF_TRUSS',
   joint: 'SCF_JOINTS',
+  // The estimate note, on a layer of its own so it can be switched off.
+  notes: 'SCF_NOTES',
 };
 
 function fmt(v, precision = 6) {
@@ -71,9 +74,11 @@ export function buildCenterlineModel(state) {
 /**
  * Serialise a centerline model to DXF text.
  * `axis` 'zup' keeps feet/Z-up; 'yup' swaps Y and Z for packages that expect it.
+ * `note` is lines of text drawn beside the model, and repeated as comments in
+ * the file, on their own layer.
  */
 export function buildDxf(model, options = {}) {
-  const { precision = 6, includeJoints = true, axis = 'zup', newline = '\r\n', title = 'Scafmetric scaffold centerlines' } = options;
+  const { precision = 6, includeJoints = true, axis = 'zup', newline = '\r\n', title = 'Scafmetric scaffold centerlines', note = [] } = options;
   const out = [];
   const pair = (code, value) => { out.push(String(code)); out.push(String(value)); };
   const map = p => (axis === 'yup' ? [p[0], p[2], p[1]] : p);
@@ -105,6 +110,27 @@ export function buildDxf(model, options = {}) {
   pair(2, 'ENTITIES');
   pair(999, title);
   pair(999, `Units=feet, Axis=${axis}`);
+  if (note.length) {
+    for (const line of note) pair(999, line);
+    // Set below the front of the model, sized to it, so it is read with the
+    // drawing and not lost in a corner of it.
+    const xs = [], ys = [];
+    for (const p of model.points) { xs.push(p[0]); ys.push(p[1]); }
+    for (const s of model.segments) { xs.push(s.start[0], s.end[0]); ys.push(s.start[1], s.end[1]); }
+    const minX = xs.length ? Math.min(...xs) : 0, maxX = xs.length ? Math.max(...xs) : 0;
+    const minY = ys.length ? Math.min(...ys) : 0;
+    const height = Math.min(1.5, Math.max(0.3, (maxX - minX) / 60));
+    note.forEach((line, i) => {
+      const at = map([minX, minY - height * (2 + 1.6 * i), 0]);
+      pair(0, 'TEXT');
+      pair(8, LAYERS.notes);
+      pair(10, fmt(at[0], precision));
+      pair(20, fmt(at[1], precision));
+      pair(30, fmt(at[2], precision));
+      pair(40, fmt(height, precision));
+      pair(1, line.toUpperCase());
+    });
+  }
 
   if (includeJoints) {
     for (const raw of model.points) {
@@ -133,6 +159,7 @@ export function buildDxf(model, options = {}) {
   return out.join(newline) + newline;
 }
 
+/** The scaffold as a DXF file, with the estimate note on it. */
 export function exportScaffoldDxf(state, options) {
-  return buildDxf(buildCenterlineModel(state), options);
+  return buildDxf(buildCenterlineModel(state), { note: SCAFFOLD_EXPORT_NOTE, ...options });
 }

@@ -5,6 +5,7 @@
 // Pure math (no three.js, no DOM) so it is unit-testable.
 
 import { tubeWeightPerFoot, STEEL_DENSITY_LB_FT3 } from '../catalog.js';
+import { SCAFFOLD_EXPORT_NOTE } from '../../scaffold-notice.js';
 import {
   WOOD_SILL, JACK_PLATE, JACK_STEM, HANDLE_NUT, BASE_COLLAR,
   PLANK, inchesToFeet, trussMemberLengthFt, sideBracketTubeLengthFt,
@@ -183,5 +184,8 @@ export function bomToCsv(bom) {
   const lines = bom.lineItems.map(r =>
     [r.category, `"${r.description.replace(/"/g, '""')}"`, r.quantity, r.unitWeightLb, r.totalWeightLb].join(','));
   const total = `,,${bom.summary.totalQuantity},,${bom.summary.totalWeightLb}`;
-  return [head, ...lines, total].join('\n');
+  // What the file is, for whoever it is passed on to. After the total, so the
+  // header stays on the first row for anything that reads the file by column.
+  const note = SCAFFOLD_EXPORT_NOTE.map(line => `"${line.replace(/"/g, '""')}"`);
+  return [head, ...lines, total, '', ...note].join('\n');
 }

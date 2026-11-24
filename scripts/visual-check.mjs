@@ -136,6 +136,11 @@ const CHECKS = {
     r.counts.ledgers !== 0 && `a fresh builder should start empty, got ${r.counts.ledgers} ledgers`,
     r.initial.projection !== 'orthographic' && `a fresh builder should open in the top view, got ${r.initial.projection}`,
     Math.abs(r.initial.camDir[2]) < 0.999 && `the opening view must look straight down, camera is at ${JSON.stringify(r.initial.camDir)}`,
+    r.button.name !== 'Scaffold builder' && `the button on the beam form should be named Scaffold builder, it says ${r.button.name}`,
+    !/estimating/i.test(r.notice.title) && `the notice should say the builder is for estimating, its title is: ${r.notice.title}`,
+    !(r.notice.builderHeldBack && r.notice.agreeLockedAtFirst && r.notice.agreeLockedWithOneTick && r.notice.agreeOpenWithBoth && r.notice.boxes === 2)
+      && `the builder must stay shut until both statements are ticked and agreed: ${JSON.stringify(r.notice)}`,
+    !(r.notice.goneAfterAgreeing && !r.notice.askedAgain) && `the notice should be asked once, then never in the way again: ${JSON.stringify(r.notice)}`,
     r.initial.tool !== 'block' && `the Block tool should be in hand on open, got ${r.initial.tool}`,
     r.initial.toolOrder.join() !== 'select,block,standard' && `the toolbar should run Select, Block, Standard; it runs ${r.initial.toolOrder}`,
     !r.initial.blockCard && 'the block card should be up on open, the Block tool being in hand',

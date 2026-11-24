@@ -43,6 +43,20 @@ export function sameOrigin(req, env = process.env) {
     return req.headers.origin === configured.origin && req.headers['sec-fetch-site'] !== 'cross-site';
   } catch { return false; }
 }
+/**
+ * The check for a READ from the app's own pages.
+ *
+ * A browser sends no Origin header on a same-site GET, so demanding one (as
+ * sameOrigin does, rightly, for anything that writes) refuses every read the
+ * app itself makes. A read is instead held to the fetch metadata browsers do
+ * send: it must not come from another site, and if an Origin is there after
+ * all it must be this one.
+ */
+export function sameSiteRead(req, env = process.env) {
+  const site = req.headers['sec-fetch-site'];
+  if (site && !['same-origin', 'none'].includes(site)) return false;
+  return req.headers.origin === undefined || sameOrigin(req, env);
+}
 export function cookieFor(token, expires, env = process.env) {
   const secure = env.NODE_ENV === 'production' ? '; Secure' : '';
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expires.toUTCString()}`;

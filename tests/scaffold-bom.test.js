@@ -111,6 +111,10 @@ test('CSV export has a header and one row per line item', () => {
   const s = bay();
   const bom = deriveBom(s);
   const csv = bomToCsv(bom).split('\n');
-  assert.ok(csv[0].startsWith('Category,Description,Qty'));
-  assert.equal(csv.length, bom.lineItems.length + 2, 'header + rows + total');
+  assert.ok(csv[0].startsWith('Category,Description,Qty'), 'the header is still the first row');
+  assert.equal(csv.length, bom.lineItems.length + 5, 'header + rows + total, then a blank line and the two-line estimate note');
+  // The file says what it is to whoever it is sent on to.
+  assert.equal(csv[bom.lineItems.length + 2], '');
+  assert.match(csv[bom.lineItems.length + 3], /^"Estimate for bidding and planning only\. Not an engineered design\."$/);
+  assert.match(csv[bom.lineItems.length + 4], /designed by a qualified person/);
 });

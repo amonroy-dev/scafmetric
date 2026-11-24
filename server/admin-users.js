@@ -12,6 +12,7 @@
 import { isAdminUid } from './admin-access.js';
 import { TERMS_VERSION } from '../src/terms.js';
 import { hasProfile } from './account.js';
+import { scaffoldNoticeStatus } from './acknowledgments.js';
 
 export const ACCOUNTS = 'scafmetricAccounts';
 export const ENTITLEMENTS = 'billingEntitlements';
@@ -84,6 +85,8 @@ export function createAdminUsers({ auth, db, env, sendReset, now = () => new Dat
         company: a.profile?.company || '', discovery: a.profile?.discovery || '',
         profileComplete: hasProfile(a),
         termsAccepted: a.termsVersion === TERMS_VERSION && Number.isFinite(Date.parse(a.termsAcceptedAt)),
+        // When they agreed the scaffold builder is for estimating, not engineering.
+        scaffoldNotice: scaffoldNoticeStatus(a),
       } : null,
       access: {
         free: g?.lifetimeFree === true,

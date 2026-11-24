@@ -42,17 +42,27 @@ cited sources, lb/ft² comparison) is still a pending deliverable; see
 
 ## Load path (preliminary — not a code check)
 
-Tributary-area method:
+Tributary method, with every ledger taken as a simple span between standards:
 
-- **Dead per leg** = its full standard self-weight + half of every ledger/brace
-  framing into it + tributary plank self-weight.
+- **Dead per leg** = its standard and base hardware (jack, collar, sill) + half of
+  every ledger, brace, truss and guardrail tube that ends on it + the side
+  brackets hung on it + its share of the planks.
+- **Planks** bear on the ledgers at their two ends, and each of those ledgers
+  passes what it gets to the legs at its own ends. For a bay with a leg at each
+  corner that is a quarter each; a leg under the middle of a side ledger carries
+  none.
+- **Guardrails** are one tube between each pair of standards a rail runs past.
 - **Live per leg** = only the live loads placed with the Live load tool (below).
   A planked bay carries no live load of its own.
-- Tributary area for the plank weight uses the quarter-bay rule, so legs' areas
-  sum exactly to the planked footprint.
+- The leg dead loads add up to the parts list weight.
 
-This is an approximation suitable for preliminary leg-reaction estimates, not a
-rigid-frame distribution.
+These leg loads are checked against OpenSees, leg by leg, and match to within
+0.01 lb: see [verification/opensees](../verification/opensees/README.md).
+
+It is a tributary takeoff, not a frame analysis. Where a loaded ledger runs over
+a standard, or braces link legs carrying different loads, a frame analysis moves
+some load between legs (the totals do not change). The same page gives the size
+of that effect on each test scaffold.
 
 ### Placed live loads (one-way)
 
@@ -88,3 +98,36 @@ leg's distance from the left support is preserved at full precision. Legs that f
 off the beam line or past the span are **flagged and excluded** from import (not
 silently clamped). Importing replaces any prior scaffold-imported rows; manually
 entered loads are left untouched.
+
+## The estimating-use notice
+
+The scaffold builder is for bids and planning, not engineering. The first time a
+person opens it they are shown a page that says so and must tick two statements
+before it opens: that they will use it for estimating and bid purposes only, and
+that it is not engineering and does not replace a qualified person or a licensed
+professional engineer.
+
+- The wording is in `src/scaffold-notice.js`. To change it, edit it there and
+  bump `SCAFFOLD_NOTICE_VERSION`; everyone is then asked again.
+- Agreement is recorded on the account (`scaffoldNoticeVersion`,
+  `scaffoldNoticeAcceptedAt` in `scafmetricAccounts`), with the date set by the
+  server. The first agreement to a version is kept and never moved.
+- It is asked once per account, not once per browser. The admin page shows, for
+  any user, whether and when they agreed.
+- If the record cannot be written the builder still opens, and the person is
+  asked again on their next visit.
+- Files exported from the builder carry the same message, because they travel to
+  people who never saw the notice. The parts list CSV ends with two lines saying
+  it is an estimate, and the DXF has them drawn beside the model on the
+  `SCF_NOTES` layer and written as comments in the file. The wording is
+  `SCAFFOLD_EXPORT_NOTE` in the same file as the notice.
+- The terms of use have a section on the scaffold builder that says the same
+  things at more length.
+
+## Saved work
+
+Beam inputs and the scaffold model are saved in the browser, and copied to the
+signed-in account so they follow the person to another device. The two are saved
+separately: each has its own time on the account, saving one leaves the other
+alone, and a copy more than 30 days old is not handed back. When both the browser
+and the account hold a copy, the newer one is used, judged for that half alone.

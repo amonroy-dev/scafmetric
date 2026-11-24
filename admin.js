@@ -68,6 +68,7 @@ function showUser(user) {
     ['Company', user.account?.company || '—'],
     ['Found us through', user.account?.discovery || '—'],
     ['Account setup', !user.account ? 'Not started' : user.account.profileComplete && user.account.termsAccepted ? 'Complete' : 'Incomplete'],
+    ['Scaffold builder notice', user.account?.scaffoldNotice?.accepted ? `Agreed ${when(user.account.scaffoldNotice.acceptedAt)}` : 'Not agreed yet'],
     ['Billing', paid ? 'Has a Stripe customer record' : 'No Stripe customer'],
     ['Account ID', user.uid],
   ];
