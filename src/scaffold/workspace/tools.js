@@ -25,7 +25,7 @@ import {
   buildPlankPreviewForLedger, computePlankBatchPreview, crossPlankPlacement, plankRunAxis, sameRunAxis,
 } from './planks.js';
 import {
-  buildFaceGraph, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
+  buildFaceGraph, framedFaces, facingOutward, faceKey, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
   bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
 } from './braces.js';
 import { marqueeFromDrag, marqueeHits, combineSelection, flatRectangleCorners, MARQUEE_DRAG_THRESHOLD_PX } from './screenmarquee.js';
@@ -730,7 +730,9 @@ export class Tools {
     const version = this.state.version;
     if (this._faceCache && this._faceCache.version === version) return this._faceCache.faces;
     const standards = [...this.state.standards.values()];
-    const faces = buildFaceGraph(standards);
+    // Sides of the scaffold as it is framed (a ledger between the two
+    // standards, where there are ledgers), each outside one facing out.
+    const faces = facingOutward(framedFaces(buildFaceGraph(standards), this._standardLinks(standards)));
     if (this.state.brackets.size > 1) {
       const nodes = this.state.nodes();
       const tips = new Map();
@@ -739,6 +741,27 @@ export class Tools {
     }
     this._faceCache = { version, faces };
     return faces;
+  }
+
+  /**
+   * Which standards a ledger or truss joins, at any lift: { joined(a, b),
+   * framed(id) } by standard id. A member to a bracket tip joins no two
+   * standards and so does not count.
+   */
+  _standardLinks(standards) {
+    const key = (x, y) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+    const idAt = new Map(standards.map(s => [key(s.x, s.y), s.id]));
+    const pairs = new Set(), framed = new Set();
+    for (const map of [this.state.ledgers, this.state.trusses]) {
+      for (const m of map.values()) {
+        const a = idAt.get(key(m.a[0], m.a[1])), b = idAt.get(key(m.b[0], m.b[1]));
+        if (!a || !b || a === b) continue;
+        pairs.add(faceKey(a, b));
+        framed.add(a);
+        framed.add(b);
+      }
+    }
+    return { joined: (a, b) => pairs.has(faceKey(a, b)), framed: id => framed.has(id) };
   }
 
   /** True when a diagonal already runs between these two points. */

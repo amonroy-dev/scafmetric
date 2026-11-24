@@ -8,6 +8,7 @@ import * as THREE from 'three';
 
 import {
   buildFaceGraph, buildBays, perimeterFaces, isPerimeterFace, planPerimeterBraces, faceKey,
+  framedFaces, facingOutward, MAX_BATCH_BRACES,
 } from '../src/scaffold/workspace/braces.js';
 import {
   bracketRunRow, rosetteAtHeight, alignedBracketDirection, bracketDirections, ROSETTE_LEVEL_TOLERANCE_FT,
@@ -109,6 +110,110 @@ test('SHIFT plans a brace on every perimeter face of the zig-zag', () => {
     standards: standardsOf(s), direction: 'ascending', targetZ: s.liftZ(2), nthBay: 2,
   });
   assert.ok(every2nd.length >= 9 && every2nd.length <= 11, `every second bay, got ${every2nd.length}`);
+});
+
+// --- which way is out, and what is really a bay --------------------------------
+
+/** For each outside face: does its normal point away from the one bay it belongs to? */
+function outwardReport(faces) {
+  const bays = buildBays(faces);
+  return perimeterFaces(faces).map(f => {
+    const own = bays.filter(b => b.faceKeys.includes(faceKey(f.columnIdA, f.columnIdB)));
+    const [mx, my] = midOf(f);
+    return { face: f, out: own.length !== 1 || (mx - own[0].cx) * f.normX + (my - own[0].cy) * f.normY > 0 };
+  });
+}
+/** Seen from outside its face, does a brace rise to the right (+1) or to the left (-1)? */
+function leanSeenFromOutside(target) {
+  const f = target.face;
+  const lo = target.a[2] < target.b[2] ? target.a : target.b, hi = target.a[2] < target.b[2] ? target.b : target.a;
+  // Standing outside and looking at the face, "right" is the outward normal turned a quarter turn.
+  return Math.sign((hi[0] - lo[0]) * f.normY + (hi[1] - lo[1]) * -f.normX);
+}
+
+test('on a zig-zag every outside face is turned to face out, not away from the middle of the job', () => {
+  const s = scaffold(ZIGZAG);
+  const raw = buildFaceGraph(standardsOf(s));
+  const wrong = outwardReport(raw).filter(r => !r.out);
+  assert.ok(wrong.length > 0, 'pointing away from the middle of all the standards gets some faces backwards');
+  // Those are the faces of each run that look across at the other run.
+  assert.ok(wrong.every(r => Math.abs(midOf(r.face)[1]) < 1e-6 || Math.abs(midOf(r.face)[0] - 28) < 1e-6));
+
+  const turned = facingOutward(raw);
+  assert.equal(outwardReport(turned).filter(r => !r.out).length, 0, 'none left facing into its own bay');
+  assert.equal(turned.length, raw.length);
+  assert.equal(perimeterFaces(turned).length, 20, 'and it is still the same twenty faces');
+  // Turning a face keeps it one face: same two standards, ends swapped, normal reversed.
+  for (const [i, f] of turned.entries()) {
+    assert.equal(faceKey(f.columnIdA, f.columnIdB), faceKey(raw[i].columnIdA, raw[i].columnIdB));
+    assert.ok(Math.abs(f.normX - -f.dirY) < 1e-12 && Math.abs(f.normY - f.dirX) < 1e-12, 'the normal is still a quarter turn from the direction');
+  }
+});
+
+test('SHIFT braces lean the same way all round a zig-zag, whichever way they are set to lean', () => {
+  const s = scaffold(ZIGZAG, [0, 4, 8]);
+  const { t } = toolsFor(s);
+  for (const direction of ['ascending', 'descending']) {
+    t.braceDirection = direction;
+    const plan = t._perimeterBracePlan(s.liftZ(2));
+    assert.equal(plan.length, 20);
+    const leans = new Set(plan.map(leanSeenFromOutside));
+    assert.equal(leans.size, 1, `${direction}: seen from outside, every brace leans the same way`);
+  }
+  // And the two settings lean opposite ways from each other.
+  t.braceDirection = 'ascending';
+  const up = leanSeenFromOutside(t._perimeterBracePlan(s.liftZ(2))[0]);
+  t.braceDirection = 'descending';
+  assert.equal(leanSeenFromOutside(t._perimeterBracePlan(s.liftZ(2))[0]), -up);
+});
+
+test('standards that merely stand near each other are not a bay once the scaffold is framed', () => {
+  // Two runs face to face with five feet of open air between them.
+  const points = [];
+  for (let i = 0; i <= 4; i++) for (const y of [-8, -5, 0, 3]) points.push([i * 7, y]);
+  const s = scaffold(points);
+  const { t } = toolsFor(s);
+
+  const near = buildFaceGraph(standardsOf(s));
+  const acrossAir = near.filter(f => Math.abs(f.spanFt - 5) < 1e-6);
+  assert.equal(acrossAir.length, 5, 'each standard of one run stands five feet from one of the other');
+  // Taken as faces, those close false bays between the runs, and the sides
+  // that look at each other read as buried: a fill would leave them open.
+  assert.equal(perimeterFaces(near).filter(f => Math.abs(f.spanFt - 7) < 1e-6).length, 8, 'only the two far sides');
+
+  const faces = t._faces();
+  assert.equal(faces.some(f => Math.abs(f.spanFt - 5) < 1e-6), false, 'no ledger joins them, so there is no face');
+  assert.equal(faces.length, 26);
+  assert.equal(buildBays(faces).length, 8, 'four real bays a run');
+  const plan = t._perimeterBracePlan(s.liftZ(2));
+  assert.equal(plan.length, 20, 'every outside face of both runs, the facing sides included');
+  assert.ok(plan.every(b => Math.abs(b.spanFt - 7) < 1e-6 || Math.abs(b.spanFt - 3) < 1e-6), 'and nothing strung across the gap');
+});
+
+test('bare standards are still paired by standing next to each other', () => {
+  const s = scaffold([[0, 0], [7, 0], [0, 3], [7, 3]], []);
+  assert.equal(s.ledgers.size, 0);
+  const { t } = toolsFor(s);
+  assert.equal(t._faces().length, 4, 'nothing to go on but where they stand');
+
+  // One ledger in: its two standards are framed; the other two are not yet,
+  // so their pairs still count.
+  const z = s.liftZ(4);
+  s.addLedger([0, 0, z], [7, 0, z]);
+  assert.equal(t._faces().length, 4);
+  const links = { joined: (a, b) => false, framed: () => true };
+  assert.equal(framedFaces(buildFaceGraph(standardsOf(s)), links).length, 0, 'all framed and none joined: no faces at all');
+});
+
+test('a long frontage is braced all the way round, not cut off part way', () => {
+  const points = [];
+  for (let i = 0; i <= 90; i++) for (const y of [0, 3]) points.push([i * 7, y]);
+  const s = scaffold(points);
+  const { t } = toolsFor(s);
+  const outside = perimeterFaces(t._faces()).length;
+  assert.equal(outside, 182, '90 bays: 90 faces a side and one at each end');
+  assert.ok(MAX_BATCH_BRACES >= outside);
+  assert.equal(t._perimeterBracePlan(s.liftZ(2)).length, outside);
 });
 
 // --- side brackets along a run ---------------------------------------------

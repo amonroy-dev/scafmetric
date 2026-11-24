@@ -16,7 +16,9 @@ export const PERP_OFFSET_FT = 2.364 / 12;
 // Reject a pair (A,B) when a third standard C lies between them, closer to the
 // line AB than 55% of the span — this is what stops cross-bay diagonals.
 export const ADJACENT_SPAN_FRAC = 0.55;
-export const MAX_BATCH_BRACES = 128;
+// A ceiling on one SHIFT fill, high enough that it never trims a real job. At
+// 128 a long frontage ran out part way round and left bays open without a word.
+export const MAX_BATCH_BRACES = 1024;
 // A diagonal climbs four rosette levels.
 export const BRACE_DELTA_LIFT = 4;
 
@@ -152,6 +154,71 @@ export function buildBays(allFaces) {
   return bays;
 }
 
+/**
+ * Keep the faces that are sides of the scaffold as it is actually framed.
+ *
+ * buildFaceGraph pairs any two standards that stand near enough with nothing
+ * between them. On bare standards that is all there is to go on. Once ledgers
+ * are in it is too generous: two runs standing a few feet apart, or the two
+ * legs of a zig-zag where they pass each other, get "faces" across the open
+ * air between them, and those close false bays that make real outside faces
+ * look buried, so a SHIFT fill skips them.
+ *
+ * So a pair is a face when a ledger joins the two standards at any lift
+ * (`joined`), or when at least one of them has no ledger on it yet (`framed`
+ * is false), in which case standing next to each other is still the only
+ * evidence.
+ */
+export function framedFaces(faces, { joined, framed }) {
+  return faces.filter(f => joined(f.columnIdA, f.columnIdB) || !framed(f.columnIdA) || !framed(f.columnIdB));
+}
+
+/** The same face seen from its other side: its ends swapped, its normal reversed. */
+function turned(f) {
+  return {
+    ...f,
+    columnIdA: f.columnIdB, columnIdB: f.columnIdA,
+    ax: f.bx, ay: f.by, bx: f.ax, by: f.ay,
+    dirX: -f.dirX, dirY: -f.dirY, normX: -f.normX, normY: -f.normY,
+  };
+}
+
+function baysByFace(faces) {
+  const byFace = new Map();
+  for (const bay of buildBays(faces)) {
+    for (const key of bay.faceKeys) {
+      let list = byFace.get(key);
+      if (!list) byFace.set(key, list = []);
+      list.push(bay);
+    }
+  }
+  return byFace;
+}
+
+/**
+ * Turn every face on the outside of the scaffold so that its normal points out
+ * of it.
+ *
+ * buildFaceGraph points each normal away from the middle of all the standards.
+ * That is the outside only while the footprint is convex. On a zig-zag or an
+ * L the middle lies off to one side of some faces, their normals come out
+ * pointing into their own bays, and since a brace climbs from a face's first
+ * standard to its second, those faces are braced leaning the other way from
+ * the rest. A face with exactly one bay has a real outside, the side away from
+ * that bay, and that is what is used here. A face buried between two bays, or
+ * part of none, is left as it was: it has no outside to face.
+ */
+export function facingOutward(faces) {
+  const byFace = baysByFace(faces);
+  return faces.map(f => {
+    const own = byFace.get(faceKey(f.columnIdA, f.columnIdB)) || [];
+    if (own.length !== 1) return f;
+    const midX = (f.ax + f.bx) * 0.5, midY = (f.ay + f.by) * 0.5;
+    const towardBay = (own[0].cx - midX) * f.normX + (own[0].cy - midY) * f.normY;
+    return towardBay > 0 ? turned(f) : f;
+  });
+}
+
 /** True unless one of these bays lies on each side of the face. */
 function openOnOneSide(face, bays) {
   const midX = (face.ax + face.bx) * 0.5, midY = (face.ay + face.by) * 0.5;
@@ -176,14 +243,7 @@ export function isPerimeterFace(face, allFaces, bays = buildBays(allFaces)) {
 }
 
 export function perimeterFaces(faces) {
-  const byFace = new Map();
-  for (const bay of buildBays(faces)) {
-    for (const key of bay.faceKeys) {
-      let list = byFace.get(key);
-      if (!list) byFace.set(key, list = []);
-      list.push(bay);
-    }
-  }
+  const byFace = baysByFace(faces);
   return faces.filter(f => openOnOneSide(f, byFace.get(faceKey(f.columnIdA, f.columnIdB)) || []));
 }
 
