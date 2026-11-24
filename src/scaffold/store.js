@@ -1,7 +1,9 @@
 // Local work-in-progress storage for the beam analysis and the scaffold builder.
 //
-// Saved in this browser only, and kept for RETENTION_DAYS. Nothing is uploaded;
-// anything older than the retention window is dropped on the next read.
+// Saved in this browser and kept for RETENTION_DAYS; anything older than that
+// is dropped on the next read. A signed-in visitor's work is also copied to
+// their account (see "server sync" below), so it follows them to another
+// device.
 
 export const RETENTION_DAYS = 30;
 const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -16,7 +18,7 @@ export const KEYS = {
 };
 
 export const RETENTION_NOTICE =
-  `Your beam inputs and scaffold model are saved in this browser for ${RETENTION_DAYS} days.`;
+  `Your beam inputs and scaffold model are saved in this browser and with your account for ${RETENTION_DAYS} days.`;
 
 function storage() {
   try {
@@ -150,10 +152,18 @@ export async function clearServerWorkspace() {
   }
 }
 
-/** Whichever copy is newer: the local one or the server one. */
-export function pickNewer(local, server) {
+/**
+ * Whichever copy is newer: the local one or the server one.
+ *
+ * `half` says which part is being compared, 'beam' or 'scaffold'. The account
+ * keeps a time for each, because each is saved on its own: judged by the
+ * record's one time, a beam saved a minute ago would make a week-old scaffold
+ * on the account look newer than this morning's on this device.
+ */
+export function pickNewer(local, server, half = null) {
   const l = local?.savedAt ?? 0;
-  const s = server?.updatedAt ? Date.parse(server.updatedAt) : 0;
+  const stamp = (half === 'beam' ? server?.beamUpdatedAt : half === 'scaffold' ? server?.scaffoldUpdatedAt : null) ?? server?.updatedAt;
+  const s = stamp ? Date.parse(stamp) : 0;
   if (!l && !s) return null;
   return s > l ? { source: 'account', savedAt: s, data: server } : { source: 'device', savedAt: l, data: local?.data };
 }

@@ -657,7 +657,7 @@ try {
  // Take the account copy when it is newer than this device's.
  loadServerWorkspace().then(server => {
   if (!server?.beam) return;
-  const winner = pickNewer(saved, server);
+  const winner = pickNewer(saved, server, 'beam');
   if (!winner || winner.source !== 'account') return;
   if (restoreBeamWip(server.beam)) {
    syncUniformLoads(); invalidate(); drawSchematic();
