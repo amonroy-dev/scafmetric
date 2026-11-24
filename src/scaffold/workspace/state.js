@@ -7,15 +7,19 @@ import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK }
 import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
 import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip } from './parts.js';
 import {
-  buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadMemberLoad,
+  buildLiveLoadInstances, resolveLiveLoadPlacement, forEachLiveLoadMemberLoad, forEachStripMemberLoad,
   distributeLedgerPointLoad, liveLoadsByDeck, DEFAULT_BAY_LIVE_LOAD_PSF,
 } from './liveloads.js';
+import { screwJackWeightLb, woodSillWeightLb, baseCollarWeightLb } from './bom.js';
 import { buildPlankDecks, resolvePlankPlacement, plankSeatOffsetFt, deckFrameFromRect, rectDeckRunsAlongX } from './planks.js';
 
 // Real connection spacing on a standard (kept even though rosette hardware is
 // not drawn), so ledger heights land where they actually would.
 export const FIRST_NODE_OFFSET_IN = 15.75;
 export const NODE_SPACING_IN = 19.6875;
+
+// How near a rail's line a standard must stand to be one the rail runs past.
+const RAIL_ON_LINE_FT = 0.05;
 
 const key = (x, y) => `${round(x)},${round(y)}`;
 function round(v, d = 3) { const f = 10 ** d; return Math.round(v * f) / f; }
@@ -232,6 +236,49 @@ export class ScaffoldState {
   }
 
   clearGuardrails() { this._pushHistory(); this.guardrails.clear(); this._emit(); }
+
+  /**
+   * The guardrails as the tubes they really are: [{ id, kind, a, b, lengthFt }].
+   *
+   * A rail round a deck is drawn as one line along each edge, however many
+   * bays that edge runs past, but it is built as one tube between each pair of
+   * standards. Weighing the line as a single 21 ft tube put half of it on each
+   * end leg and none on the legs between, and listed a part nobody makes. The
+   * parts list and the leg loads both read rails from here.
+   */
+  guardrailPieces() {
+    const cols = [...this.standards.values()];
+    const out = [];
+    for (const g of this.guardrails.values()) {
+      const dx = g.b[0] - g.a[0], dy = g.b[1] - g.a[1], dz = g.b[2] - g.a[2];
+      const plan = Math.hypot(dx, dy);
+      const whole = { id: g.id, kind: g.kind, a: g.a, b: g.b, lengthFt: Math.hypot(dx, dy, dz) };
+      // A post stands on one spot; so does anything with no run in plan.
+      if (g.kind === 'post' || plan < 1e-6) { out.push(whole); continue; }
+      const ux = dx / plan, uy = dy / plan;
+      const stops = [0, plan];
+      for (const s of cols) {
+        const ex = s.x - g.a[0], ey = s.y - g.a[1];
+        const t = ex * ux + ey * uy;
+        if (Math.abs(ey * ux - ex * uy) <= RAIL_ON_LINE_FT && t > RAIL_ON_LINE_FT && t < plan - RAIL_ON_LINE_FT) stops.push(t);
+      }
+      stops.sort((p, q) => p - q);
+      const at = t => [g.a[0] + ux * t, g.a[1] + uy * t, g.a[2] + dz * (t / plan)];
+      for (let i = 0; i < stops.length - 1; i++) {
+        if (stops[i + 1] - stops[i] < RAIL_ON_LINE_FT) continue; // two standards on one spot
+        const a = at(stops[i]), b = at(stops[i + 1]);
+        out.push({ id: g.id, kind: g.kind, a, b, lengthFt: Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) });
+      }
+    }
+    return out;
+  }
+
+  /** What stands under every standard: its screw jack, and the collar and sill when they are on. */
+  baseHardwareLb() {
+    return screwJackWeightLb(this.base.jackExtensionIn)
+      + (this.base.showWoodSill ? woodSillWeightLb() : 0)
+      + (this.base.showBaseCollar ? baseCollarWeightLb() : 0);
+  }
 
   // --- per-bay live loads --------------------------------------------------
   // A load is placed on a decked bay and spans one way: along the boards, or
@@ -551,6 +598,19 @@ export class ScaffoldState {
   }
 
   // --- load takeoff --------------------------------------------------------
+  // What each leg delivers to whatever it stands on, dead and live apart.
+  //
+  // Every pound in the parts list reaches a leg, by the path it really takes:
+  //   a standard and its base hardware   straight down its own leg
+  //   a ledger, brace, truss or rail     half to the leg at each end
+  //   a side bracket                     the standard it hangs on
+  //   a plank                            the two ledgers it bears on, then
+  //                                      along each ledger to its legs
+  //   a live load                        the same way as the planks under it,
+  //                                      or across them if it was turned
+  // Ledgers are taken as simple spans between standards, which is what makes
+  // this a tributary takeoff rather than a frame analysis. It is checked
+  // against OpenSees, leg by leg: see verification/opensees.
   takeoff() {
     const perFootStandard = tubeWeightPerFoot(this.components.standard);
     const perFootLedger = tubeWeightPerFoot(this.components.ledger);
@@ -558,8 +618,11 @@ export class ScaffoldState {
     const plankPsf = this.components.plank.areaWeightLbPerFt2;
 
     const legs = new Map();
+    // The jack, collar and sill are on the leg too: they were in the parts
+    // list but not in the leg loads, which read about 14 lb a leg light.
+    const hardwareLb = this.baseHardwareLb();
     for (const s of this.standards.values()) {
-      legs.set(s.id, { id: s.id, x: s.x, y: s.y, deadLb: perFootStandard * this.standardHeightFt(s), liveLb: 0 });
+      legs.set(s.id, { id: s.id, x: s.x, y: s.y, deadLb: perFootStandard * this.standardHeightFt(s) + hardwareLb, liveLb: 0 });
     }
     const byCol = new Map();
     for (const l of legs.values()) byCol.set(key(l.x, l.y), l);
@@ -590,27 +653,35 @@ export class ScaffoldState {
       const w = perFootLedger * trussMemberLengthFt(len, t.family); // every chord, post, tie and diagonal
       attribute(t.a[0], t.a[1], w / 2); attribute(t.b[0], t.b[1], w / 2);
     }
-    for (const g of this.guardrails.values()) {
-      const len = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]);
-      const w = perFootLedger * len;
+    // A rail is a tube between each pair of standards it runs past.
+    for (const g of this.guardrailPieces()) {
+      const w = perFootLedger * g.lengthFt;
       attribute(g.a[0], g.a[1], w / 2); attribute(g.b[0], g.b[1], w / 2);
     }
-    // Deck self weight. A deck brings no live load with it: that is only ever
-    // what was placed on it with the Live load tool.
+    // Deck self weight, board by board: a plank bears on the ledgers at its
+    // two ends and on nothing else, so that is where its weight goes, and from
+    // each ledger to the legs at that ledger's ends. (Sharing a bay's planks
+    // equally among the legs round it is right only for four legs at the
+    // corners; a leg under the middle of a side ledger carries none of them.)
+    // A deck brings no live load with it: that is only ever what was placed on
+    // it with the Live load tool.
     const decks = this.plankBays();
-    for (const p of decks) {
-      const dead = p.areaSqFt * plankPsf;
-      const inside = [...legs.values()].filter(l =>
-        l.x >= p.x0 - 1e-6 && l.x <= p.x1 + 1e-6 && l.y >= p.y0 - 1e-6 && l.y <= p.y1 + 1e-6);
-      const targets = inside.length ? inside : [nearest((p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2)].filter(Boolean);
-      for (const l of targets) l.deadLb += dead / targets.length;
+    const ledgerList = this.ledgerList();
+    for (const deck of decks) {
+      for (const board of deck.boards) {
+        forEachStripMemberLoad(
+          { center: board.center, z: deck.frame.z, span: deck.frame.along, spanFt: board.lengthFt, widthFt: inchesToFeet(board.widthIn), psf: plankPsf },
+          ledgerList,
+          (ledger, point, lb) => distributeLedgerPointLoad(ledger, point, lb, attribute),
+          // A board with no ledger under it still weighs on the nearest leg.
+          (point, lb) => attribute(point.x, point.y, lb));
+      }
     }
 
     // Placed live loads: one-way onto the ledgers either side of the span (as
     // RISA-3D attributes a one-way area load), then each ledger point load
     // split between the legs at its ends.
     let placedLiveLb = 0;
-    const ledgerList = this.ledgerList();
     for (const placement of this.liveLoads.values()) {
       const resolved = resolveLiveLoadPlacement(placement, ledgerList, decks);
       if (!resolved) continue;

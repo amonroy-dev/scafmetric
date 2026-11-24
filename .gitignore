@@ -7,3 +7,6 @@ workspace-private/
 
 # Headless WebGL verification output
 .visual/
+
+# Models and reactions written by the OpenSees check; reference/ is kept
+verification/opensees/out/

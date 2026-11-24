@@ -1,0 +1,77 @@
+{
+ "about": "A beam under the front legs of three-bay-run-braced, solved by OpenSees. Written by run.mjs --save.",
+ "input": {
+  "spanFt": 24,
+  "uniformLoadPlf": 26,
+  "Eksi": 29000,
+  "Iin4": 204,
+  "stiffnessFactor": 0.8,
+  "pointLoads": [
+   {
+    "loadLb": 266.91285470664286,
+    "locationFt": 1.5
+   },
+   {
+    "loadLb": 447.44967186390573,
+    "locationFt": 8.5
+   },
+   {
+    "loadLb": 447.44967186390573,
+    "locationFt": 15.5
+   },
+   {
+    "loadLb": 266.91285470664286,
+    "locationFt": 22.5
+   }
+  ],
+  "stationsFt": [
+   0,
+   1.5,
+   8.5,
+   12,
+   15.5,
+   22.5,
+   24
+  ]
+ },
+ "opensees": "3.8.0",
+ "leftLb": 1026.3625263410843,
+ "rightLb": 1026.3625264170278,
+ "stations": [
+  {
+   "xFt": 0,
+   "momentLbIn": 1.8258106138091534e-10,
+   "deflectionIn": 0
+  },
+  {
+   "xFt": 1.5,
+   "momentLbIn": 18123.525474116384,
+   "deflectionIn": 0.026602761458976908
+  },
+  {
+   "xFt": 8.5,
+   "momentLbIn": 70997.29790129497,
+   "deflectionIn": 0.12121202481433418
+  },
+  {
+   "xFt": 12,
+   "momentLbIn": 72908.29790006616,
+   "deflectionIn": 0.1347397888752917
+  },
+  {
+   "xFt": 15.5,
+   "momentLbIn": 70997.29789970633,
+   "deflectionIn": 0.12121202481427587
+  },
+  {
+   "xFt": 22.5,
+   "momentLbIn": 18123.525475531256,
+   "deflectionIn": 0.026602761459214013
+  },
+  {
+   "xFt": 24,
+   "momentLbIn": 8.667484507896006e-10,
+   "deflectionIn": 0
+  }
+ ]
+}

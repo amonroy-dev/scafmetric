@@ -122,11 +122,13 @@ export function deriveBom(state) {
     }
   }
   if (state.guardrails) {
-    for (const g of state.guardrails.values()) {
-      const len = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]);
+    // One tube between each pair of standards a rail runs past, and weighed as
+    // the ledger tube a rail is: the same pieces and weight the leg loads use.
+    for (const g of state.guardrailPieces()) {
+      const len = g.lengthFt;
       const label = g.kind === 'post' ? 'Guardrail post' : 'Guardrail rail';
       add('Guardrails', `${g.kind}${sizeKey(len)}`, `${label} · ${formatFeetInches(len)}`,
-        1, tubeWeightPerFoot(state.components.brace) * len);
+        1, perFootLedger * len);
     }
   }
   if (state.brackets) {

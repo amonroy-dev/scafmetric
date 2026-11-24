@@ -329,6 +329,19 @@ function mergeCuts(cuts) {
 }
 
 /**
+ * A strip of deck carrying `psf` over its own footprint, handed to the ledgers
+ * it bears on: a plank and its own weight, say. `center` is [x, y], `span` the
+ * unit vector it runs along, `spanFt` its length that way and `widthFt` its
+ * width. The same one-way attribution a live load gets, so a board's weight
+ * and the load standing on it reach the same legs.
+ */
+export function forEachStripMemberLoad({ center, z, span, spanFt, widthFt, psf }, ledgers, onMember, onUnsupported = () => {}) {
+  forEachLiveLoadMemberLoad(
+    { placement: { psf }, span, z, center, widthFt: spanFt, lengthFt: widthFt },
+    ledgers, onMember, onUnsupported);
+}
+
+/**
  * Split a point load on a ledger between the legs at its two ends, as a simply
  * supported span. `addAt(x, y, lb)` receives each reaction in plan position.
  */
