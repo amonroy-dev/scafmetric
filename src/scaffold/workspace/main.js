@@ -20,7 +20,7 @@ import { buildSideBracket, buildTruss, buildStairFlight, GUARDRAIL_OD_IN, SHARED
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
-import { buildBuildingMeshes, buildingTopFt } from './buildings.js';
+import { buildBuildingMeshes, buildingTopFt, asRect } from './buildings.js';
 import { UnderlayLayer, readUnderlayFile, sheetWidthFt, UNDERLAY_DEFAULTS } from './underlay.js';
 
 // Line icons, 20px grid, drawn in currentColor.
@@ -160,13 +160,13 @@ const TEMPLATE = `
           <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
           <div data-for="building">
             <div class="sfw-grid2">
-              <label>Shape<select id="sfw-bldg-shape"><option value="" hidden>Choose</option><option value="rect">Rectangle</option><option value="round">Round</option><option value="outline">Trace</option></select></label>
+              <label data-bldg="new">Shape<select id="sfw-bldg-shape"><option value="" hidden>Choose</option><option value="rect">Rectangle</option><option value="round">Round</option><option value="outline">Trace</option></select></label>
               <label data-bldg="rect round">Roof<select id="sfw-bldg-roof"><option value="flat">Flat</option><option value="gable">Gable</option><option value="hip">Hip</option><option value="shed">Shed</option><option value="cone">Cone</option><option value="dome">Dome</option></select></label>
               <label data-bldg="roofed">Roof rise<span class="sfw-u"><input type="number" id="sfw-bldg-rise" min="0" step="any" value="6"><i>ft</i></span></label>
               <label data-bldg="roofed">Overhang<span class="sfw-u"><input type="number" id="sfw-bldg-over" min="0" step="any" value="0"><i>ft</i></span></label>
               <label data-bldg="ridged">Ridge<select id="sfw-bldg-ridge"><option value="">Long side</option><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
               <label data-bldg="any">Raised<span class="sfw-u"><input type="number" id="sfw-bldg-raise" min="0" step="any" value="0" title="Lifted off what it stands on: a balcony or a canopy. 0 to stand on the ground or the roof under it."><i>ft</i></span></label>
-              <label data-bldg="round">Hollow radius<span class="sfw-u"><input type="number" id="sfw-bldg-inner" min="0" step="any" value="0" title="For a round building: the radius of an open middle. 0 for none."><i>ft</i></span></label>
+              <label data-bldg="newround">Hollow radius<span class="sfw-u"><input type="number" id="sfw-bldg-inner" min="0" step="any" value="0" title="For a round building: the radius of an open middle. 0 for none."><i>ft</i></span></label>
               <label data-bldg="flatroof">Parapet<span class="sfw-u"><input type="number" id="sfw-bldg-par" min="0" step="any" value="0"><i>ft</i></span></label>
               <label data-bldg="any">Height<span class="sfw-u"><input type="number" id="sfw-bldg-h" min="1" step="any" value="${BUILDING_DEFAULTS.heightFt}"><i>ft</i></span></label>
               <label data-bldg="any">Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
@@ -706,6 +706,12 @@ class Workspace {
     for (const o of this.$('sfw-cat').options) o.hidden = CATEGORY_TOOL[o.value] !== 'truss';
     // Picking the Live load tool puts its loads back along the planks.
     this.$('sfw-load-dir').value = this.tools?.liveLoadAcross ? 'across' : 'along';
+    // The Building card starts over each time the tool is picked: the shape first, nothing else.
+    if (name === 'building') {
+      this.tools.buildingSettings.shape = '';
+      this.$('sfw-bldg-shape').value = '';
+    }
+    this._syncBuildingEdit();
     // The block card comes up with the Block tool, as ScaffoldPro's does.
     const card = this.$('sfw-blockcard');
     if (card) {
@@ -1125,6 +1131,8 @@ class Workspace {
     this._refreshTakeoff();
     this._updateCounts();
     this._refreshBom();
+    // What is selected may have just been changed: its card says what it is now.
+    if (this.selection.length) this._refreshProps();
     this._persist();
   }
 
@@ -1272,6 +1280,7 @@ class Workspace {
     const ids = this.selection;
     // With Select in hand the card comes and goes with the selection.
     if (this.tools?.tool === 'select') this.$('sfw-toolcard').hidden = !ids.length;
+    this._syncBuildingEdit();
     if (!ids.length) { el.innerHTML = ''; return; }
     if (ids.length > 1) {
       const kinds = {};
@@ -1724,17 +1733,44 @@ class Workspace {
    */
   _syncBuildingFields() {
     const k = this.tools.buildingSettings;
-    const shape = k.shape;
+    // A building being changed has the shape it was drawn with.
+    const editing = this._editingBuilding ? this.state.buildings.get(this._editingBuilding) : null;
+    const shape = editing ? (editing.round ? 'round' : asRect(editing.points) ? 'rect' : 'outline') : k.shape;
     const roofs = shape === 'rect' ? ['flat', 'gable', 'hip', 'shed'] : shape === 'round' ? ['flat', 'cone', 'dome'] : ['flat'];
     const roof = this.$('sfw-bldg-roof');
     if (!roofs.includes(k.roofType)) { k.roofType = 'flat'; roof.value = 'flat'; }
     for (const o of roof.options) o.hidden = !roofs.includes(o.value);
     const roofed = k.roofType !== 'flat';
     const show = {
+      new: !editing, newround: !editing && shape === 'round',
       any: !!shape, rect: shape === 'rect', round: shape === 'round',
       roofed: !!shape && roofed, ridged: shape === 'rect' && roofed, flatroof: !!shape && !roofed,
     };
     for (const el of this.root.querySelectorAll('#sfw-toolcard [data-bldg]')) el.hidden = !el.dataset.bldg.split(' ').some(key => show[key]);
+  }
+
+  /**
+   * With Select in hand and one building selected, the Select card carries
+   * that building's own settings (all but its shape), filled in from it, and
+   * changing one changes the building.
+   */
+  _syncBuildingEdit() {
+    const fields = this.root.querySelector('#sfw-toolcard [data-for="building"]');
+    if (!fields || !this.tools) return;
+    const tool = this.tools.tool;
+    const id = tool === 'select' && this.selection.length === 1 && this.state.buildings.has(this.selection[0]) ? this.selection[0] : null;
+    if (tool === 'select') fields.hidden = !id;
+    if (id && id !== this._editingBuilding) {
+      const b = this.state.buildings.get(id), k = this.tools.buildingSettings;
+      Object.assign(k, {
+        heightFt: b.heightFt, roofType: b.roof ? b.roof.type : 'flat', riseFt: b.roof ? b.roof.riseFt : k.riseFt,
+        overhangFt: b.roof ? b.roof.overhangFt || 0 : 0, ridge: (b.roof && b.roof.ridge) || '', parapetFt: b.parapetFt || 0, raisedFt: b.raisedFt || 0,
+      });
+      for (const [field, value] of [['sfw-bldg-h', k.heightFt], ['sfw-bldg-roof', k.roofType], ['sfw-bldg-rise', k.riseFt], ['sfw-bldg-over', k.overhangFt],
+        ['sfw-bldg-ridge', k.ridge], ['sfw-bldg-par', k.parapetFt], ['sfw-bldg-raise', k.raisedFt]]) this.$(field).value = String(value);
+    }
+    this._editingBuilding = id;
+    this._syncBuildingFields();
   }
 
   _syncBuildingCard() {
