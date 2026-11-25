@@ -199,8 +199,13 @@ export function buildStairFlight(f, material) {
   const n = Math.max(0, Math.round(f.treads || 0));
   for (let k = 1; k <= n; k++) {
     const t = k / (n + 1);
-    const p = i => [f.lower[i][0] + (f.upper[i][0] - f.lower[i][0]) * t, f.lower[i][1] + (f.upper[i][1] - f.lower[i][1]) * t];
-    const a = p(0), b = p(1);
+    // A tread runs from the inside face of one stringer to the inside face of the other, and no further.
+    const lines = stairStringerLines(f);
+    const on = i => [lines[i][0][0] + (lines[i][1][0] - lines[i][0][0]) * t, lines[i][0][1] + (lines[i][1][1] - lines[i][0][1]) * t];
+    const c0 = on(0), c1 = on(1);
+    const gap = Math.hypot(c1[0] - c0[0], c1[1] - c0[1]) || 1, halfWidth = inchesToFeet(STRINGER_WIDTH_IN) / 2;
+    const ix = ((c1[0] - c0[0]) / gap) * halfWidth, iy = ((c1[1] - c0[1]) / gap) * halfWidth;
+    const a = [c0[0] + ix, c0[1] + iy], b = [c1[0] - ix, c1[1] - iy];
     const run = Math.hypot(f.upper[0][0] - f.lower[0][0], f.upper[0][1] - f.lower[0][1]) || 1;
     const half = 0.4; // a tread is about 10 in from front to back
     const rx = ((f.upper[0][0] - f.lower[0][0]) / run) * half, ry = ((f.upper[0][1] - f.lower[0][1]) / run) * half;

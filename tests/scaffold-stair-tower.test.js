@@ -96,6 +96,46 @@ test('the landings are railed on their outer sides and open where the flights co
   assert.equal(s.plankBays().every(d => d.stair), true);
 });
 
+test('the standards stop where they are needed: rail height at the top landing, the last ledgers at the other end', () => {
+  for (const [heightFt, topEnd] of [[14.5, -1], [8, 1]]) { // two flights end at the left, one at the right
+    const { s } = place(heightFt);
+    const flights = s.stairs.size;
+    const topLanding = flights * 4;
+    for (const c of s.standards.values()) {
+      const top = s.standardLifts(c);
+      if (Math.sign(c.x) === topEnd) assert.ok(top >= topLanding + 2 && top <= topLanding + 3, `at the top landing a standard reaches its rails: lift ${top}`);
+      else assert.equal(top, topLanding, 'at the other end it stops at the last ledgers, with nothing standing up past them');
+    }
+    // Every ledger and brace still ends on a rosette its standard has.
+    const tops = new Map([...s.standards.values()].map(c => [`${c.x},${c.y}`, s.standardTopZ(c)]));
+    const near = p => { let best = null; for (const c of s.standards.values()) { const d = Math.hypot(c.x - p[0], c.y - p[1]); if (!best || d < best.d) best = { d, c }; } return best.c; };
+    for (const m of [...s.ledgers.values(), ...s.braces.values()]) for (const p of [m.a, m.b]) {
+      const c = near(p);
+      assert.ok(p[2] <= tops.get(`${c.x},${c.y}`) + 1e-6, `a member at ${p[2].toFixed(2)} ft is above the top of its standard`);
+    }
+  }
+});
+
+test('handrails hang inside the tower, and treads stop at the inside faces of the stringers', async () => {
+  const { s } = place();
+  // Every handrail diagonal is set off its face toward the flight it guards: none is outside the 7 ft width.
+  const rails = [...s.braces.values()].filter(b => Math.abs(b.a[1] - b.b[1]) < 1e-6);
+  assert.equal(rails.length, 8);
+  for (const b of rails) assert.ok(Math.abs(b.a[1]) < 3.5, `a handrail at y = ${b.a[1]} is outside the tower`);
+  const { buildStairFlight, stairStringerLines, STRINGER_WIDTH_IN } = await import('../src/scaffold/workspace/parts.js');
+  const f = [...s.stairs.values()][0];
+  const meshes = buildStairFlight(f, null);
+  const [l0, l1] = stairStringerLines(f);
+  const inner = [Math.min(l0[0][1], l1[0][1]) + STRINGER_WIDTH_IN / 24, Math.max(l0[0][1], l1[0][1]) - STRINGER_WIDTH_IN / 24];
+  const treads = meshes.slice(2);
+  assert.equal(treads.length, 9);
+  for (const t of treads) {
+    const lo = t.position.y - t.scale.y / 2, hi = t.position.y + t.scale.y / 2;
+    assert.ok(lo >= inner[0] - 1e-6 && hi <= inner[1] + 1e-6, `a tread from ${lo} to ${hi} runs past a stringer (${inner})`);
+    assert.ok(Math.abs(lo - inner[0]) < 1e-6 && Math.abs(hi - inner[1]) < 1e-6, 'and it reaches both');
+  }
+});
+
 test('turned a quarter turn it stands 7 ft wide and 14 ft deep, and placing it twice adds nothing', () => {
   const { s, tools } = place(14.5, { x: 0, y: 0 }, 1);
   const xs = [...s.standards.values()].map(c => c.x), ys = [...s.standards.values()].map(c => c.y);

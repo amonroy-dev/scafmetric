@@ -712,7 +712,9 @@ export const STAIR_DEFAULTS = { heightFt: 14.5 };
  *   rails      ledgers one and two rosettes above each landing, round its
  *              three outer sides; and across the half of the top landing no
  *              flight leaves from
- *   standards  two rosettes above the top landing, picked to that height
+ *   standards  at the top landing's end, two rosettes above it for its rails;
+ *              at the other end only up to the last ledgers, at the landing's
+ *              own height, so that nothing stands up past them with nothing on it
  */
 export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardLengthsFt }) {
   const T = STAIR_TOWER;
@@ -729,9 +731,12 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
   const halfL = T.lengthFt / 2, halfW = T.widthFt / 2, inner = halfL - T.landingFt;
   const xs = [-halfL, -inner, inner, halfL];
   const ys = [-halfW, 0, halfW];
+  // The top landing is at the left-hand end after an even number of flights.
+  const topEnd = flightCount % 2 === 0 ? -1 : 1;
   const standards = [];
-  for (const y of [-halfW, halfW]) for (const x of xs) standards.push({ x, y });
-  standards.push({ x: -inner, y: 0 }, { x: inner, y: 0 });
+  const stand = (x, y) => standards.push({ x, y, requiredLift: Math.sign(x) === topEnd ? requiredLift : topLanding });
+  for (const y of [-halfW, halfW]) for (const x of xs) stand(x, y);
+  stand(-inner, 0); stand(inner, 0);
 
   const ledgers = [];
   const ledger = (ax, ay, bx, by, lift) => ledgers.push({ a: { x: ax, y: ay }, b: { x: bx, y: by }, lift });
@@ -770,7 +775,8 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
       lift, toLift: lift + T.flightLifts, treads: T.treadsPerFlight,
     });
     for (const up of [1, 2]) {
-      braces.push({ a: { x: from, y: side * halfW }, b: { x: to, y: side * halfW }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: side } });
+      // The outer handrail is hung on the inside of its standards, toward the flight, as the middle one is.
+      braces.push({ a: { x: from, y: side * halfW }, b: { x: to, y: side * halfW }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: -side } });
       braces.push({ a: { x: from, y: 0 }, b: { x: to, y: 0 }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: side } });
     }
   });

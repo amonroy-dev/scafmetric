@@ -1989,7 +1989,7 @@ export class Tools {
       z0: s.liftZ(f.lift), z1: s.liftZ(f.toLift), treads: f.treads,
     }));
     return {
-      standards: plan.standards.map(at),
+      standards: plan.standards.map(o => ({ ...at(o), requiredLift: o.requiredLift })),
       ledgers: plan.ledgers.map(l => ({ a: xyz(l.a, l.lift), b: xyz(l.b, l.lift), lift: l.lift })),
       braces, decks, corners, flights,
     };
@@ -2023,14 +2023,16 @@ export class Tools {
       for (const [i, p] of w.standards.entries()) {
         const existing = s.standardAt(p.x, p.y);
         if (!existing) {
-          const need = plan.requiredLift - (firsts[i] - 1);
+          // (A stair tower asks less of the standards at the end its top landing is not at.)
+          const top = p.requiredLift ?? plan.requiredLift;
+          const need = top - (firsts[i] - 1);
           if (need < 1) continue; // the roof is above the top of the block here
-          const segments = firsts[i] > 1 ? planStandardSegmentsForLift(need, lengths) : plan.segments;
+          const segments = firsts[i] > 1 || top !== plan.requiredLift ? planStandardSegmentsForLift(need, lengths) : plan.segments;
           for (const len of segments) s.addStandard(p.x, p.y, len, { exact: true });
           added++;
           continue;
         }
-        const short = plan.requiredLift - s.standardLifts(existing);
+        const short = (p.requiredLift ?? plan.requiredLift) - s.standardLifts(existing);
         if (short > 0) for (const len of planStandardSegmentsForLift(short, lengths)) s.addStandard(p.x, p.y, len, { exact: true });
       }
       const ledgerKeys = new Set([...s.ledgers.values()].map(l => segmentKey(l.a, l.b)));
@@ -2072,7 +2074,11 @@ export class Tools {
     const base = s.baseOffsetFt();
     const top = base + placement.plan.segments.reduce((a, b) => a + b, 0);
     const meshes = [];
-    for (const p of w.standards) meshes.push(verticalTube(p.x, p.y, base, top, STANDARD_TUBE_OD_IN, mat));
+    // (A stair tower's standards away from its top landing stop at the last ledgers.)
+    for (const p of w.standards) {
+      const short = p.requiredLift !== undefined && p.requiredLift < placement.plan.requiredLift;
+      meshes.push(verticalTube(p.x, p.y, base, short ? Math.min(top, s.liftZ(p.requiredLift) + 0.3) : top, STANDARD_TUBE_OD_IN, mat));
+    }
     for (const l of w.ledgers) meshes.push(tubeBetween(l.a, l.b, 1.9, mat));
     for (const b of w.braces) meshes.push(tubeBetween(b.a, b.b, 1.69, mat));
     for (const d of w.decks) {
