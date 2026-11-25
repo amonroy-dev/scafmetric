@@ -20,6 +20,7 @@ import { buildSideBracket, buildTruss, buildStairFlight, GUARDRAIL_OD_IN, SHARED
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
+import { buildBuildingMeshes, buildingTopFt } from './buildings.js';
 import { UnderlayLayer, readUnderlayFile, sheetWidthFt, UNDERLAY_DEFAULTS } from './underlay.js';
 
 // Line icons, 20px grid, drawn in currentColor.
@@ -65,6 +66,7 @@ const TOOL_META = {
 const OFF_TOLERANCE_FT = 0.5;
 // A building is a pale mass the scaffold reads against.
 const BUILDING_MASS = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, transparent: true, opacity: 0.55, roughness: 0.9, metalness: 0, depthWrite: false });
+const BUILDING_ROOF = new THREE.MeshStandardMaterial({ color: 0xa1a1aa, transparent: true, opacity: 0.7, roughness: 0.9, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
 
 // Send to beam, as drawn. The beam is a flat bar on the ground under the legs
 // picked for it, drawn over the model (no depth test) so that it shows from
@@ -158,6 +160,14 @@ const TEMPLATE = `
           <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
           <div data-for="building">
             <div class="sfw-grid2">
+              <label>Shape<select id="sfw-bldg-shape"><option value="outline">Outline</option><option value="rect">Rectangle</option><option value="round">Round</option></select></label>
+              <label>Roof<select id="sfw-bldg-roof"><option value="flat">Flat</option><option value="gable">Gable</option><option value="hip">Hip</option><option value="shed">Shed</option><option value="cone">Cone</option><option value="dome">Dome</option></select></label>
+              <label>Roof rise<span class="sfw-u"><input type="number" id="sfw-bldg-rise" min="0" step="any" value="6"><i>ft</i></span></label>
+              <label>Overhang<span class="sfw-u"><input type="number" id="sfw-bldg-over" min="0" step="any" value="0"><i>ft</i></span></label>
+              <label>Ridge<select id="sfw-bldg-ridge"><option value="">Long side</option><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
+              <label>Raised<span class="sfw-u"><input type="number" id="sfw-bldg-raise" min="0" step="any" value="0" title="Lifted off what it stands on: a balcony or a canopy. 0 to stand on the ground or the roof under it."><i>ft</i></span></label>
+              <label>Hollow radius<span class="sfw-u"><input type="number" id="sfw-bldg-inner" min="0" step="any" value="0" title="For a round building: the radius of an open middle. 0 for none."><i>ft</i></span></label>
+              <label>Parapet<span class="sfw-u"><input type="number" id="sfw-bldg-par" min="0" step="any" value="0"><i>ft</i></span></label>
               <label>Height<span class="sfw-u"><input type="number" id="sfw-bldg-h" min="1" step="any" value="${BUILDING_DEFAULTS.heightFt}"><i>ft</i></span></label>
               <label>Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
             </div>
@@ -504,6 +514,11 @@ class Workspace {
           : !n ? 'Nothing to take: the last bay stays.'
           : `${done > 0 ? 'Added' : 'Took away'} ${n} bay${n === 1 ? '' : 's'} (${round(n * depthFt, 2)} ft).${n < Math.abs(asked) ? ' That is as far as it goes.' : ''} Ctrl+Z takes it back.`;
       },
+      onWallMoved: (done, byFt) => {
+        this.$('sfw-hint').textContent = !byFt ? '' : done
+          ? `Wall moved ${byFt > 0 ? 'out' : 'in'} ${round(Math.abs(byFt), 2)} ft. Ctrl+Z takes it back.`
+          : 'That would leave the building with a wall under a foot long.';
+      },
       onChainSelected: ids => {
         const n = ids.filter(id => this.state.standards.has(id)).length;
         this.$('sfw-hint').textContent = `Whole chain selected: ${n} standard${n === 1 ? '' : 's'} and everything on them. Move or Copy picks it up.`;
@@ -801,13 +816,51 @@ class Workspace {
       // The sockets that can take a standard light up, as rosettes do for the other tools.
       this._rebuildNodes();
     });
+    // The card sets the next building traced, and changes the one selected.
+    const selectedBuilding = () => this.selection.find(id => this.state.buildings.has(id)) || null;
+    const roofNow = () => this.tools._buildingExtras().roof;
+    for (const [id, key, isNumber] of [['sfw-bldg-over', 'overhangFt', true], ['sfw-bldg-ridge', 'ridge', false]]) {
+      this.$(id).addEventListener('change', e => {
+        this.tools.buildingSettings[key] = isNumber ? Math.max(0, Number(e.target.value) || 0) : e.target.value;
+        const picked = selectedBuilding();
+        if (picked) this.state.updateBuilding(picked, { roof: roofNow() });
+      });
+    }
+    this.$('sfw-bldg-raise').addEventListener('change', e => {
+      this.tools.buildingSettings.raisedFt = Math.max(0, Number(e.target.value) || 0);
+      const picked = selectedBuilding();
+      if (picked) this.state.updateBuilding(picked, { raisedFt: this.tools.buildingSettings.raisedFt });
+    });
+    this.$('sfw-bldg-inner').addEventListener('change', e => { this.tools.buildingSettings.innerRadiusFt = Math.max(0, Number(e.target.value) || 0); });
+    this.$('sfw-bldg-shape').addEventListener('change', e => { this.tools.buildingSettings.shape = e.target.value; this.tools.outline = []; this.tools._refreshGhost(); });
+    this.$('sfw-bldg-roof').addEventListener('change', e => {
+      this.tools.buildingSettings.roofType = e.target.value;
+      const id = selectedBuilding();
+      if (id) this.state.updateBuilding(id, { roof: roofNow() });
+    });
+    this.$('sfw-bldg-rise').addEventListener('change', e => {
+      this.tools.buildingSettings.riseFt = Math.max(0, Number(e.target.value) || 0);
+      const id = selectedBuilding();
+      if (id) this.state.updateBuilding(id, { roof: roofNow() });
+    });
+    this.$('sfw-bldg-par').addEventListener('change', e => {
+      this.tools.buildingSettings.parapetFt = Math.max(0, Number(e.target.value) || 0);
+      const id = selectedBuilding();
+      if (id) this.state.updateBuilding(id, { parapetFt: this.tools.buildingSettings.parapetFt });
+    });
+    this.$('sfw-bldg-h').addEventListener('change', e => {
+      const id = selectedBuilding();
+      if (id) this.state.updateBuilding(id, { heightFt: Math.max(1, Number(e.target.value) || BUILDING_DEFAULTS.heightFt) });
+    });
     this.$('sfw-bldg-h').addEventListener('input', e => { this.tools.buildingSettings.heightFt = Math.max(1, Number(e.target.value) || BUILDING_DEFAULTS.heightFt); });
     this.$('sfw-bldg-off').addEventListener('input', e => { this.tools.buildingSettings.wallDistanceFt = Math.max(0, Number(e.target.value) || 0); });
     this.$('sfw-bldg-auto').addEventListener('click', () => {
       const id = this._buildingInHand();
       const done = id ? this.tools.scaffoldRoundBuilding(id) : null;
       if (!done) return;
-      this.$('sfw-hint').textContent = `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.` +
+      this.$('sfw-hint').textContent = (done.round
+        ? `Scaffold laid round the building: ${done.blocks} bays in a ring, its depth and levels set by the Block card.`
+        : `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.`) +
         (done.skipped ? ` ${done.skipped} wall${done.skipped === 1 ? ' is' : 's are'} not square to the grid and got none.` : '') + ' Ctrl+Z takes it back.';
     });
     this.$('sfw-stair-h').addEventListener('input', e => {
@@ -867,11 +920,23 @@ class Workspace {
         : `Click to deck this bay${info.crossed ? ', boards turned with R' : ''}. R turns the boards; SHIFT decks the whole run.`;
       return;
     }
+    if (tool === 'wall') {
+      hint.textContent = !info.held ? 'Drag the arrow to move this wall in or out.'
+        : !count ? 'Drag out or in to move the wall.'
+        : `Move the wall ${count > 0 ? 'out' : 'in'} ${round(Math.abs(count), 2)} ft. Let go to do it.`;
+      return;
+    }
     if (tool === 'pull') {
       const n = Math.abs(count);
       hint.textContent = !info.held ? 'Drag the arrow to make the scaffold longer or shorter, a bay at a time.'
         : !n ? 'Drag out to add bays, in to take them away.'
         : `${count > 0 ? 'Add' : 'Take away'} ${n} bay${n === 1 ? '' : 's'} (${round(n * info.depthFt, 2)} ft). Let go to do it.`;
+      return;
+    }
+    if (tool === 'building' && info.shape !== 'outline') {
+      hint.textContent = info.shape === 'round'
+        ? (!count ? 'Click the centre of the building.' : `Radius ${round(info.lengthFt, 2)} ft. Click to set the wall.`)
+        : (!count ? 'Click one corner of the building.' : 'Click the opposite corner.');
       return;
     }
     if (tool === 'building') {
@@ -1026,7 +1091,17 @@ class Workspace {
 
   _modelBox() {
     const b = stateBounds(this.state);
-    return b ? new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)) : null;
+    const box = b ? new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max)) : null;
+    // Buildings are part of what there is to look at.
+    let all = box;
+    for (const h of this.state.buildings.values()) {
+      const z0 = this.state.buildingBaseZ(h);
+      for (const p of h.points) for (const z of [z0, z0 + buildingTopFt(h)]) {
+        if (!all) all = new THREE.Box3();
+        all.expandByPoint(new THREE.Vector3(p[0], p[1], z));
+      }
+    }
+    return all;
   }
 
   _frame() {
@@ -1079,8 +1154,8 @@ class Workspace {
       const mat = this._matFor(s.id, MATERIALS.steel);
       // A base under each leg. A standard seated in a side bracket has none.
       const { meshes } = s.leg ? buildBaseAssembly({
-        x: s.x, y: s.y, groundZ: 0,
-        jackExtensionIn: this.state.base.jackExtensionIn,
+        x: s.x, y: s.y, groundZ: s.supportZ,
+        jackExtensionIn: this.state.base.jackExtensionIn + s.jackExtraIn,
         showWoodSill: this.state.base.showWoodSill,
         showBaseCollar: this.state.base.showBaseCollar,
         material: mat === MATERIALS.steel ? null : mat,
@@ -1109,10 +1184,11 @@ class Workspace {
       for (const m of buildTruss(t.a, t.b, mat, t.family)) add(m, { id: t.id, kind: 'truss' });
     }
     for (const b of g.buildings || []) {
-      const shape = new THREE.Shape(b.points.map(p => new THREE.Vector2(p[0], p[1])));
-      const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: b.heightFt, bevelEnabled: false }), this.selection.includes(b.id) ? MATERIALS.selected : BUILDING_MASS);
-      mesh.userData = { id: b.id, kind: 'building', ownsGeometry: true };
-      this._buildingMeshes.push(mesh);
+      const picked = this.selection.includes(b.id);
+      for (const mesh of buildBuildingMeshes(b, picked ? MATERIALS.selected : BUILDING_MASS, picked ? MATERIALS.selected : BUILDING_ROOF)) {
+        mesh.userData = { id: b.id, kind: 'building', ownsGeometry: true };
+        this._buildingMeshes.push(mesh);
+      }
     }
     for (const f of g.stairs || []) {
       const mat = this._matFor(f.id, MATERIALS.ledger);
@@ -1226,7 +1302,17 @@ class Workspace {
   _describe(id) {
     const r = v => Math.round(v * 100) / 100;
     const bldg = this.state.buildings.get(id);
-    if (bldg) return [['Type', 'Building'], ['Height', `${r(bldg.heightFt)} ft`], ['Walls', String(bldg.points.length)]];
+    if (bldg) {
+      const foot = this.state.buildingBaseZ(bldg);
+      const rows = [['Type', bldg.round ? (bldg.round.innerRadiusFt ? 'Ring building' : 'Round building') : 'Building'], ['Wall height', `${r(bldg.heightFt)} ft`]];
+      if (bldg.raisedFt) rows.push(['Raised', `${r(bldg.raisedFt)} ft`]);
+      if (foot - (bldg.raisedFt || 0) > 0) rows.push(['Stands on a roof at', `${r(foot - (bldg.raisedFt || 0))} ft`]);
+      if (bldg.round) rows.push(['Radius', `${r(bldg.round.radiusFt)} ft`]); else rows.push(['Walls', String(bldg.points.length)]);
+      if (bldg.roof) rows.push(['Roof', `${bldg.roof.type}, ${r(bldg.roof.riseFt)} ft rise`]);
+      if (bldg.parapetFt) rows.push(['Parapet', `${r(bldg.parapetFt)} ft`]);
+      rows.push(['Top', `${r(foot + buildingTopFt(bldg))} ft`]);
+      return rows;
+    }
     const flight = this.state.stairs.get(id);
     if (flight) {
       return [['Type', 'Stair flight'], ['Rise', `${r(flight.z1 - flight.z0)} ft`], ['Treads', String(flight.treads || 0)],

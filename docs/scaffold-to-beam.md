@@ -210,6 +210,27 @@ corner, or Enter, closes it into a building of the height in the card. A
 building is drawn as a pale mass. It carries nothing and weighs nothing: it is
 there to build against.
 
+- **Shape.** Outline (corner by corner), Rectangle (two opposite corners) or
+  Round (the centre, then a point on the wall; drawn as 48 straight walls).
+- **Roof** on a rectangle: flat, gable, hip or shed, with a rise; the ridge runs
+  along the longer side. **Parapet** is a height of wall above a flat roof.
+  These are drawn only (`src/scaffold/workspace/buildings.js`).
+- A round building takes a **cone** or a **dome**. **Overhang** carries the
+  eaves of any roof out, and **Ridge** turns a gable, hip or shed. **Hollow
+  radius** makes a round building a ring with an open middle.
+- A building drawn on another's flat roof stands on it: a penthouse, a setback
+  (`buildingBaseZ`). Its Height is its own, above that roof. Scaffold round it
+  stands on the roof below and is decked under its top.
+- **Raised** lifts a building off what it stands on: a balcony or a canopy on
+  the side of another. A raised one is not stood on, and a leg under it stands
+  on whatever is below.
+- With a building selected in Select, each wall that is square to the grid
+  shows an arrow as the pointer comes near; dragged, it moves that wall in or
+  out a foot at a time and the walls either side follow (`moveBuildingWall`).
+  A building picked up on its own snaps corner to corner with one that stays.
+- With a building selected, the card's Height, Roof, Roof rise and Parapet
+  change that building. Move and Copy pick a building up like a chain, held by
+  a corner, and R turns it.
 - **Standing off a wall.** A block or stair tower placed beside a wall that is
   square to the grid stands off it by **Scaffold off wall** (`snapToWall` in
   `src/scaffold/workspace/planning.js`). Joining standards already there comes
@@ -226,6 +247,36 @@ there to build against.
 - The face of that scaffold that looks at the wall gets no rails, then or when
   a later block re-lays the rails round that deck height. The outside face and
   the ends are railed as any block's.
+
+## Legs that stand on a building
+
+As ScaffoldPro's support-aware legs: the scaffold stays level and every rosette
+stays on the same heights whatever is under a leg.
+
+- A leg over a building with a flat roof stands on the roof
+  (`supportZAt`, `firstLiftAt` in `src/scaffold/workspace/state.js`). A pitched
+  roof is not stood on, and a leg on the line of a wall is beside the building.
+- Its tube starts at the first height that keeps its rosettes in step with the
+  legs on the ground, so it is shorter by the roof, and its screw jack is wound
+  out by the difference: less than one rosette spacing (19 11/16 in).
+- A block placed over a roof gives each such leg only the standards it needs,
+  and builds nothing of the block at it below its lowest rosette. Wholly on one
+  roof, its foot ledgers go on the collars up there. Half on and half off, the
+  ground legs are full height.
+- What a leg stands on is read from what is under it now: move or remove the
+  building and its legs are on the ground again.
+
+The extra jack travel is drawn and is not added to the jack's weight.
+
+## Scaffold round a round building
+
+**Scaffold round it** on a round building lays two rings of standards, the
+inner one off the wall and the outer one the Block card's depth further out,
+with straight ledgers between them (ScaffoldPro's round plan,
+`planRoundScaffold`). The number of bays is the one that brings the inner
+ledgers nearest 6 ft and the outer nearest 8 ft. It is decked at the card's
+planked levels and railed on the outer ring only. Its ledgers are whatever
+length the ring makes them, not catalogue lengths, and it is not braced.
 
 ## Drawing underlay
 

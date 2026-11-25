@@ -635,6 +635,32 @@ export function planScaffoldRoundBuilding(points, { offsetFt = BUILDING_DEFAULTS
 }
 
 /**
+ * Scaffold round a round building, as ScaffoldPro's buildRoundAutoScaffoldPlan:
+ * a ring of standards `offsetFt` off the wall and another `depthFt` further
+ * out, with as many bays as bring the straight ledger between two inner
+ * standards nearest 6 ft and between two outer ones nearest 8 ft.
+ * Returns { bays, inner:[[x,y]], outer:[[x,y]], innerChordFt, outerChordFt }.
+ */
+export function planRoundScaffold(round, { offsetFt = BUILDING_DEFAULTS.wallDistanceFt, depthFt = 3, innerLedgerFt = 6, outerLedgerFt = 8 } = {}) {
+  const innerR = Math.max(0.1, Number(round.radiusFt) || 0) + Math.max(0, Number(offsetFt) || 0);
+  const outerR = innerR + Math.max(0.5, Number(depthFt) || 3);
+  const around = Math.PI * (innerR + outerR);
+  const least = Math.max(6, Math.round(around / 12)), most = Math.max(least, Math.round(around / 4));
+  let best = null;
+  for (let bays = least; bays <= most; bays++) {
+    const half = Math.PI / bays;
+    const innerChordFt = 2 * innerR * Math.sin(half), outerChordFt = 2 * outerR * Math.sin(half);
+    const score = Math.abs(innerChordFt - innerLedgerFt) * 2 + Math.abs(outerChordFt - outerLedgerFt);
+    if (!best || score < best.score - 1e-6) best = { bays, innerChordFt, outerChordFt, score };
+  }
+  const ring = r => Array.from({ length: best.bays }, (_, i) => {
+    const a = (i / best.bays) * Math.PI * 2;
+    return [round.cx + Math.cos(a) * r, round.cy + Math.sin(a) * r];
+  });
+  return { bays: best.bays, inner: ring(innerR), outer: ring(outerR), innerChordFt: best.innerChordFt, outerChordFt: best.outerChordFt };
+}
+
+/**
  * Where a block centred at `center`, `alongFt` by `acrossFt` in world x and y,
  * should sit to stand `offsetFt` off the nearest wall it is beside: the same
  * centre moved square to that wall, or null when no wall is within reach.

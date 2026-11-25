@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { buildStairFlight } from './parts.js';
 import { findEnd, pullEnd } from './pull.js';
+import { rectOutline, roundOutline } from './buildings.js';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { legColumn } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
@@ -18,7 +19,7 @@ import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame, planLiftOutline,
   planBlockRecipe, planStandardSegmentsForLift, rotateOffset90, snapBlockCenter, BLOCK_DEFAULTS,
   planStairTower, STAIR_DEFAULTS, BLOCK_SNAP_RADIUS_FT,
-  BUILDING_DEFAULTS, planScaffoldRoundBuilding, snapToWall,
+  BUILDING_DEFAULTS, planScaffoldRoundBuilding, snapToWall, planRoundScaffold, buildingWalls,
 } from './planning.js';
 import { hitData, instanceMeshes, clearGroup } from './instancing.js';
 import {
@@ -136,7 +137,7 @@ export class Tools {
     this.stairSettings = { ...STAIR_DEFAULTS };
     // Building tool: the height of the next building traced, how far off its
     // walls scaffold stands, and the corners clicked so far.
-    this.buildingSettings = { ...BUILDING_DEFAULTS };
+    this.buildingSettings = { ...BUILDING_DEFAULTS, shape: 'outline', roofType: 'flat', riseFt: 6, overhangFt: 0, ridge: '', parapetFt: 0, innerRadiusFt: 0, raisedFt: 0 };
     this.outline = [];
     this.rotationSteps = 0;
     // Live load tool: a load spans along the boards of the deck it sits on,
@@ -238,6 +239,60 @@ export class Tools {
     return end;
   }
 
+  /** A two-headed arrow on the ground at `p`, lying along `n`. */
+  _arrowGhost(p, n, held) {
+    const mat = held ? MATERIALS.braceGhost : MATERIALS.ghost;
+    const t = { x: -n.y, y: n.x };
+    const at = (u, v) => [p.x + n.x * u + t.x * v, p.y + n.y * u + t.y * v, 0.12];
+    this.ghostGroup.add(tubeBetween(at(-0.9, 0), at(0.9, 0), 3, mat));
+    for (const s of [-1, 1]) for (const w of [-1, 1]) this.ghostGroup.add(tubeBetween(at(s * 0.9, 0), at(s * 0.45, w * 0.45), 3, mat));
+  }
+
+  /**
+   * A wall of a selected building the pointer is near, for dragging it in or
+   * out: { building, index, wall, handle }. With `grab`, only on its handle.
+   */
+  _wallUnderPointer(e, grab = false) {
+    if (this.tool !== 'select' || this.carry || this.groundHook) return null;
+    const picked = [...this.selection].map(id => this.state.buildings.get(id)).filter(b => b && !b.round);
+    if (!picked.length) return null;
+    this.engine.setPointerFromEvent(e);
+    const g = this.engine.groundPoint();
+    if (!g) return null;
+    let best = null, bd = PULL_NEAR_FT;
+    for (const b of picked) {
+      buildingWalls(b.points).forEach((w, index) => {
+        if (!w.square) return;
+        const along = (g.x - w.a[0]) * w.tx + (g.y - w.a[1]) * w.ty, out = (g.x - w.a[0]) * w.nx + (g.y - w.a[1]) * w.ny;
+        const d = Math.hypot(Math.max(0, -along, along - w.lengthFt), out);
+        if (d < bd) { bd = d; best = { building: b, index, wall: w }; }
+      });
+    }
+    if (!best) return null;
+    const w = best.wall;
+    best.handle = { x: (w.a[0] + w.b[0]) / 2 + w.nx * 1.5, y: (w.a[1] + w.b[1]) / 2 + w.ny * 1.5 };
+    if (grab) {
+      const { camera, renderer } = this.engine;
+      const p = new THREE.Vector3(best.handle.x, best.handle.y, 0).project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      if (!(Math.hypot(((p.x + 1) / 2) * r.width - (e.clientX - r.left), ((1 - p.y) / 2) * r.height - (e.clientY - r.top)) <= PULL_GRAB_PX)) return null;
+    }
+    return best;
+  }
+
+  /** The handle on a building's wall, and with a drag under way where the wall would stand. */
+  _wallGhost(hit, byFt = 0, held = false) {
+    const w = hit.wall, n = { x: w.nx, y: w.ny };
+    this._arrowGhost({ x: hit.handle.x + n.x * byFt, y: hit.handle.y + n.y * byFt }, n, held);
+    if (byFt) {
+      const pts = [w.a, w.b].map(p => new THREE.Vector3(p[0] + n.x * byFt, p[1] + n.y * byFt, 0.05));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), byFt > 0 ? OUTLINE_LINE : PULL_REMOVE_LINE);
+      line.userData.ownsGeometry = true;
+      this.ghostGroup.add(line);
+    }
+    this.hooks.onPreview?.('wall', byFt, { held });
+  }
+
   /** The handle on an end, and with a pull under way the bays it would add or take. */
   _pullGhost(end, bays = 0, held = false) {
     const mat = held ? MATERIALS.braceGhost : MATERIALS.ghost;
@@ -291,20 +346,25 @@ export class Tools {
   beginCarry(ids, copy = false) {
     const s = this.state;
     const cols = ids.map(id => s.standards.get(id)).filter(c => c && s.isLeg(c));
-    if (!cols.length) return false;
+    const masses = ids.map(id => s.buildings.get(id)).filter(Boolean);
+    // Held by a standard, or with none among them by a corner of a building.
+    const corners = cols.length ? cols : masses.flatMap(b => b.points.map(p => ({ x: p[0], y: p[1] })));
+    if (!corners.length) return false;
     this.setTool('select');
-    let hold = cols[0];
+    let hold = corners[0];
     if (this._hoverAt) {
       this.engine.setPointerFromEvent(this._hoverAt);
       const g = this.engine.groundPoint();
-      if (g) for (const c of cols) if (Math.hypot(c.x - g.x, c.y - g.y) < Math.hypot(hold.x - g.x, hold.y - g.y)) hold = c;
+      if (g) for (const c of corners) if (Math.hypot(c.x - g.x, c.y - g.y) < Math.hypot(hold.x - g.x, hold.y - g.y)) hold = c;
     }
     const has = new Set(ids);
     const lines = [];
+    for (const b of masses) b.points.forEach((p, i) => { const q = b.points[(i + 1) % b.points.length]; lines.push({ a: [p[0], p[1], 0.05], b: [q[0], q[1], 0.05] }); });
     for (const map of [s.ledgers, s.trusses, s.braces, s.guardrails]) for (const m of map.values()) if (has.has(m.id)) lines.push({ a: m.a, b: m.b });
     this.carry = {
       ids: [...ids], copy, steps: 0, pivot: { x: hold.x, y: hold.y },
       cols: cols.map(c => ({ x: c.x, y: c.y, top: s.standardTopZ(c) })), lines,
+      corners: masses.flatMap(b => b.points.map(p => ({ x: p[0], y: p[1] }))),
     };
     this._refreshGhost();
     return true;
@@ -335,6 +395,17 @@ export class Tools {
         const p = at(col);
         const d = Math.hypot(other.x - p.x, other.y - p.y);
         if (d <= BLOCK_SNAP_RADIUS_FT && (!best || d < best.d)) best = { d, ox: other.x - p.x, oy: other.y - p.y };
+      }
+    }
+    // A building carried on its own snaps corner to corner with the buildings that are staying.
+    if (!c.cols.length && c.corners) {
+      for (const other of this.state.buildings.values()) {
+        if (!c.copy && carried.has(other.id)) continue;
+        for (const q of other.points) for (const corner of c.corners) {
+          const p = at(corner);
+          const d = Math.hypot(q[0] - p.x, q[1] - p.y);
+          if (d <= BLOCK_SNAP_RADIUS_FT && (!best || d < best.d)) best = { d, ox: q[0] - p.x, oy: q[1] - p.y };
+        }
       }
     }
     if (best) { dx += best.ox; dy += best.oy; }
@@ -399,10 +470,37 @@ export class Tools {
     return { x: g.x, y: g.y, closes };
   }
 
+  /** What the card says the next building has on top. */
+  _buildingExtras() {
+    const k = this.buildingSettings;
+    const roof = { type: k.roofType, riseFt: k.riseFt, overhangFt: k.overhangFt };
+    if (k.ridge) roof.ridge = k.ridge;
+    return { roof, parapetFt: k.parapetFt, raisedFt: k.raisedFt };
+  }
+
+  /**
+   * A rectangle or a round building takes two clicks: a corner and the
+   * opposite one, or the centre and a point on the wall. The outline those
+   * two points make, or null while they are the same spot.
+   */
+  _twoClickOutline(first, p) {
+    if (this.buildingSettings.shape === 'round') {
+      const r = Math.hypot(p.x - first[0], p.y - first[1]);
+      if (!(r > 0.5)) return null;
+      const round = { cx: first[0], cy: first[1], radiusFt: r };
+      const hollow = Number(this.buildingSettings.innerRadiusFt) || 0;
+      if (hollow > 0 && hollow < r) round.innerRadiusFt = hollow;
+      return { points: roundOutline(first, r), round };
+    }
+    if (Math.abs(p.x - first[0]) < 0.5 || Math.abs(p.y - first[1]) < 0.5) return null;
+    return { points: rectOutline(first, [p.x, p.y]) };
+  }
+
   /** Close the outline traced so far into a building. */
-  finishOutline() {
-    if (this.outline.length < 3) return null;
-    const b = this.state.addBuilding(this.outline, this.buildingSettings.heightFt);
+  finishOutline(made = null) {
+    const points = made ? made.points : this.outline;
+    if (points.length < 3) return null;
+    const b = this.state.addBuilding(points, this.buildingSettings.heightFt, { ...this._buildingExtras(), round: made ? made.round : null });
     this.outline = [];
     this._clearGhost();
     if (b) this.hooks.onBuilding?.(b);
@@ -411,8 +509,12 @@ export class Tools {
 
   _outlineGhost(e) {
     const p = this._outlinePoint(e);
-    const pts = this.outline.map(q => new THREE.Vector3(q[0], q[1], 0.04));
-    if (p) pts.push(p.closes ? pts[0].clone() : new THREE.Vector3(p.x, p.y, 0.04));
+    const twoClick = this.buildingSettings.shape !== 'outline';
+    let pts = this.outline.map(q => new THREE.Vector3(q[0], q[1], 0.04));
+    if (twoClick && p && this.outline.length) {
+      const made = this._twoClickOutline(this.outline[0], p);
+      pts = made ? [...made.points, made.points[0]].map(q => new THREE.Vector3(q[0], q[1], 0.04)) : pts;
+    } else if (p) pts.push(p.closes ? pts[0].clone() : new THREE.Vector3(p.x, p.y, 0.04));
     if (pts.length >= 2) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), OUTLINE_LINE);
       line.userData.ownsGeometry = true;
@@ -420,12 +522,14 @@ export class Tools {
     }
     if (p) {
       const marker = new THREE.Mesh(MARKER_GEO, MATERIALS.ghost);
-      marker.position.set(p.closes ? this.outline[0][0] : p.x, p.closes ? this.outline[0][1] : p.y, 0.1);
+      const onFirst = p.closes && !twoClick;
+      marker.position.set(onFirst ? this.outline[0][0] : p.x, onFirst ? this.outline[0][1] : p.y, 0.1);
       this.ghostGroup.add(marker);
     }
     const last = this.outline[this.outline.length - 1];
     this.hooks.onPreview?.('building', this.outline.length, {
-      closes: !!(p && p.closes),
+      shape: this.buildingSettings.shape,
+      closes: !!(p && p.closes) && !twoClick,
       lengthFt: p && last ? Math.hypot(p.x - last[0], p.y - last[1]) : 0,
     });
   }
@@ -439,6 +543,7 @@ export class Tools {
     const b = this.state.buildings.get(buildingId);
     if (!b) return null;
     const s = this.state;
+    if (b.round) return this._scaffoldRoundRound(b);
     const plan = planScaffoldRoundBuilding(b.points, { offsetFt: this.buildingSettings.wallDistanceFt, depthFt: this.blockSettings.depthFt });
     const ctx = {
       liftZ: lift => s.liftZ(lift), showBaseCollar: s.base.showBaseCollar,
@@ -452,12 +557,57 @@ export class Tools {
     try {
       s.batch(() => {
         for (const k of plan.blocks) {
-          const recipe = { ...this.blockSettings, widthFt: k.widthFt, depthFt: k.depthFt, heightFt: b.heightFt };
+          const recipe = { ...this.blockSettings, widthFt: k.widthFt, depthFt: k.depthFt, heightFt: s.buildingBaseZ(b) + b.heightFt };
           this.placeBlockAt({ plan: planBlockRecipe(recipe, ctx), center: k.center, snapped: false, rotationSteps: k.rotationSteps });
         }
       });
     } finally { this.hooks.onBulkFill = heard; }
     return { blocks: plan.blocks.length, skipped: plan.skipped };
+  }
+
+  /**
+   * Scaffold round a round building: two rings of standards with straight
+   * ledgers between them, built to the Block card's height rules under the
+   * building's height. Decked where the card asks for planked levels, railed
+   * on the outer ring only. One undo step.
+   */
+  _scaffoldRoundRound(b) {
+    const s = this.state;
+    const ring = planRoundScaffold(b.round, { offsetFt: this.buildingSettings.wallDistanceFt, depthFt: this.blockSettings.depthFt });
+    // The lifts a block of this recipe would have: its standards, its ledgers, its decks.
+    const like = planBlockRecipe({ ...this.blockSettings, widthFt: 7, heightFt: s.buildingBaseZ(b) + b.heightFt }, {
+      liftZ: lift => s.liftZ(lift), showBaseCollar: s.base.showBaseCollar,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt), ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
+    });
+    const n = ring.bays;
+    s.batch(() => {
+      for (const p of [...ring.inner, ...ring.outer]) {
+        if (!s.standardAt(p[0], p[1])) for (const len of like.segments) s.addStandard(p[0], p[1], len, { exact: true });
+      }
+      const fix = v => Math.round(v * 1e6) / 1e6;
+      const at = (p, lift) => [fix(p[0]), fix(p[1]), s.liftZ(lift)];
+      const outerAt = new Map();
+      for (const lift of like.ledgerLifts) {
+        for (let i = 0; i < n; i++) {
+          const j = (i + 1) % n;
+          s.addLedger(at(ring.inner[i], lift), at(ring.inner[j], lift));
+          const outer = s.addLedger(at(ring.outer[i], lift), at(ring.outer[j], lift));
+          s.addLedger(at(ring.inner[i], lift), at(ring.outer[i], lift));
+          outerAt.set(`${lift}:${i}`, outer.id);
+        }
+      }
+      for (const lift of like.deckLifts) {
+        for (let i = 0; i < n; i++) {
+          const id = outerAt.get(`${lift}:${i}`);
+          if (id && !s.addPlankOnLedger(id, 1)) s.addPlankOnLedger(id, -1);
+        }
+        // Rails on the outside; the face that looks at the wall is left open.
+        if (this.blockSettings.guardrails) {
+          for (const up of [1, 2]) for (let i = 0; i < n; i++) s.addLedger(at(ring.outer[i], lift + up), at(ring.outer[(i + 1) % n], lift + up));
+        }
+      }
+    });
+    return { blocks: n, skipped: 0, round: true };
   }
 
   setTool(name) {
@@ -576,6 +726,15 @@ export class Tools {
       this._marquee = null;
       return;
     }
+    // And one on the handle of a selected building's wall moves that wall.
+    const wall = this._wallUnderPointer(e, true);
+    if (wall) {
+      this.engine.setPointerFromEvent(e);
+      const g = this.engine.groundPoint();
+      this.wallPull = { hit: wall, byFt: 0, from: { x: g.x, y: g.y } };
+      this._marquee = null;
+      return;
+    }
     // A left-drag draws a selection box in any tool and any view; a click
     // without a drag still belongs to the tool.
     this._marquee = { startClientX: e.clientX, startClientY: e.clientY, currentClientX: e.clientX, currentClientY: e.clientY };
@@ -583,6 +742,18 @@ export class Tools {
 
   _onMove(e) {
     if (this._down) this._down.moved = Math.max(Math.abs(e.clientX - this._down.x), Math.abs(e.clientY - this._down.y));
+    if (this.wallPull) {
+      if (!(e.buttons & 1)) { this.wallPull = null; } else {
+        this.engine.setPointerFromEvent(e);
+        const g = this.engine.groundPoint();
+        const { hit, from } = this.wallPull;
+        if (g) this.wallPull.byFt = this.state.snap((g.x - from.x) * hit.wall.nx + (g.y - from.y) * hit.wall.ny);
+        this._clearGhost();
+        this._wallGhost(hit, this.wallPull.byFt, true);
+        this.engine.invalidate?.();
+        return;
+      }
+    }
     if (this.pull) {
       if (!(e.buttons & 1)) { this.pull = null; } else {
         this.engine.setPointerFromEvent(e);
@@ -614,6 +785,15 @@ export class Tools {
     this._down = null;
     this._marquee = null;
     this._clearOverlay();
+    if (this.wallPull) {
+      const { hit, byFt } = this.wallPull;
+      this.wallPull = null;
+      this._clearGhost();
+      const done = byFt ? this.state.moveBuildingWall(hit.building.id, hit.index, byFt) : false;
+      this.hooks.onWallMoved?.(done, byFt);
+      this._updateGhost(e);
+      return;
+    }
     if (this.pull) {
       const { end, bays } = this.pull;
       this.pull = null;
@@ -715,7 +895,7 @@ export class Tools {
     for (const c of s.standards.values()) {
       const leg = s.isLeg(c);
       if (legsOnly && !leg) continue;
-      out.push({ id: c.id, a: [c.x, c.y, leg ? 0 : s.standardBaseZ(c)], b: [c.x, c.y, s.standardTopZ(c)] });
+      out.push({ id: c.id, a: [c.x, c.y, leg ? s.supportZAt(c.x, c.y) : s.standardBaseZ(c)], b: [c.x, c.y, s.standardTopZ(c)] });
     }
     return out;
   }
@@ -740,6 +920,12 @@ export class Tools {
     if (this.tool === 'building') {
       const p = this._outlinePoint(e);
       if (!p) return;
+      if (this.buildingSettings.shape !== 'outline') {
+        if (!this.outline.length) { this.outline.push([p.x, p.y]); return; }
+        const made = this._twoClickOutline(this.outline[0], p);
+        if (made) this.finishOutline(made);
+        return;
+      }
       if (p.closes) this.finishOutline(); else this.outline.push([p.x, p.y]);
       return;
     }
@@ -1783,11 +1969,11 @@ export class Tools {
       const n = rotateOffset90(b.normal, rotationSteps);
       const a = xyz(b.a, b.lift), z = xyz(b.b, b.toLift);
       const ox = n.x * PERP_OFFSET_FT, oy = n.y * PERP_OFFSET_FT;
-      return { a: [a[0] + ox, a[1] + oy, a[2]], b: [z[0] + ox, z[1] + oy, z[2]] };
+      return { a: [a[0] + ox, a[1] + oy, a[2]], b: [z[0] + ox, z[1] + oy, z[2]], ends: [at(b.a), at(b.b)], lift: b.lift, toLift: b.toLift };
     });
     const decks = plan.decks.map(d => {
       const p = at({ x: d.x0, y: d.y0 }), q = at({ x: d.x1, y: d.y1 });
-      return { x0: Math.min(p.x, q.x), y0: Math.min(p.y, q.y), x1: Math.max(p.x, q.x), y1: Math.max(p.y, q.y), z: s.liftZ(d.lift) };
+      return { x0: Math.min(p.x, q.x), y0: Math.min(p.y, q.y), x1: Math.max(p.x, q.x), y1: Math.max(p.y, q.y), z: s.liftZ(d.lift), lift: d.lift };
     });
     const corners = [[plan.xs[0], plan.ys[0]], [plan.xs[plan.xs.length - 1], plan.ys[0]],
       [plan.xs[plan.xs.length - 1], plan.ys[plan.ys.length - 1]], [plan.xs[0], plan.ys[plan.ys.length - 1]]]
@@ -1799,7 +1985,7 @@ export class Tools {
     }));
     return {
       standards: plan.standards.map(at),
-      ledgers: plan.ledgers.map(l => ({ a: xyz(l.a, l.lift), b: xyz(l.b, l.lift) })),
+      ledgers: plan.ledgers.map(l => ({ a: xyz(l.a, l.lift), b: xyz(l.b, l.lift), lift: l.lift })),
       braces, decks, corners, flights,
     };
   }
@@ -1816,10 +2002,26 @@ export class Tools {
     const lengths = CATALOG.standards.parts.map(p => p.lengthFt);
     let added = 0;
     s.batch(() => {
-      for (const p of w.standards) {
+      // What each standard stands on. One over a flat roof starts on the roof:
+      // it is that many rosettes shorter, and nothing of the block below its
+      // lowest rosette is built at it (ScaffoldPro's support-aware legs).
+      const collar = s.base.showBaseCollar ? 1 : 0;
+      const firsts = w.standards.map(p => s.firstLiftAt(p.x, p.y));
+      const lowest = (x, y) => s.firstLiftAt(x, y) - collar;
+      // Wholly on one roof, the ledgers at the foot go on the collars up there.
+      const raised = firsts.every(f => f === firsts[0]) && firsts[0] > 1 ? firsts[0] - 1 : 0;
+      const liftOf = lift => (raised && collar && lift === 0 ? raised : lift);
+      w.ledgers = w.ledgers.map(l => { const lift = liftOf(l.lift); return lift === l.lift ? l : { ...l, lift, a: [l.a[0], l.a[1], s.liftZ(lift)], b: [l.b[0], l.b[1], s.liftZ(lift)] }; })
+        .filter(l => l.lift >= lowest(l.a[0], l.a[1]) && l.lift >= lowest(l.b[0], l.b[1]));
+      w.braces = w.braces.filter(b => b.lift >= lowest(b.ends[0].x, b.ends[0].y) && b.toLift >= lowest(b.ends[1].x, b.ends[1].y));
+      w.decks = w.decks.filter(d => [[d.x0, d.y0], [d.x1, d.y0], [d.x1, d.y1], [d.x0, d.y1]].every(([x, y]) => d.lift >= lowest(x, y)));
+      for (const [i, p] of w.standards.entries()) {
         const existing = s.standardAt(p.x, p.y);
         if (!existing) {
-          for (const len of plan.segments) s.addStandard(p.x, p.y, len, { exact: true });
+          const need = plan.requiredLift - (firsts[i] - 1);
+          if (need < 1) continue; // the roof is above the top of the block here
+          const segments = firsts[i] > 1 ? planStandardSegmentsForLift(need, lengths) : plan.segments;
+          for (const len of segments) s.addStandard(p.x, p.y, len, { exact: true });
           added++;
           continue;
         }
@@ -2036,7 +2238,10 @@ export class Tools {
     if (this.tool === 'select') {
       const end = this._endUnderPointer(e);
       if (end) this._pullGhost(end, 0, !!this._endUnderPointer(e, true));
-      this._setCursor(end && this._endUnderPointer(e, true) ? 'grab' : '');
+      const wall = end ? null : this._wallUnderPointer(e);
+      const onWall = wall ? !!this._wallUnderPointer(e, true) : false;
+      if (wall) this._wallGhost(wall, 0, onWall);
+      this._setCursor((end && this._endUnderPointer(e, true)) || onWall ? 'grab' : '');
       return;
     }
     if (this.tool === 'erase') return;

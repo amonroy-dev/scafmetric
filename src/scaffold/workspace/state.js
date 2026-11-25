@@ -206,7 +206,72 @@ export class ScaffoldState {
   /** Bottom of a standard's tube: above its base assembly, or seated in its bracket. */
   standardBaseZ(s) {
     const k = this.standardBracket(s);
-    return k ? k.z + inchesToFeet(BRACKET_SEAT_UP_IN) : this.baseOffsetFt();
+    if (k) return k.z + inchesToFeet(BRACKET_SEAT_UP_IN);
+    return this.liftZ(this.firstLiftAt(s.x, s.y)) - inchesToFeet(FIRST_NODE_OFFSET_IN);
+  }
+
+  // --- what a leg stands on -----------------------------------------------------
+  // As ScaffoldPro's support-aware legs: the scaffold stays level and every
+  // rosette stays on the same heights whatever is under a leg. A leg over a
+  // flat-roofed building stands on the roof. Its tube starts at the first
+  // height that keeps its rosettes in step with the legs on the ground, its
+  // screw jack takes up the difference, and it is that much shorter.
+
+  /** The height of what is under (x, y): the flat roof of a building it is over, else the ground. */
+  supportZAt(x, y, before = null) {
+    if (!this.buildings.size) return 0;
+    let z = 0;
+    for (const b of this.buildings.values()) {
+      // (Asked for a building's own foot: only the buildings drawn before it can be under it.)
+      if (before && b.id === before) break;
+      if (b.roof || b.raisedFt) continue; // a pitched roof is not stood on, nor a canopy
+      const top = this.buildingBaseZ(b) + b.heightFt;
+      if (!(top > z)) continue;
+      // The open middle of a ring is not roof.
+      const hollow = b.round ? Number(b.round.innerRadiusFt) || 0 : 0;
+      if (hollow > 0 && Math.hypot(x - b.round.cx, y - b.round.cy) < hollow) continue;
+      let inside = false, onWall = false;
+      for (let i = 0, j = b.points.length - 1; i < b.points.length; j = i++) {
+        const [xi, yi] = b.points[i], [xj, yj] = b.points[j];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        // On the line of a wall is beside the building, not on it.
+        const dx = xj - xi, dy = yj - yi, len2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / len2));
+        if (Math.hypot(x - (xi + dx * t), y - (yi + dy * t)) < 0.05) onWall = true;
+      }
+      if (inside && !onWall) z = top;
+    }
+    return z;
+  }
+
+  /**
+   * The height a building's own foot is at: the ground, or the flat roof of a
+   * building drawn before it that it stands on (a penthouse, a setback).
+   * Judged at the middle of its outline and read afresh, so it follows the
+   * building under it.
+   */
+  buildingBaseZ(b) {
+    if (!this._baseZCache || this._baseZCache.version !== this.version) this._baseZCache = { version: this.version, at: new Map() };
+    const known = this._baseZCache.at.get(b.id);
+    if (known !== undefined) return known;
+    const cx = b.points.reduce((n, p) => n + p[0], 0) / b.points.length, cy = b.points.reduce((n, p) => n + p[1], 0) / b.points.length;
+    const z = this.supportZAt(cx, cy, b.id) + Math.max(0, Number(b.raisedFt) || 0);
+    this._baseZCache.at.set(b.id, z);
+    return z;
+  }
+
+  /** The lift of the lowest rosette a leg at (x, y) has on its tube: 1 on the ground, higher on a roof. */
+  firstLiftAt(x, y) {
+    const z = this.supportZAt(x, y);
+    if (!(z > 0)) return 1;
+    const pitch = inchesToFeet(NODE_SPACING_IN);
+    return 1 + Math.ceil(z / pitch - 1e-9);
+  }
+
+  /** How much further than the Base panel says a leg's screw jack is wound out, to keep its rosettes in step. */
+  jackExtraFtAt(x, y) {
+    const z = this.supportZAt(x, y);
+    return z > 0 ? (this.firstLiftAt(x, y) - 1) * inchesToFeet(NODE_SPACING_IN) - z : 0;
   }
   standardTopZ(s) { return this.standardBaseZ(s) + this.standardHeightFt(s); }
 
@@ -808,6 +873,14 @@ export class ScaffoldState {
       for (const [id, f] of [...this.stairs]) {
         if (want.has(id)) put(this.stairs, 'F', id, { lower: f.lower.map(p => at(p[0], p[1])), upper: f.upper.map(p => at(p[0], p[1])) });
       }
+      for (const [id, b] of [...this.buildings]) {
+        if (!want.has(id)) continue;
+        const changes = { points: b.points.map(p => at(p[0], p[1])) };
+        if (b.round) { const [cx, cy] = at(b.round.cx, b.round.cy); changes.round = { ...b.round, cx, cy }; }
+        // A roof's ridge turns with the building.
+        if (b.roof && b.roof.ridge && turns % 2 === 1) changes.roof = { ...b.roof, ridge: b.roof.ridge === 'x' ? 'y' : 'x' };
+        put(this.buildings, 'H', id, changes);
+      }
       // A deck on a ledger or a bracket arm: it is wherever that is. A copy needs the copy's.
       const supportOf = ledgerId => (typeof ledgerId === 'string' && ledgerId.startsWith(ARM_PREFIX) ? ledgerId.slice(ARM_PREFIX.length) : ledgerId);
       for (const [id, pp] of [...this.plankPlacements]) {
@@ -830,7 +903,7 @@ export class ScaffoldState {
   }
 
   _has(id) {
-    return [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements].some(m => m.has(id));
+    return [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.buildings, this.liveLoads, this.plankPlacements].some(m => m.has(id));
   }
 
   /**
@@ -903,13 +976,57 @@ export class ScaffoldState {
   }
 
   /** A building from its outline in plan (three points or more) and its height. */
-  addBuilding(points, heightFt) {
+  addBuilding(points, heightFt, extras = {}) {
     if (!points || points.length < 3) return null;
     this._pushHistory();
     const b = { id: this._id('H'), points: points.map(p => [p[0], p[1]]), heightFt: Math.max(1, Number(heightFt) || 1) };
+    // A roof ({ type, riseFt, overhangFt }), a parapet height, and for a round building its centre and radius.
+    if (extras.roof && extras.roof.type && extras.roof.type !== 'flat') b.roof = { ...extras.roof };
+    if (Number(extras.parapetFt) > 0) b.parapetFt = Number(extras.parapetFt);
+    if (extras.round) b.round = { ...extras.round };
+    // Raised off what it stands on: a balcony or a canopy on the side of a building.
+    if (Number(extras.raisedFt) > 0) b.raisedFt = Number(extras.raisedFt);
     this.buildings.set(b.id, b);
     this._emit();
     return b;
+  }
+
+  /** Change a building's height, roof or parapet. */
+  updateBuilding(id, patch) {
+    const b = this.buildings.get(id);
+    if (!b) return null;
+    this._pushHistory();
+    if (patch.heightFt !== undefined) b.heightFt = Math.max(1, Number(patch.heightFt) || 1);
+    if (patch.roof !== undefined) { if (patch.roof && patch.roof.type !== 'flat') b.roof = { ...patch.roof }; else delete b.roof; }
+    if (patch.parapetFt !== undefined) { if (Number(patch.parapetFt) > 0) b.parapetFt = Number(patch.parapetFt); else delete b.parapetFt; }
+    if (patch.raisedFt !== undefined) { if (Number(patch.raisedFt) > 0) b.raisedFt = Number(patch.raisedFt); else delete b.raisedFt; }
+    this._emit();
+    return b;
+  }
+
+  /**
+   * Move one wall of a building square to itself by `byFt` (out is positive),
+   * the walls either side growing or shrinking with it. Refused when it would
+   * leave a wall under a foot long or turn the outline inside out.
+   */
+  moveBuildingWall(id, wallIndex, byFt) {
+    const b = this.buildings.get(id);
+    if (!b || b.round || !(Math.abs(byFt) > 1e-9)) return false;
+    const n = b.points.length;
+    const i = ((wallIndex % n) + n) % n, j = (i + 1) % n;
+    const area = pts => pts.reduce((sum, p, k) => { const q = pts[(k + 1) % pts.length]; return sum + (p[0] * q[1] - q[0] * p[1]) / 2; }, 0);
+    const before = area(b.points);
+    const dx = b.points[j][0] - b.points[i][0], dy = b.points[j][1] - b.points[i][1], len = Math.hypot(dx, dy) || 1;
+    const out = before > 0 ? [dy / len, -dx / len] : [-dy / len, dx / len];
+    const next = b.points.map(p => [p[0], p[1]]);
+    for (const k of [i, j]) next[k] = [Math.round((next[k][0] + out[0] * byFt) * 1e6) / 1e6, Math.round((next[k][1] + out[1] * byFt) * 1e6) / 1e6];
+    const after = area(next);
+    const short = next.some((p, k) => Math.hypot(next[(k + 1) % n][0] - p[0], next[(k + 1) % n][1] - p[1]) < 1);
+    if (short || Math.sign(after) !== Math.sign(before) || Math.abs(after) < 1) return false;
+    this._pushHistory();
+    b.points = next;
+    this._emit();
+    return true;
   }
 
   /** A stair flight between the ledger on `lower` at z0 and the one on `upper` at z1 (see this.stairs). */
@@ -972,8 +1089,10 @@ export class ScaffoldState {
         }
         continue;
       }
-      if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: this.liftZ(0), level: 0, columnId: s.id });
-      for (let level = 1; this.liftZ(level) <= top + 1e-6; level++) {
+      // A leg on a roof starts higher: its collar and rosettes are on the same lifts as the rest.
+      const first = this.firstLiftAt(s.x, s.y);
+      if (this.base.showBaseCollar) out.push({ x: s.x, y: s.y, z: this.liftZ(first - 1), level: first - 1, columnId: s.id });
+      for (let level = first; this.liftZ(level) <= top + 1e-6; level++) {
         out.push({ x: s.x, y: s.y, z: this.liftZ(level), level, columnId: s.id });
       }
     }
@@ -1003,10 +1122,11 @@ export class ScaffoldState {
     return this.baseOffsetFt() + inchesToFeet(FIRST_NODE_OFFSET_IN) + (lift - 1) * inchesToFeet(NODE_SPACING_IN);
   }
 
-  /** How many rosettes a standard carries (its top lift). */
+  /** A standard's top lift: the rosettes it carries, counted from the lift its first one is on. */
   standardLifts(s) {
     const tubeIn = this.standardHeightFt(s) * 12;
-    return tubeIn + 1e-6 < FIRST_NODE_OFFSET_IN ? 0 : Math.floor((tubeIn - FIRST_NODE_OFFSET_IN) / NODE_SPACING_IN + 1e-6) + 1;
+    const own = tubeIn + 1e-6 < FIRST_NODE_OFFSET_IN ? 0 : Math.floor((tubeIn - FIRST_NODE_OFFSET_IN) / NODE_SPACING_IN + 1e-6) + 1;
+    return own + (this.isLeg(s) ? this.firstLiftAt(s.x, s.y) - 1 : 0);
   }
 
   /** The rosette at a side bracket's tip, as a connection node. */
@@ -1048,6 +1168,8 @@ export class ScaffoldState {
     // `leg` is false for a standard seated in a side bracket: it has no base.
     const standards = [...this.standards.values()].map(s => ({
       id: s.id, x: s.x, y: s.y, baseZ: this.standardBaseZ(s), topZ: this.standardTopZ(s), segments: s.segments.slice(), leg: this.isLeg(s),
+      // What it stands on, and how much more its jack is wound out for it.
+      supportZ: this.isLeg(s) ? this.supportZAt(s.x, s.y) : 0, jackExtraIn: this.isLeg(s) ? this.jackExtraFtAt(s.x, s.y) * 12 : 0,
     }));
     const bases = [...this.standards.values()].filter(s => this.isLeg(s)).map(s => ({ id: s.id, x: s.x, y: s.y }));
     const ledgers = [...this.ledgers.values()].map(l => ({ id: l.id, a: l.a, b: l.b }));
@@ -1057,7 +1179,7 @@ export class ScaffoldState {
     const trusses = [...this.trusses.values()].map(t => ({ ...t }));
     const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
     const stairs = [...this.stairs.values()].map(f => ({ ...f }));
-    const buildings = [...this.buildings.values()].map(b => ({ ...b }));
+    const buildings = [...this.buildings.values()].map(b => ({ ...b, baseZ: this.buildingBaseZ(b) }));
     const liveLoads = this.liveLoadPatches();
     return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, stairs, buildings, liveLoads, nodes: this.nodes() };
   }
