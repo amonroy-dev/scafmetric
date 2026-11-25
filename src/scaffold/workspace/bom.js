@@ -136,9 +136,19 @@ export function deriveBom(state) {
   }
   if (state.stairs) {
     for (const f of state.stairs.values()) {
-      add('Stairs', 'stringer-left', `Stair stringer, left · 7'-0"`, 1, STAIR_TOWER.stringerLb);
-      add('Stairs', 'stringer-right', `Stair stringer, right · 7'-0"`, 1, STAIR_TOWER.stringerLb);
+      if (f.starter) {
+        add('Stairs', 'starter-left', 'Starter stair stringer, left', 1, STAIR_TOWER.starterStringerLb);
+        add('Stairs', 'starter-right', 'Starter stair stringer, right', 1, STAIR_TOWER.starterStringerLb);
+        add('Stairs', 'starter-handrail', 'Starter stair handrail', 2, STAIR_TOWER.starterHandrailLb);
+      } else {
+        add('Stairs', 'stringer-left', `Stair stringer, left · 7'-0"`, 1, STAIR_TOWER.stringerLb);
+        add('Stairs', 'stringer-right', `Stair stringer, right · 7'-0"`, 1, STAIR_TOWER.stringerLb);
+      }
       if (f.treads) add('Stairs', 'tread', `Stair tread · 2'-6"`, f.treads, STAIR_TOWER.treadLb);
+      if (f.step) {
+        add('Stairs', 'step-bracket', 'Clamp-on board bracket', 2, STAIR_TOWER.stepBracketLb);
+        add('Stairs', 'step-plank', `Step plank · 3'-6"`, 1, STAIR_TOWER.stepPlankLb);
+      }
     }
   }
   if (state.brackets) {

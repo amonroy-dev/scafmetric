@@ -688,27 +688,96 @@ export function snapToWall(center, sizeX, sizeY, buildings, offsetFt, reachFt = 
 // side by side, one going each way. Four standards down each long side (at
 // 0, 3'-6", 10'-6" and 14 ft) and one in the middle of the width on each
 // landing line, where the two flights meet.
+//
+// A flight is a fixed part: it always climbs four rosettes. A top landing that
+// is not a whole number of flights up is reached by one adjustment:
+//
+//   one rosette short   the top flight is buried: its foot hangs a rosette
+//                       below the landing it leaves, its lowest treads are left
+//                       off, and three planks laid between its stringers carry
+//                       the landing out to where its treads come up
+//   one rosette over    the top flight is hung a rosette high, with a one-plank
+//                       step on two clamp-on brackets making up the first rise
+//   two rosettes over   a short starter stair off the ground comes first
+//
+// Weights are round figures for a takeoff, not any maker's catalogue.
 export const STAIR_TOWER = {
   lengthFt: 14, widthFt: 7, landingFt: 3.5,
   // One flight (a pair of 7 ft stringers) climbs four rosettes: 6'-6 3/4".
   flightLifts: 4,
   treadsPerFlight: 9,
-  stringerLb: 65, // USSL70 / USSR70, each
-  treadLb: 12,    // UST26
+  // A rosette of a flight buried under a landing takes three treads with it.
+  treadsPerRosette: 3,
+  maxBuryRosettes: 2,
+  stringerLb: 66,
+  treadLb: 12.5,
+  // The starter stair: two rosettes, four treads, its own short stringers and handrails.
+  starterLifts: 2,
+  starterTreads: 4,
+  starterRunFt: 3.5,
+  starterStringerLb: 29,
+  starterHandrailLb: 23,
+  // The step under a flight hung high: one 3'-6" plank on two clamp-on brackets.
+  stepBracketLb: 4,
+  stepPlankLb: 18,
+  // The planks carried out under a buried flight: three 9 in boards between its stringers.
+  buriedPlankWidthFt: 2.25,
 };
 export const STAIR_DEFAULTS = { heightFt: 14.5 };
+
+/** What a flight weighs: its two stringers and treads, and what goes with it (a starter's handrails, a step). */
+export function stairFlightWeightLb(f) {
+  const T = STAIR_TOWER;
+  const treads = (f.treads || 0) * T.treadLb;
+  if (f.starter) return 2 * T.starterStringerLb + treads + 2 * T.starterHandrailLb;
+  return 2 * T.stringerLb + treads + (f.step ? 2 * T.stepBracketLb + T.stepPlankLb : 0);
+}
+
+/**
+ * How the flights between two landings `gap` rosettes apart climb: a list of
+ * 4s (a whole flight), 3s (one buried a rosette) and 5s (one hung a rosette
+ * high, with a step), the adjusted ones last. From the foot of the tower
+ * (`first`) a starter stair takes up two, and the lowest flight is never
+ * buried: there is nothing under the foot to hang it from. Null when the two
+ * are too close to put a flight between.
+ */
+export function flightsForRise(gap, first = false) {
+  const F = STAIR_TOWER.flightLifts;
+  const whole = n => Array.from({ length: n }, () => F);
+  if (first) {
+    if (gap === STAIR_TOWER.starterLifts) return { starter: true, rises: [] };
+    if (gap < F) return null;
+    const k = Math.floor(gap / F), over = gap % F;
+    if (over === 0) return { starter: false, rises: whole(k) };
+    if (over === 1) return { starter: false, rises: [...whole(k - 1), F + 1] };
+    if (over === 2) return { starter: true, rises: whole(k) };
+    return { starter: false, rises: [...whole(k), F - 1] };
+  }
+  if (gap < F - 1) return null;
+  const k = Math.floor(gap / F), over = gap % F;
+  if (over === 0) return { starter: false, rises: whole(k) };
+  if (over === 1) return { starter: false, rises: [...whole(k - 1), F + 1] };
+  if (over === 2) return { starter: false, rises: [...whole(k - 1), F - 1, F - 1] };
+  return { starter: false, rises: [...whole(k), F - 1] };
+}
 
 /**
  * Lay a stair tower out, centred on the origin, unrotated, in the shape
  * planBlockRecipe returns so the Block tool's ghost, snapping and placing take
- * it as they take a block. `heightFt` is the height of the top landing; the
- * tower has as many flights as fit under it (one at least).
+ * it as they take a block. `heightFt` is the height of the top landing, taken
+ * down to the rosette at or under it (one flight up at the least). With
+ * `landingsFt`, a list of heights, the tower has a landing on the rosette
+ * nearest each one instead (within 10 in of it), the last being the top.
  *
- *   landings   at the first rosette (the collar's) and every fourth above, at
- *              alternate ends, decked with 7 ft planks across the tower
+ *   landings   at alternate ends, decked with 7 ft planks across the tower;
+ *              the first on the collar's rosette, or with a starter stair two
+ *              rosettes up with nothing decked at the ground
  *   flights    from each landing line up to the other, on alternate halves
+ *   adjust     'none', 'buried', 'step' or 'starter' (see above)
  *   handrails  two diagonals beside each flight on its outer side and two on
  *              the middle standards, a rosette and two above the stringer
+ *   bracing    a diagonal on the long side opposite each flight, leaning the
+ *              other way from it, and one up each end face every four rosettes
  *   rails      ledgers one and two rosettes above each landing, round its
  *              three outer sides; and across the half of the top landing no
  *              flight leaves from
@@ -720,9 +789,41 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
   const T = STAIR_TOWER;
   const heightFt = Math.max(0.1, Number(recipe && recipe.heightFt) || STAIR_DEFAULTS.heightFt);
   const start = showBaseCollar ? 0 : 1;
-  let flightCount = 1;
-  while (flightCount < 100 && liftZ(start + (flightCount + 1) * T.flightLifts) <= heightFt + 1e-6) flightCount++;
-  const landingLifts = Array.from({ length: flightCount + 1 }, (_, i) => start + i * T.flightLifts);
+  // The rosettes the wanted landings are on, counted up from the foot.
+  const wanted = (Array.isArray(recipe && recipe.landingsFt) ? recipe.landingsFt : [])
+    .map(Number).filter(h => Number.isFinite(h) && h > 0).sort((a, b) => a - b);
+  const pitch = liftZ(start + 1) - liftZ(start);
+  let targets;
+  if (wanted.length) {
+    targets = wanted.map(h => ({ wantFt: h, rise: Math.round((h - liftZ(start)) / pitch) }));
+  } else {
+    // One height: the rosette at or under it, one flight up at the least.
+    let rise = T.flightLifts;
+    while (rise < 400 && liftZ(start + rise + 1) <= heightFt + 1e-6) rise++;
+    targets = [{ wantFt: heightFt, rise }];
+  }
+  // Flight by flight up to each wanted landing in turn. One too close above the last to reach is left out.
+  let starter = false;
+  const rises = [], matched = [], missed = [];
+  let reached = 0;
+  for (const t of targets) {
+    let part = flightsForRise(t.rise - reached, reached === 0);
+    // The lowest wanted landing, under one flight up and not a starter's height: one flight up it is.
+    if (!part && reached === 0 && !matched.length && t === targets[0]) { t.rise = T.flightLifts; part = flightsForRise(T.flightLifts, true); }
+    if (!part) { missed.push(t.wantFt); continue; }
+    if (part.starter) starter = true;
+    rises.push(...part.rises);
+    reached = t.rise;
+    matched.push({ wantFt: t.wantFt, lift: start + t.rise });
+  }
+  const flightCount = rises.length;
+  const adjusts = { buried: rises.filter(r => r < T.flightLifts).length, step: rises.filter(r => r > T.flightLifts).length, starter };
+  const kinds = ['buried', 'step', 'starter'].filter(k => adjusts[k]);
+  const adjust = kinds.length === 0 ? 'none' : kinds.length === 1 ? kinds[0] : 'mixed';
+
+  const first = start + (starter ? T.starterLifts : 0);
+  const landingLifts = [first];
+  for (let i = 0; i < flightCount; i++) landingLifts.push(landingLifts[i] + rises[i]);
   const topLanding = landingLifts[flightCount];
   const requiredLift = topLanding + 2;
   const segments = planStandardSegmentsForLift(requiredLift, standardLengthsFt);
@@ -740,7 +841,9 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
 
   const ledgers = [];
   const ledger = (ax, ay, bx, by, lift) => ledgers.push({ a: { x: ax, y: ay }, b: { x: bx, y: by }, lift });
-  for (const lift of landingLifts) {
+  // The frame: at the foot, and at every landing.
+  const ringLifts = [...new Set([start, ...landingLifts])].sort((a, b) => a - b);
+  for (const lift of ringLifts) {
     for (const y of [-halfW, halfW]) for (let i = 0; i < 3; i++) ledger(xs[i], y, xs[i + 1], y, lift);
     for (const x of [-halfL, halfL]) ledger(x, -halfW, x, halfW, lift);
     for (const x of [-inner, inner]) { ledger(x, -halfW, x, 0, lift); ledger(x, 0, x, halfW, lift); }
@@ -753,43 +856,68 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
     const end = i % 2 === 0 ? -1 : 1;
     const [x0, x1] = end < 0 ? [-halfL, -inner] : [inner, halfL];
     decks.push({ x0, y0: -halfW, x1, y1: halfW, lift });
-    // Its rails. The landing the stair starts from is a step off the ground and has none.
-    if (i > 0) {
+    // Its rails. A landing on the collar is a step off the ground and has none.
+    if (lift > start) {
       for (const up of [1, 2]) {
         ledger(end * halfL, -halfW, end * halfL, halfW, lift + up);
         for (const y of [-halfW, halfW]) ledger(x0, y, x1, y, lift + up);
       }
     }
+    const side = i % 2 === 0 ? -1 : 1;
     if (i === flightCount) {
       // Nothing leaves the top landing: close the half the next flight would have used.
-      const side = i % 2 === 0 ? -1 : 1;
       for (const up of [1, 2]) ledger(end * inner, 0, end * inner, side * halfW, lift + up);
       return;
     }
     // The flight up from this landing: away from its end, on the left-hand half going out and the other coming back.
-    const side = i % 2 === 0 ? -1 : 1;
     const from = end * inner, to = -end * inner;
-    flights.push({
+    const buried = Math.max(0, T.flightLifts - rises[i]), raised = Math.max(0, rises[i] - T.flightLifts);
+    const foot = lift - buried + raised; // the rosette its stringers hang on at the bottom
+    const flight = {
       lower: [{ x: from, y: 0 }, { x: from, y: side * halfW }],
       upper: [{ x: to, y: 0 }, { x: to, y: side * halfW }],
-      lift, toLift: lift + T.flightLifts, treads: T.treadsPerFlight,
-    });
+      lift: foot, toLift: foot + T.flightLifts,
+      treads: T.treadsPerFlight - buried * T.treadsPerRosette,
+    };
+    if (buried) {
+      // Its treads start where it comes up through the landing, and the landing is carried out to there.
+      flight.treadFrom = buried / T.flightLifts;
+      const mid = side * halfW / 2, half = T.buriedPlankWidthFt / 2;
+      decks.push({ x0: Math.min(from, to), y0: mid - half, x1: Math.max(from, to), y1: mid + half, lift });
+    }
+    if (raised) flight.step = true;
+    // A ledger for its foot where the landing's own is not at that height.
+    if (foot !== lift) ledger(from, 0, from, side * halfW, foot);
+    flights.push(flight);
     for (const up of [1, 2]) {
       // The outer handrail is hung on the inside of its standards, toward the flight, as the middle one is.
-      braces.push({ a: { x: from, y: side * halfW }, b: { x: to, y: side * halfW }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: -side } });
-      braces.push({ a: { x: from, y: 0 }, b: { x: to, y: 0 }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: side } });
+      braces.push({ a: { x: from, y: side * halfW }, b: { x: to, y: side * halfW }, lift: foot + up, toLift: foot + up + T.flightLifts, normal: { x: 0, y: -side } });
+      braces.push({ a: { x: from, y: 0 }, b: { x: to, y: 0 }, lift: foot + up, toLift: foot + up + T.flightLifts, normal: { x: 0, y: side } });
     }
+    // And a brace on the long side the flight is not on, leaning against it: up
+    // from the landing line the flight arrives at to the one it leaves from.
+    braces.push({ a: { x: to, y: -side * halfW }, b: { x: from, y: -side * halfW }, lift: foot, toLift: foot + T.flightLifts, normal: { x: 0, y: -side } });
   });
-  // A diagonal up each end face, flight by flight.
-  for (let i = 0; i < flightCount; i++) {
+  if (starter) {
+    // Up to the first landing from the ground in the bay, on the half the first flight does not leave from.
+    flights.unshift({
+      lower: [{ x: -inner + T.starterRunFt, y: 0 }, { x: -inner + T.starterRunFt, y: halfW }],
+      upper: [{ x: -inner, y: 0 }, { x: -inner, y: halfW }],
+      ground: true, starter: true, lift: start, toLift: first, treads: T.starterTreads,
+    });
+  }
+  // A diagonal up each end face, every four rosettes from the foot.
+  for (let lift = start; lift + T.flightLifts <= topLanding; lift += T.flightLifts) {
     for (const end of [-1, 1]) {
-      braces.push({ a: { x: end * halfL, y: -halfW }, b: { x: end * halfL, y: halfW }, lift: landingLifts[i], toLift: landingLifts[i + 1], normal: { x: end, y: 0 } });
+      braces.push({ a: { x: end * halfL, y: -halfW }, b: { x: end * halfL, y: halfW }, lift, toLift: lift + T.flightLifts, normal: { x: end, y: 0 } });
     }
   }
 
   return {
     stair: true, widthFt: T.lengthFt, depthFt: T.widthFt, heightFt, xs, ys,
-    segments, requiredLift, topLift, deckLifts: landingLifts, ledgerLifts: landingLifts, flightCount,
+    segments, requiredLift, topLift, deckLifts: landingLifts, ledgerLifts: ringLifts, flightCount, adjust, adjusts,
+    // The landings asked for and the rosette each is on; and any left out for being too close above the last.
+    matched: matched.map(m => ({ ...m, atFt: liftZ(m.lift) })), missed,
     standards, ledgers, braces, decks, flights,
   };
 }

@@ -159,6 +159,8 @@ export function tubeBetween(a, b, odIn, material) {
  * `f` is { lower:[[x,y],[x,y]], upper:[[x,y],[x,y]], z0, z1, treads }.
  */
 // A stair stringer is drawn as a rectangular tube on edge: 6 in deep, 2 in wide.
+// (The spacing of the rosettes up a standard, for the step under a flight hung one high.)
+const NODE_SPACING_IN_FOR_STEP = 19.6875;
 export const STRINGER_DEPTH_IN = 6;
 export const STRINGER_WIDTH_IN = 2;
 // Each stands this far in from the standards its ledgers hang on, clear of them.
@@ -197,8 +199,10 @@ export function buildStairFlight(f, material) {
   const out = [];
   for (const [a, b] of stairStringerLines(f)) out.push(rectTubeBetween(a, b, STRINGER_DEPTH_IN, STRINGER_WIDTH_IN, material));
   const n = Math.max(0, Math.round(f.treads || 0));
+  // Buried under the landing it leaves, a flight has treads only above that landing.
+  const clear = Math.min(0.9, Math.max(0, Number(f.treadFrom) || 0));
   for (let k = 1; k <= n; k++) {
-    const t = k / (n + 1);
+    const t = clear + (1 - clear) * (k / (n + 1));
     // A tread runs from the inside face of one stringer to the inside face of the other, and no further.
     const lines = stairStringerLines(f);
     const on = i => [lines[i][0][0] + (lines[i][1][0] - lines[i][0][0]) * t, lines[i][0][1] + (lines[i][1][1] - lines[i][0][1]) * t];
@@ -211,6 +215,15 @@ export function buildStairFlight(f, material) {
     const rx = ((f.upper[0][0] - f.lower[0][0]) / run) * half, ry = ((f.upper[0][1] - f.lower[0][1]) / run) * half;
     const z = f.z0 + (f.z1 - f.z0) * t;
     out.push(plankDeck(Math.min(a[0], b[0]) - Math.abs(rx), Math.min(a[1], b[1]) - Math.abs(ry), Math.max(a[0], b[0]) + Math.abs(rx), Math.max(a[1], b[1]) + Math.abs(ry), z, material));
+  }
+  if (f.step) {
+    // Hung a rosette high: a one-plank step half a rosette under its foot, at the landing line.
+    const [l0, l1] = stairStringerLines(f);
+    const run = Math.hypot(f.upper[0][0] - f.lower[0][0], f.upper[0][1] - f.lower[0][1]) || 1;
+    const rx = ((f.upper[0][0] - f.lower[0][0]) / run) * 0.375, ry = ((f.upper[0][1] - f.lower[0][1]) / run) * 0.375;
+    const a = l0[0], b = l1[0];
+    out.push(plankDeck(Math.min(a[0], b[0]) - Math.abs(rx), Math.min(a[1], b[1]) - Math.abs(ry), Math.max(a[0], b[0]) + Math.abs(rx), Math.max(a[1], b[1]) + Math.abs(ry),
+      f.z0 - inchesToFeet(NODE_SPACING_IN_FOR_STEP) / 2, material));
   }
   return out;
 }

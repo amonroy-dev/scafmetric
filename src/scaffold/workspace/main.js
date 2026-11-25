@@ -64,6 +64,19 @@ const TOOL_META = {
   beam: { label: 'Send to beam', icon: ICONS.beam, hint: 'Click the legs that sit on the beam.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
+// How a stair tower makes up a height that is not a whole number of flights.
+function stairAdjustText(a) {
+  if (!a) return '';
+  const bits = [];
+  if (a.buried) bits.push(`${a.buried} buried a rosette`);
+  if (a.step) bits.push(a.step === 1 ? 'a step' : `${a.step} steps`);
+  if (a.starter) bits.push('a starter stair');
+  return bits.length ? ` (${bits.join(', ')})` : '';
+}
+/** The heights typed into the Stair card: one, or several with commas or spaces between. */
+function parseHeights(text) {
+  return String(text || '').split(/[\s,;]+/).map(Number).filter(h => Number.isFinite(h) && h > 0);
+}
 // A building is a pale mass the scaffold reads against.
 const BUILDING_MASS = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, transparent: true, opacity: 0.55, roughness: 0.9, metalness: 0, depthWrite: false });
 const BUILDING_ROOF = new THREE.MeshStandardMaterial({ color: 0xa1a1aa, transparent: true, opacity: 0.7, roughness: 0.9, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
@@ -157,7 +170,7 @@ const TEMPLATE = `
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
             <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
-          <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
+          <label data-for="stair">Landing heights<span class="sfw-u"><input type="text" id="sfw-stair-h" inputmode="decimal" autocomplete="off" value="${STAIR_DEFAULTS.heightFt}" title="One height, or several with commas between: 25, 36, 45"><i>ft</i></span></label>
           <div data-for="building">
             <div class="sfw-grid2">
               <label data-bldg="new">Shape<select id="sfw-bldg-shape"><option value="" hidden>Choose</option><option value="rect">Rectangle</option><option value="round">Round</option><option value="outline">Trace</option></select></label>
@@ -528,9 +541,9 @@ class Workspace {
       },
       onPreview: (tool, count, info) => this._onToolPreview(tool, count, info),
       onRotate: (tool, value) => this._onToolRotate(tool, value),
-      onBulkFill: (n, tool) => {
+      onBulkFill: (n, tool, adjust) => {
         if (tool === 'stair') {
-          this.$('sfw-hint').textContent = `Stair tower placed: ${n} flight${n === 1 ? '' : 's'}, with its landings, handrails and standards. Ctrl+Z takes it back.`;
+          this.$('sfw-hint').textContent = `Stair tower placed: ${n} flight${n === 1 ? '' : 's'}${stairAdjustText(adjust)}, with its landings, handrails and standards. Ctrl+Z takes it back.`;
         } else if (tool === 'block') {
           this.$('sfw-hint').textContent = n
             ? `Block placed: ${n} new standard${n === 1 ? '' : 's'}, with its ledgers, decks and bracing. Ctrl+Z takes it back.`
@@ -557,7 +570,7 @@ class Workspace {
     this.tools.braceFaceFilter = this.$('sfw-brace-filter').value;
     this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(this.$('sfw-brace-nth').value) || 1)));
     this.tools.perimeterHandrails = this.$('sfw-ledger-outside').checked;
-    this.tools.stairSettings.heightFt = Math.max(1, Number(this.$('sfw-stair-h').value) || STAIR_DEFAULTS.heightFt);
+    this._readStairHeights();
     this._persist = debounce(() => {
       const snapshot = this.state.snapshot();
       saveWip(KEYS.scaffold, snapshot);
@@ -876,10 +889,7 @@ class Workspace {
         : `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.`) +
         (done.skipped ? ` ${done.skipped} wall${done.skipped === 1 ? ' is' : 's are'} not square to the grid and got none.` : '') + ' Ctrl+Z takes it back.';
     });
-    this.$('sfw-stair-h').addEventListener('input', e => {
-      this.tools.stairSettings.heightFt = Math.max(1, Number(e.target.value) || STAIR_DEFAULTS.heightFt);
-      this.tools._refreshGhost();
-    });
+    this.$('sfw-stair-h').addEventListener('input', () => { this._readStairHeights(); this.tools._refreshGhost(); });
     this.$('sfw-ledger-outside').addEventListener('change', e => {
       this.tools.setPerimeterHandrails(e.target.checked);
       this.$('sfw-hint').textContent = e.target.checked
@@ -965,7 +975,10 @@ class Workspace {
       return;
     }
     if (tool === 'stair') {
-      hint.textContent = `Click to place the stair tower: ${info.flights} flight${info.flights === 1 ? '' : 's'}, top landing at ${round(info.deckZ, 2)} ft` +
+      const several = info.matched && info.matched.length > 1;
+      const where = several ? `landings at ${info.matched.map(m => round(m.atFt, 1)).join(', ')} ft` : `top landing at ${round(info.deckZ, 2)} ft`;
+      const left = info.missed && info.missed.length ? ` ${info.missed.join(', ')} ft is too close above the landing under it and was left out.` : '';
+      hint.textContent = `Click to place the stair tower: ${info.flights} flight${info.flights === 1 ? '' : 's'}${stairAdjustText(info.adjusts)}, ${where}` + left +
         `${info.rotation ? `, turned ${info.rotation}°` : ''}.` + (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
       return;
     }
@@ -1717,6 +1730,14 @@ class Workspace {
         hint('Drawing moved.');
       });
     });
+  }
+
+  /** The Stair card's heights: one is the top landing; several are landings the tower must have. */
+  _readStairHeights() {
+    const heights = parseHeights(this.$('sfw-stair-h').value);
+    const k = this.tools.stairSettings;
+    k.heightFt = heights.length ? Math.max(...heights) : STAIR_DEFAULTS.heightFt;
+    k.landingsFt = heights.length > 1 ? heights : null;
   }
 
   /** The building "Scaffold round it" works on: the one selected, else the last one traced. */

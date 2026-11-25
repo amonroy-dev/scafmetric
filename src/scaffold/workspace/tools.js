@@ -1986,7 +1986,8 @@ export class Tools {
     const flights = (plan.flights || []).map(f => ({
       lower: f.lower.map(o => { const p = at(o); return [p.x, p.y]; }),
       upper: f.upper.map(o => { const p = at(o); return [p.x, p.y]; }),
-      z0: s.liftZ(f.lift), z1: s.liftZ(f.toLift), treads: f.treads,
+      z0: f.ground ? 0 : s.liftZ(f.lift), z1: s.liftZ(f.toLift), treads: f.treads,
+      treadFrom: f.treadFrom || 0, starter: !!f.starter, step: !!f.step,
     }));
     return {
       standards: plan.standards.map(o => ({ ...at(o), requiredLift: o.requiredLift })),
@@ -2060,7 +2061,7 @@ export class Tools {
         for (const lift of plan.deckLifts) s.setDeckGuardrails(s.liftZ(lift), [s.liftZ(lift + 1), s.liftZ(lift + 2)]);
       }
     });
-    this.hooks.onBulkFill?.(plan.stair ? plan.flightCount : added, plan.stair ? 'stair' : 'block');
+    this.hooks.onBulkFill?.(plan.stair ? plan.flightCount : added, plan.stair ? 'stair' : 'block', plan.adjusts);
     return added;
   }
 
@@ -2105,7 +2106,7 @@ export class Tools {
     this.ghostGroup.add(outline);
     const { plan } = placement;
     this.hooks.onPreview?.(plan.stair ? 'stair' : 'block', w.standards.length, {
-      flights: plan.flightCount, onWall: !!placement.onWall,
+      flights: plan.flightCount, adjust: plan.adjust, adjusts: plan.adjusts, matched: plan.matched, missed: plan.missed, onWall: !!placement.onWall,
       snapped: placement.snapped,
       widthFt: plan.widthFt, depthFt: plan.depthFt,
       deckZ: plan.deckLifts.length ? s.liftZ(plan.deckLifts[plan.deckLifts.length - 1]) : null,

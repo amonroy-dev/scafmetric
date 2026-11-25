@@ -193,11 +193,39 @@ landing (`planStairTower` in `src/scaffold/workspace/planning.js`).
   rosettes up on its three outer sides, and open where the flights come and go.
   A block's rails are never laid round a stair landing.
 - **Flights** between the landing lines, on alternate halves of the width. A
-  flight is two 7 ft stringers (65 lb each) and nine 2'-6" treads (12 lb each),
-  238 lb, a quarter of it to each of the four standards its two ledgers hang on.
+  flight is two 7 ft stringers and nine 2'-6" treads, a quarter of its weight
+  to each of the four standards its two ledgers hang on.
 - **Handrails** are 7 ft bay diagonals: two beside each flight on its outer side
   and two on the middle standards. One more diagonal goes up each end face for
   each flight.
+
+A flight always climbs four rosettes, so a top landing that is not a whole
+number of flights up is reached by one adjustment, chosen from the height:
+
+- **One rosette short: the top flight is buried.** Its foot hangs on a ledger a
+  rosette below the landing it leaves, its three lowest treads are left off,
+  and three 9 in planks laid between its stringers carry the landing out to
+  where its treads come up.
+- **One rosette over: a step.** The top flight is hung a rosette high, with a
+  one-plank step on two clamp-on brackets making up the first rise.
+- **Two rosettes over: a starter stair.** A short stair of four treads comes
+  off the ground to a first landing two rosettes up, and nothing is decked at
+  the ground. Half its weight is on the ground, not on a leg.
+
+So every height is reached to the rosette, and the hint says which it used. A
+flight is never buried more than one rosette by the tool: the three cases cover
+every height without it.
+
+**Landing heights** in the Stair card takes one height or several, as
+"25, 36, 45". The tower is given a landing within a foot of each (the nearest
+rosette, which is never more than 10 in off), with whole flights between them
+and a buried flight or a step wherever the distance from one wanted landing to
+the next is not a whole number of flights. Two wanted heights less than three
+rosettes (4'-11") apart cannot both be landed on: the upper one is left out and
+the hint says so.
+
+Parts are named for what they are and weighed in round figures for a takeoff.
+No maker's part numbers or catalogue weights are kept here.
 
 No live load is put on a stair. The Live load tool loads its landings like any
 other deck; it does not yet load a flight.

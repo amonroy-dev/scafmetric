@@ -4,7 +4,7 @@
 
 import { tubeWeightPerFoot, resolveComponents } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
-import { STAIR_TOWER } from './planning.js';
+import { stairFlightWeightLb } from './planning.js';
 import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
 import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip, sideBracketCentroidOutFt } from './parts.js';
 import {
@@ -1030,16 +1030,21 @@ export class ScaffoldState {
   }
 
   /** A stair flight between the ledger on `lower` at z0 and the one on `upper` at z1 (see this.stairs). */
-  addStairFlight({ lower, upper, z0, z1, treads }) {
+  addStairFlight({ lower, upper, z0, z1, treads, treadFrom, starter, step }) {
     this._pushHistory();
     const f = { id: this._id('F'), lower: lower.map(p => [p[0], p[1]]), upper: upper.map(p => [p[0], p[1]]), z0, z1, treads };
+    // Buried under the landing it leaves: its treads start part-way up. A
+    // starter stands on the ground at its foot. A step goes with one hung high.
+    if (treadFrom > 0) f.treadFrom = treadFrom;
+    if (starter) f.starter = true;
+    if (step) f.step = true;
     this.stairs.set(f.id, f);
     this._emit();
     return f;
   }
 
   /** What a flight weighs: its two stringers and its treads. */
-  stairFlightWeightLb(f) { return 2 * STAIR_TOWER.stringerLb + (f.treads || 0) * STAIR_TOWER.treadLb; }
+  stairFlightWeightLb(f) { return stairFlightWeightLb(f); }
 
   remove(id) { this._pushHistory();
     for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.buildings, this.liveLoads, this.plankPlacements]) {
@@ -1333,9 +1338,10 @@ export class ScaffoldState {
     }
     // A stair flight hangs on a ledger at each end: half its weight to each,
     // and each ledger passes its half to the standards at its two ends.
+    // A starter stair stands on the ground at its foot: that half is not on any leg.
     for (const f of this.stairs.values()) {
       const w = this.stairFlightWeightLb(f) / 4;
-      for (const p of [...f.lower, ...f.upper]) attribute(p[0], p[1], w);
+      for (const p of (f.starter ? f.upper : [...f.lower, ...f.upper])) attribute(p[0], p[1], w);
     }
     // Deck self weight, board by board: a plank bears on the ledgers at its
     // two ends and on nothing else, so that is where its weight goes, and from
