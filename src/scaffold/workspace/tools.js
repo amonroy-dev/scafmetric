@@ -9,7 +9,7 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
-import { buildStairFlight } from './parts.js';
+import { buildStairFlight, stairStringerLines } from './parts.js';
 import { findEnd, pullEnd } from './pull.js';
 import { rectOutline, roundOutline } from './buildings.js';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
@@ -870,6 +870,8 @@ export class Tools {
     for (const map of [s.ledgers, s.braces, s.guardrails]) for (const m of map.values()) segments.push({ id: m.id, a: m.a, b: m.b });
     for (const k of s.brackets.values()) for (const m of sideBracketWorldMembers(k, k.dir, k.lengthFt)) segments.push({ id: k.id, a: m.a, b: m.b });
     for (const t of s.trusses.values()) for (const m of trussWorldMembers(t.a, t.b, t.family)) segments.push({ id: t.id, a: m.a, b: m.b });
+    // A stair flight is taken by either of its stringers.
+    for (const f of s.stairs.values()) for (const [a, b] of stairStringerLines(f)) segments.push({ id: f.id, a, b });
     for (const d of s.plankBays()) {
       outlines.push({ id: d.id, corners: [[d.x0, d.y0, d.z], [d.x1, d.y0, d.z], [d.x1, d.y1, d.z], [d.x0, d.y1, d.z]] });
     }

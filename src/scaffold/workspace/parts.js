@@ -158,9 +158,44 @@ export function tubeBetween(a, b, odIn, material) {
  * A stair flight as it is drawn: a stringer down each side and its treads.
  * `f` is { lower:[[x,y],[x,y]], upper:[[x,y],[x,y]], z0, z1, treads }.
  */
+// A stair stringer is drawn as a rectangular tube on edge: 6 in deep, 2 in wide.
+export const STRINGER_DEPTH_IN = 6;
+export const STRINGER_WIDTH_IN = 2;
+// Each stands this far in from the standards its ledgers hang on, clear of them.
+const STRINGER_INSET_FT = 0.25;
+
+/** A rectangular tube from a to b, `depthIn` up its side and `widthIn` across, standing on edge. */
+export function rectTubeBetween(a, b, depthIn, widthIn, material) {
+  const from = new THREE.Vector3(a[0], a[1], a[2]), along = new THREE.Vector3(b[0], b[1], b[2]).sub(from);
+  const len = Math.max(along.length(), 1e-6);
+  const x = along.clone().normalize();
+  // Its width lies level, square to the run; its depth is square to both.
+  const y = new THREE.Vector3(0, 0, 1).cross(x);
+  if (y.lengthSq() < 1e-9) y.set(0, 1, 0);
+  y.normalize();
+  const z = x.clone().cross(y);
+  const m = new THREE.Mesh(UNIT_BOX, material);
+  m.position.copy(from).addScaledVector(along, 0.5);
+  m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  m.scale.set(len, inchesToFeet(widthIn), inchesToFeet(depthIn));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** The centre lines of a flight's two stringers: [[a, b], [a, b]], each a little in from its standards. */
+export function stairStringerLines(f) {
+  const cx = (f.lower[0][0] + f.lower[1][0]) / 2, cy = (f.lower[0][1] + f.lower[1][1]) / 2;
+  return [0, 1].map(i => {
+    const dx = cx - f.lower[i][0], dy = cy - f.lower[i][1], d = Math.hypot(dx, dy) || 1;
+    const ox = (dx / d) * STRINGER_INSET_FT, oy = (dy / d) * STRINGER_INSET_FT;
+    return [[f.lower[i][0] + ox, f.lower[i][1] + oy, f.z0], [f.upper[i][0] + ox, f.upper[i][1] + oy, f.z1]];
+  });
+}
+
 export function buildStairFlight(f, material) {
   const out = [];
-  for (const i of [0, 1]) out.push(tubeBetween([f.lower[i][0], f.lower[i][1], f.z0], [f.upper[i][0], f.upper[i][1], f.z1], 2.4, material));
+  for (const [a, b] of stairStringerLines(f)) out.push(rectTubeBetween(a, b, STRINGER_DEPTH_IN, STRINGER_WIDTH_IN, material));
   const n = Math.max(0, Math.round(f.treads || 0));
   for (let k = 1; k <= n; k++) {
     const t = k / (n + 1);

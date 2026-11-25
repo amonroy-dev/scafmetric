@@ -104,3 +104,24 @@ test('turned a quarter turn it stands 7 ft wide and 14 ft deep, and placing it t
   tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 0, y: 0 }, snapped: false, rotationSteps: 1 });
   assert.deepEqual([s.standards.size, s.ledgers.size, s.braces.size, s.stairs.size, s.planks.size], before);
 });
+
+test('a box drawn round the tower takes its flights, and a stringer is a 6 x 2 tube on edge', async () => {
+  const { s, tools } = place();
+  const { stairStringerLines, rectTubeBetween, STRINGER_DEPTH_IN, STRINGER_WIDTH_IN } = await import('../src/scaffold/workspace/parts.js');
+  const parts = tools._marqueeParts();
+  for (const f of s.stairs.values()) {
+    const mine = parts.segments.filter(seg => seg.id === f.id);
+    assert.equal(mine.length, 2, 'both stringers stand for the flight');
+    assert.deepEqual(mine.map(seg => [seg.a[2], seg.b[2]]), [[f.z0, f.z1], [f.z0, f.z1]]);
+  }
+  const f = [...s.stairs.values()][0];
+  const [[a, b]] = stairStringerLines(f);
+  assert.ok(Math.abs(Math.abs(a[1] - f.lower[0][1]) - 0.25) < 1e-9, 'a little in from the standards');
+  const m = rectTubeBetween(a, b, STRINGER_DEPTH_IN, STRINGER_WIDTH_IN, null);
+  assert.deepEqual([STRINGER_DEPTH_IN, STRINGER_WIDTH_IN], [6, 2]);
+  assert.ok(Math.abs(m.scale.x - Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])) < 1e-9, 'as long as the flight');
+  assert.ok(Math.abs(m.scale.y - 2 / 12) < 1e-9 && Math.abs(m.scale.z - 6 / 12) < 1e-9);
+  // On edge: its width lies level.
+  const across = new (await import('three')).Vector3(0, 1, 0).applyQuaternion(m.quaternion);
+  assert.ok(Math.abs(across.z) < 1e-9);
+});
