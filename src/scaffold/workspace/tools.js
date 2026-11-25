@@ -9,12 +9,14 @@
 // (intersecting), Shift adds to the current selection.
 
 import * as THREE from 'three';
+import { buildStairFlight } from './parts.js';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { legColumn } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame, planLiftOutline,
   planBlockRecipe, planStandardSegmentsForLift, rotateOffset90, snapBlockCenter, BLOCK_DEFAULTS,
+  planStairTower, STAIR_DEFAULTS,
 } from './planning.js';
 import { hitData, instanceMeshes, clearGroup } from './instancing.js';
 import {
@@ -26,6 +28,7 @@ import { buildPlankPreviewForLedger, crossPlankPlacement, plankRunAxis, sameRunA
 import { ARM_PREFIX } from './state.js';
 import {
   buildFaceGraph, framedFaces, facingOutward, faceKey, pickFace, faceBraceTarget, nodesByColumn, planPerimeterBraces,
+  traceFraming, MIN_SPAN_FT, MAX_SPAN_FT,
   bracketTipFaces, footprintCentroid, PERP_OFFSET_FT,
 } from './braces.js';
 import { marqueeFromDrag, marqueeHits, combineSelection, flatRectangleCorners, MARQUEE_DRAG_THRESHOLD_PX } from './screenmarquee.js';
@@ -60,7 +63,7 @@ const RAIL_ON_LIFT_FT = 0.05;
 // A leg stands where a bracket hangs when it is this near in plan.
 const BRACKET_HOST_FT = 0.05;
 // In toolbar order. Block comes straight after Select: most scaffolds start as one.
-export const TOOLS = ['select', 'block', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
+export const TOOLS = ['select', 'block', 'stair', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 // The block ghost's footprint: blue, and green once snapped (ScaffoldPro's cue).
@@ -119,6 +122,8 @@ export class Tools {
     // Block tool: ScaffoldPro's block recipe (the block card edits it) and the
     // preview's quarter turns (R).
     this.blockSettings = { ...BLOCK_DEFAULTS };
+    // Stair tool: the height of the tower's top landing (its card's one field).
+    this.stairSettings = { ...STAIR_DEFAULTS };
     this.rotationSteps = 0;
     // Live load tool: a load spans along the boards of the deck it sits on,
     // until R turns it across them. Picking the tool again puts it back.
@@ -449,7 +454,7 @@ export class Tools {
       return;
     }
     // A click places the block the ghost is showing.
-    if (this.tool === 'block') {
+    if (this.tool === 'block' || this.tool === 'stair') {
       const placement = this._blockPlacement(e);
       if (placement) this.placeBlockAt(placement);
       return;
@@ -899,6 +904,15 @@ export class Tools {
     let frame = lifts.frames.get(level);
     if (frame === undefined) lifts.frames.set(level, frame = liftFrame(nodes));
     outline = planLiftOutline(nodes, frame, (a, b) => this._isBayEdge(a, b));
+    // A side the traced outline has a bay on both hands of is inside, whatever
+    // the squares say: they miss a bay with a standard part-way along a side.
+    // (The trace knows the legs only, so it cannot call a side outside: a row
+    // of bracket standards may stand beyond it.)
+    const traced = this._framing();
+    for (const e of outline.edges) {
+      const side = traced.byKey.get(faceKey(e.a.columnId, e.b.columnId));
+      if (side && !side.outside) outline.outside.delete(e.key);
+    }
     lifts.outlines.set(level, outline);
     return outline;
   }
@@ -1068,7 +1082,13 @@ export class Tools {
     const standards = this._legs();
     // Sides of the scaffold as it is framed (a ledger between the two
     // standards, where there are ledgers), each outside one facing out.
-    const faces = facingOutward(framedFaces(buildFaceGraph(standards), this._standardLinks(standards)));
+    // Where there are ledgers the faces are the sides traced along them, each
+    // knowing whether it is outside. Standards with none on them yet have only
+    // where they stand to go on.
+    const traced = this._framing();
+    const loose = facingOutward(framedFaces(buildFaceGraph(standards), this._standardLinks(standards)))
+      .filter(f => !traced.framed.has(f.columnIdA) || !traced.framed.has(f.columnIdB));
+    const faces = [...traced.faces.filter(f => f.spanFt >= MIN_SPAN_FT && f.spanFt <= MAX_SPAN_FT), ...loose];
     if (this.state.brackets.size) {
       const nodes = this.state.nodes();
       const byColumn = nodesByColumn(nodes);
@@ -1117,7 +1137,19 @@ export class Tools {
         framed.add(b);
       }
     }
+    // And the two halves of a ledger that passes a standard part-way along it.
+    for (const f of this._framing().faces) pairs.add(faceKey(f.columnIdA, f.columnIdB));
     return { joined: (a, b) => pairs.has(faceKey(a, b)), framed: id => framed.has(id) };
+  }
+
+  /** The scaffold's outline traced along its ledgers and trusses (traceFraming), kept until the model changes. */
+  _framing() {
+    const version = this.state.version;
+    if (this._framingCache && this._framingCache.version === version) return this._framingCache.traced;
+    const traced = traceFraming(this._legs(), [...this.state.ledgers.values(), ...this.state.trusses.values()]);
+    traced.byKey = new Map(traced.faces.map(f => [faceKey(f.columnIdA, f.columnIdB), f]));
+    this._framingCache = { version, traced };
+    return traced;
   }
 
   /** True when a diagonal already runs between these two points. */
@@ -1376,6 +1408,14 @@ export class Tools {
 
   _blockPlan() {
     const s = this.state;
+    // The Stair tool places a stair tower the way the Block tool places a block.
+    if (this.tool === 'stair') {
+      return planStairTower(this.stairSettings, {
+        liftZ: lift => s.liftZ(lift),
+        showBaseCollar: s.base.showBaseCollar,
+        standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
+      });
+    }
     return planBlockRecipe(this.blockSettings, {
       liftZ: lift => s.liftZ(lift),
       showBaseCollar: s.base.showBaseCollar,
@@ -1430,10 +1470,15 @@ export class Tools {
     const corners = [[plan.xs[0], plan.ys[0]], [plan.xs[plan.xs.length - 1], plan.ys[0]],
       [plan.xs[plan.xs.length - 1], plan.ys[plan.ys.length - 1]], [plan.xs[0], plan.ys[plan.ys.length - 1]]]
       .map(([x, y]) => at({ x, y }));
+    const flights = (plan.flights || []).map(f => ({
+      lower: f.lower.map(o => { const p = at(o); return [p.x, p.y]; }),
+      upper: f.upper.map(o => { const p = at(o); return [p.x, p.y]; }),
+      z0: s.liftZ(f.lift), z1: s.liftZ(f.toLift), treads: f.treads,
+    }));
     return {
       standards: plan.standards.map(at),
       ledgers: plan.ledgers.map(l => ({ a: xyz(l.a, l.lift), b: xyz(l.b, l.lift) })),
-      braces, decks, corners,
+      braces, decks, corners, flights,
     };
   }
 
@@ -1471,14 +1516,20 @@ export class Tools {
       for (const d of w.decks) {
         const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2;
         if (decked.some(e => Math.abs(e.z - d.z) < 0.1 && Math.hypot((e.x0 + e.x1) / 2 - cx, (e.y0 + e.y1) / 2 - cy) < 0.5)) continue;
-        s.addPlank([d.x0, d.y0, d.z], [d.x1, d.y1, d.z]);
+        s.addPlank([d.x0, d.y0, d.z], [d.x1, d.y1, d.z], { stair: !!plan.stair });
       }
-      // Rails round each planked level, on the two rosettes above the deck.
-      if (this.blockSettings.guardrails) {
+      for (const f of w.flights) {
+        const there = [...s.stairs.values()].some(e => Math.abs(e.z0 - f.z0) < 0.05 && Math.hypot(e.lower[0][0] - f.lower[0][0], e.lower[0][1] - f.lower[0][1]) < 0.05
+          && Math.hypot(e.lower[1][0] - f.lower[1][0], e.lower[1][1] - f.lower[1][1]) < 0.05);
+        if (!there) s.addStairFlight(f);
+      }
+      // Rails round each planked level, on the two rosettes above the deck. A
+      // stair tower's rails are among its ledgers, open where the flights are.
+      if (!plan.stair && this.blockSettings.guardrails) {
         for (const lift of plan.deckLifts) s.setDeckGuardrails(s.liftZ(lift), [s.liftZ(lift + 1), s.liftZ(lift + 2)]);
       }
     });
-    this.hooks.onBulkFill?.(added, 'block');
+    this.hooks.onBulkFill?.(plan.stair ? plan.flightCount : added, plan.stair ? 'stair' : 'block');
     return added;
   }
 
@@ -1498,7 +1549,8 @@ export class Tools {
     for (const d of w.decks) {
       for (const b of s.plankBoards({ id: 'ghost', ...d })) meshes.push(plankBoard(b.center, b.rotationZ, b.lengthFt, b.widthIn, mat));
     }
-    if (this.blockSettings.guardrails) {
+    for (const f of w.flights) meshes.push(...buildStairFlight(f, mat));
+    if (!placement.plan.stair && this.blockSettings.guardrails) {
       for (const lift of placement.plan.deckLifts) {
         for (const z of [s.liftZ(lift + 1), s.liftZ(lift + 2)]) {
           w.corners.forEach((c, i) => {
@@ -1517,7 +1569,8 @@ export class Tools {
     outline.userData.ownsGeometry = true;
     this.ghostGroup.add(outline);
     const { plan } = placement;
-    this.hooks.onPreview?.('block', w.standards.length, {
+    this.hooks.onPreview?.(plan.stair ? 'stair' : 'block', w.standards.length, {
+      flights: plan.flightCount,
       snapped: placement.snapped,
       widthFt: plan.widthFt, depthFt: plan.depthFt,
       deckZ: plan.deckLifts.length ? s.liftZ(plan.deckLifts[plan.deckLifts.length - 1]) : null,
@@ -1586,9 +1639,9 @@ export class Tools {
   rotate() {
     // Redraw first, then report: what R did is the news, not the usual hover hint.
     const done = (tool, value) => { this._refreshGhost(); this.hooks.onRotate?.(tool, value); return value; };
-    if (this.tool === 'block') {
+    if (this.tool === 'block' || this.tool === 'stair') {
       this.rotationSteps = (this.rotationSteps + 1) % 4;
-      return done('block', this.rotationSteps);
+      return done(this.tool, this.rotationSteps);
     }
     if (this.tool === 'brace') {
       this.braceDirection = this.braceDirection === 'ascending' ? 'descending' : 'ascending';
@@ -1653,7 +1706,7 @@ export class Tools {
     this._pendingBatch = null;
     if (this.tool === 'select' || this.tool === 'erase') return;
     if (this.tool === 'beam') { this._legHoverGhost(e); return; }
-    if (this.tool === 'block') { this._blockGhost(e); return; }
+    if (this.tool === 'block' || this.tool === 'stair') { this._blockGhost(e); return; }
     // Live loads: ghost the patch and its span arrows on the hovered deck, or
     // on every deck of the platform with SHIFT.
     if (this.tool === 'liveload') {

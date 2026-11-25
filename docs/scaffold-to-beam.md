@@ -177,6 +177,31 @@ there. Either way a bay edge is listed and weighed once. The Ledger tool only
 adds: the block's rail down the face the brackets hang on stays until it is
 erased (one click for each of the two rails).
 
+## Stair tower
+
+The Stair tool places a 14 x 7 ft switchback stair tower the way the Block tool
+places a block: a ghost that snaps onto the standards beside it, R to turn it a
+quarter turn, a click to place. Its one setting is the height of the top
+landing; the tower has a flight for every four rosettes (6'-6 3/4") under that
+height, and its standards are picked to stand two rosettes above the top
+landing (`planStairTower` in `src/scaffold/workspace/planning.js`).
+
+- **Ten standards.** Four down each long side, at 0, 3'-6", 10'-6" and 14 ft,
+  and one in the middle of the 7 ft width on each landing line.
+- **Landings** 3'-6" by 7 ft at alternate ends, the first on the collar's
+  rosette, decked with 7 ft planks. Each is railed with ledgers one and two
+  rosettes up on its three outer sides, and open where the flights come and go.
+  A block's rails are never laid round a stair landing.
+- **Flights** between the landing lines, on alternate halves of the width. A
+  flight is two 7 ft stringers (65 lb each) and nine 2'-6" treads (12 lb each),
+  238 lb, a quarter of it to each of the four standards its two ledgers hang on.
+- **Handrails** are 7 ft bay diagonals: two beside each flight on its outer side
+  and two on the middle standards. One more diagonal goes up each end face for
+  each flight.
+
+No live load is put on a stair. The Live load tool loads its landings like any
+other deck; it does not yet load a flight.
+
 ## Picking legs and importing
 
 **To beam** in the toolbar opens the Send to beam card. With it open, a click on a

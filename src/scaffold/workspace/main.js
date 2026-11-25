@@ -12,11 +12,11 @@ import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, liveLoadArrows, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
-import { BLOCK_DEFAULTS } from './planning.js';
+import { BLOCK_DEFAULTS, STAIR_DEFAULTS } from './planning.js';
 import { beamUnderPickedLegs, toBeamPointLoads, forBeamForm, wholePoundsOnLeg, loadOnBeamFromLeg } from '../legloads.js';
 import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
-import { buildSideBracket, buildTruss, GUARDRAIL_OD_IN, SHARED_GEO, sideBracketTip } from './parts.js';
+import { buildSideBracket, buildTruss, buildStairFlight, GUARDRAIL_OD_IN, SHARED_GEO, sideBracketTip } from './parts.js';
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
@@ -28,6 +28,7 @@ const ICONS = {
   select: svg('<path d="M5 3.5l10 6.2-4.4 1.2-2.3 4.3L5 3.5z"/>'),
   standard: svg('<path d="M10 3v12.5M6.5 16.5h7M8.2 3h3.6M7.8 8h4.4M7.8 12h4.4"/>'),
   block: svg('<rect x="3.5" y="3.5" width="13" height="13" rx="1.5"/><path d="M3.5 10h13M10 3.5v13"/>'),
+  stair: svg('<path d="M3 16.5h3.5v-3.5H10V9.5h3.5V6H17"/>'),
   ledger: svg('<path d="M5 10h10"/><circle cx="3.6" cy="10" r="1.4"/><circle cx="16.4" cy="10" r="1.4"/>'),
   brace: svg('<path d="M4 3.5v13M16 3.5v13M4 15L16 5"/>'),
   truss: svg('<path d="M3 14.5h14M4 6h12M4 6l3 8.5L10 6l3 8.5L16 6"/>'),
@@ -46,6 +47,7 @@ const ICONS = {
 const TOOL_META = {
   select: { label: 'Select', icon: ICONS.select, hint: 'Click to select, Shift+click to add. Drag left to right for a window, right to left for a crossing; Ctrl+drag adds. Delete removes.' },
   block: { label: 'Block', icon: ICONS.block, hint: 'Set the block in the card, then click the grid to place it. It snaps onto the standards beside it. R turns it 90°.' },
+  stair: { label: 'Stair', icon: ICONS.stair, hint: 'Set the top landing height in the card, then click the grid to place a 14 x 7 ft stair tower. It snaps onto the standards beside it. R turns it 90°.' },
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
   ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level, or with Perimeter handrails ticked, only the outside of it.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
@@ -148,6 +150,7 @@ const TEMPLATE = `
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
             <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
+          <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
           <label data-for="ledger" class="sfw-check"><input type="checkbox" id="sfw-ledger-outside"><span>Perimeter handrails</span></label>
           <div data-for="brace">
             <div class="sfw-grid2 sfw-mt">
@@ -454,7 +457,9 @@ class Workspace {
       onPreview: (tool, count, info) => this._onToolPreview(tool, count, info),
       onRotate: (tool, value) => this._onToolRotate(tool, value),
       onBulkFill: (n, tool) => {
-        if (tool === 'block') {
+        if (tool === 'stair') {
+          this.$('sfw-hint').textContent = `Stair tower placed: ${n} flight${n === 1 ? '' : 's'}, with its landings, handrails and standards. Ctrl+Z takes it back.`;
+        } else if (tool === 'block') {
           this.$('sfw-hint').textContent = n
             ? `Block placed: ${n} new standard${n === 1 ? '' : 's'}, with its ledgers, decks and bracing. Ctrl+Z takes it back.`
             : 'Block placed onto the standards already there, with its ledgers, decks and bracing.';
@@ -480,6 +485,7 @@ class Workspace {
     this.tools.braceFaceFilter = this.$('sfw-brace-filter').value;
     this.tools.braceNthBay = Math.min(3, Math.max(1, Math.floor(Number(this.$('sfw-brace-nth').value) || 1)));
     this.tools.perimeterHandrails = this.$('sfw-ledger-outside').checked;
+    this.tools.stairSettings.heightFt = Math.max(1, Number(this.$('sfw-stair-h').value) || STAIR_DEFAULTS.heightFt);
     this._persist = debounce(() => {
       const snapshot = this.state.snapshot();
       saveWip(KEYS.scaffold, snapshot);
@@ -737,6 +743,10 @@ class Workspace {
       // The sockets that can take a standard light up, as rosettes do for the other tools.
       this._rebuildNodes();
     });
+    this.$('sfw-stair-h').addEventListener('input', e => {
+      this.tools.stairSettings.heightFt = Math.max(1, Number(e.target.value) || STAIR_DEFAULTS.heightFt);
+      this.tools._refreshGhost();
+    });
     this.$('sfw-ledger-outside').addEventListener('change', e => {
       this.tools.setPerimeterHandrails(e.target.checked);
       this.$('sfw-hint').textContent = e.target.checked
@@ -788,6 +798,11 @@ class Workspace {
       hint.textContent = info.batch
         ? `SHIFT: deck ${count} bay${count === 1 ? '' : 's'} along this run — click or press Enter.`
         : `Click to deck this bay${info.crossed ? ', boards turned with R' : ''}. R turns the boards; SHIFT decks the whole run.`;
+      return;
+    }
+    if (tool === 'stair') {
+      hint.textContent = `Click to place the stair tower: ${info.flights} flight${info.flights === 1 ? '' : 's'}, top landing at ${round(info.deckZ, 2)} ft` +
+        `${info.rotation ? `, turned ${info.rotation}°` : ''}.` + (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
       return;
     }
     if (tool === 'block') {
@@ -891,7 +906,7 @@ class Workspace {
     if (!hint) return;
     // The refreshed preview usually writes its own hint; these are for when it
     // has nothing to show.
-    if (tool === 'block') return;
+    if (tool === 'block' || tool === 'stair') return;
     if (tool === 'brace') {
       const sel = this.$('sfw-brace-dir');
       if (sel) sel.value = value;
@@ -1004,6 +1019,10 @@ class Workspace {
       const mat = this._matFor(t.id, MATERIALS.ledger);
       for (const m of buildTruss(t.a, t.b, mat, t.family)) add(m, { id: t.id, kind: 'truss' });
     }
+    for (const f of g.stairs || []) {
+      const mat = this._matFor(f.id, MATERIALS.ledger);
+      for (const m of buildStairFlight(f, mat)) add(m, { id: f.id, kind: 'stair' });
+    }
     for (const gr of g.guardrails || []) {
       const mat = this._matFor(gr.id, MATERIALS.brace);
       add(tubeBetween(gr.a, gr.b, GUARDRAIL_OD_IN, mat), { id: gr.id, kind: 'guardrail' });
@@ -1103,12 +1122,18 @@ class Workspace {
     if (this.state.brackets.has(id)) return 'bracket';
     if (this.state.trusses.has(id)) return 'truss';
     if (this.state.guardrails.has(id)) return 'guardrail';
+    if (this.state.stairs.has(id)) return 'stair';
     if (this.state.liveLoads.has(id)) return 'live load';
     return 'item';
   }
 
   _describe(id) {
     const r = v => Math.round(v * 100) / 100;
+    const flight = this.state.stairs.get(id);
+    if (flight) {
+      return [['Type', 'Stair flight'], ['Rise', `${r(flight.z1 - flight.z0)} ft`], ['Treads', String(flight.treads || 0)],
+        ['Weight', `${Math.round(this.state.stairFlightWeightLb(flight))} lb`]];
+    }
     const st = this.state.standards.get(id);
     if (st) {
       const { legs } = this.state.takeoff();

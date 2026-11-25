@@ -145,6 +145,8 @@ export function planGuardrails(rects, deckZ, opts = {}) {
 export function deckRectsByHeight(state) {
   const byZ = new Map();
   for (const p of state.plankBays()) {
+    // A stair landing has rails of its own, open where the flights come and go.
+    if (p.stair) continue;
     const z = roundTo(p.z);
     if (!byZ.has(z)) byZ.set(z, []);
     byZ.get(z).push({ xMin: p.x0, xMax: p.x1, yMin: p.y0, yMax: p.y1 });

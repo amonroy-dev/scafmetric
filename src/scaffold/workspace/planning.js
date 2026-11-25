@@ -558,6 +558,112 @@ export function planBlockRecipe(recipe, { liftZ, showBaseCollar = true, standard
 
 export const BLOCK_SNAP_RADIUS_FT = 1.25;
 
+// --- the stair tower -------------------------------------------------------------
+// A 14 x 7 ft switchback tower on ten standards: a 3'-6" landing at each end,
+// the full 7 ft wide, and between them a 7 ft bay holding two 3'-6" flights
+// side by side, one going each way. Four standards down each long side (at
+// 0, 3'-6", 10'-6" and 14 ft) and one in the middle of the width on each
+// landing line, where the two flights meet.
+export const STAIR_TOWER = {
+  lengthFt: 14, widthFt: 7, landingFt: 3.5,
+  // One flight (a pair of 7 ft stringers) climbs four rosettes: 6'-6 3/4".
+  flightLifts: 4,
+  treadsPerFlight: 9,
+  stringerLb: 65, // USSL70 / USSR70, each
+  treadLb: 12,    // UST26
+};
+export const STAIR_DEFAULTS = { heightFt: 14.5 };
+
+/**
+ * Lay a stair tower out, centred on the origin, unrotated, in the shape
+ * planBlockRecipe returns so the Block tool's ghost, snapping and placing take
+ * it as they take a block. `heightFt` is the height of the top landing; the
+ * tower has as many flights as fit under it (one at least).
+ *
+ *   landings   at the first rosette (the collar's) and every fourth above, at
+ *              alternate ends, decked with 7 ft planks across the tower
+ *   flights    from each landing line up to the other, on alternate halves
+ *   handrails  two diagonals beside each flight on its outer side and two on
+ *              the middle standards, a rosette and two above the stringer
+ *   rails      ledgers one and two rosettes above each landing, round its
+ *              three outer sides; and across the half of the top landing no
+ *              flight leaves from
+ *   standards  two rosettes above the top landing, picked to that height
+ */
+export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardLengthsFt }) {
+  const T = STAIR_TOWER;
+  const heightFt = Math.max(0.1, Number(recipe && recipe.heightFt) || STAIR_DEFAULTS.heightFt);
+  const start = showBaseCollar ? 0 : 1;
+  let flightCount = 1;
+  while (flightCount < 100 && liftZ(start + (flightCount + 1) * T.flightLifts) <= heightFt + 1e-6) flightCount++;
+  const landingLifts = Array.from({ length: flightCount + 1 }, (_, i) => start + i * T.flightLifts);
+  const topLanding = landingLifts[flightCount];
+  const requiredLift = topLanding + 2;
+  const segments = planStandardSegmentsForLift(requiredLift, standardLengthsFt);
+  const topLift = segments.reduce((n, ft) => n + rosettesOnSegment(ft), 0);
+
+  const halfL = T.lengthFt / 2, halfW = T.widthFt / 2, inner = halfL - T.landingFt;
+  const xs = [-halfL, -inner, inner, halfL];
+  const ys = [-halfW, 0, halfW];
+  const standards = [];
+  for (const y of [-halfW, halfW]) for (const x of xs) standards.push({ x, y });
+  standards.push({ x: -inner, y: 0 }, { x: inner, y: 0 });
+
+  const ledgers = [];
+  const ledger = (ax, ay, bx, by, lift) => ledgers.push({ a: { x: ax, y: ay }, b: { x: bx, y: by }, lift });
+  for (const lift of landingLifts) {
+    for (const y of [-halfW, halfW]) for (let i = 0; i < 3; i++) ledger(xs[i], y, xs[i + 1], y, lift);
+    for (const x of [-halfL, halfL]) ledger(x, -halfW, x, halfW, lift);
+    for (const x of [-inner, inner]) { ledger(x, -halfW, x, 0, lift); ledger(x, 0, x, halfW, lift); }
+    ledger(-inner, 0, inner, 0, lift);
+  }
+
+  const decks = [], flights = [], braces = [];
+  landingLifts.forEach((lift, i) => {
+    // Landings alternate ends, the first at the left.
+    const end = i % 2 === 0 ? -1 : 1;
+    const [x0, x1] = end < 0 ? [-halfL, -inner] : [inner, halfL];
+    decks.push({ x0, y0: -halfW, x1, y1: halfW, lift });
+    // Its rails. The landing the stair starts from is a step off the ground and has none.
+    if (i > 0) {
+      for (const up of [1, 2]) {
+        ledger(end * halfL, -halfW, end * halfL, halfW, lift + up);
+        for (const y of [-halfW, halfW]) ledger(x0, y, x1, y, lift + up);
+      }
+    }
+    if (i === flightCount) {
+      // Nothing leaves the top landing: close the half the next flight would have used.
+      const side = i % 2 === 0 ? -1 : 1;
+      for (const up of [1, 2]) ledger(end * inner, 0, end * inner, side * halfW, lift + up);
+      return;
+    }
+    // The flight up from this landing: away from its end, on the left-hand half going out and the other coming back.
+    const side = i % 2 === 0 ? -1 : 1;
+    const from = end * inner, to = -end * inner;
+    flights.push({
+      lower: [{ x: from, y: 0 }, { x: from, y: side * halfW }],
+      upper: [{ x: to, y: 0 }, { x: to, y: side * halfW }],
+      lift, toLift: lift + T.flightLifts, treads: T.treadsPerFlight,
+    });
+    for (const up of [1, 2]) {
+      braces.push({ a: { x: from, y: side * halfW }, b: { x: to, y: side * halfW }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: side } });
+      braces.push({ a: { x: from, y: 0 }, b: { x: to, y: 0 }, lift: lift + up, toLift: lift + up + T.flightLifts, normal: { x: 0, y: side } });
+    }
+  });
+  // A diagonal up each end face, flight by flight.
+  for (let i = 0; i < flightCount; i++) {
+    for (const end of [-1, 1]) {
+      braces.push({ a: { x: end * halfL, y: -halfW }, b: { x: end * halfL, y: halfW }, lift: landingLifts[i], toLift: landingLifts[i + 1], normal: { x: end, y: 0 } });
+    }
+  }
+
+  return {
+    stair: true, widthFt: T.lengthFt, depthFt: T.widthFt, heightFt, xs, ys,
+    segments, requiredLift, topLift, deckLifts: landingLifts, ledgerLifts: landingLifts, flightCount,
+    standards, ledgers, braces, decks, flights,
+  };
+}
+
 /**
  * Where to put a block whose centre is near `center` so it joins what is
  * already standing, as ScaffoldPro's ghost does: line one of its edge

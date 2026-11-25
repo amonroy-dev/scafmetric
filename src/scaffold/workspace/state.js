@@ -4,6 +4,7 @@
 
 import { tubeWeightPerFoot, resolveComponents } from '../catalog.js';
 import { getStandardBaseOffsetFt, inchesToFeet, buildBestFitPlankLayout, PLANK } from './parts.js';
+import { STAIR_TOWER } from './planning.js';
 import { planGuardrails, deckRectsByHeight, computeRectUnionBoundarySegments } from './guardrails.js';
 import { trussMemberLengthFt, sideBracketTubeLengthFt, sideBracketTip, sideBracketCentroidOutFt } from './parts.js';
 import {
@@ -74,6 +75,11 @@ export class ScaffoldState {
     this.brackets = new Map();  // id -> { id, x, y, z, dir:[dx,dy], lengthFt }
     this.trusses = new Map();   // id -> { id, a:[x,y,z], b:[x,y,z] }
     this.guardrails = new Map();// id -> { id, a:[x,y,z], b:[x,y,z], kind }
+    // A stair flight: two stringers and their treads, hooked on a ledger at
+    // the bottom and one at the top. id -> { id, lower:[[x,y],[x,y]],
+    // upper:[[x,y],[x,y]], z0, z1, treads }: the standards at the two ends of
+    // each of those ledgers, and the heights of the two.
+    this.stairs = new Map();
     // A live load sits on a deck: id -> { id, deckId, psf, across }. Models
     // saved before that hold ledger-anchored patches, { id, ledgerId, sideSign, psf }.
     // These are ALL the live load there is: a deck carries none of its own, so
@@ -122,6 +128,7 @@ export class ScaffoldState {
       standards: [...this.standards], ledgers: [...this.ledgers],
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       trusses: [...this.trusses], guardrails: [...this.guardrails],
+      stairs: [...this.stairs],
       liveLoads: [...this.liveLoads],
       plankPlacements: [...this.plankPlacements],
       seq: this._seq, base: { ...this.base },
@@ -136,6 +143,7 @@ export class ScaffoldState {
     this.brackets = new Map(d.brackets || []);
     this.trusses = new Map(d.trusses || []);
     this.guardrails = new Map(d.guardrails || []);
+    this.stairs = new Map(d.stairs || []);
     this.liveLoads = new Map(d.liveLoads || []);
     this.plankPlacements = new Map(d.plankPlacements || []);
     // Older saves also carry a liveLoadMode ('uniform' put a blanket load on
@@ -606,7 +614,7 @@ export class ScaffoldState {
     const out = buildPlankDecks([...this.plankPlacements.values()], this.supportList());
     for (const p of this.planks.values()) {
       out.push({
-        id: p.id,
+        id: p.id, stair: !!p.stair,
         x0: p.x0, x1: p.x1, y0: p.y0, y1: p.y1, z: p.z,
         boards: this.plankBoards(p),
         frame: deckFrameFromRect(p),
@@ -663,18 +671,32 @@ export class ScaffoldState {
     const b = { id: this._id('K'), x: node.x, y: node.y, z: node.z, dir: [dir[0], dir[1]], lengthFt };
     this.brackets.set(b.id, b); this._emit(); return b;
   }
-  addPlank(a, b) { this._pushHistory();
+  addPlank(a, b, { stair = false } = {}) { this._pushHistory();
     const p = {
       id: this._id('P'),
       x0: Math.min(a[0], b[0]), y0: Math.min(a[1], b[1]),
       x1: Math.max(a[0], b[0]), y1: Math.max(a[1], b[1]),
       z: Math.min(a[2], b[2]),
     };
+    // A stair landing brings its own rails: a block's rails are not laid round it.
+    if (stair) p.stair = true;
     this.planks.set(p.id, p); this._emit(); return p;
   }
 
+  /** A stair flight between the ledger on `lower` at z0 and the one on `upper` at z1 (see this.stairs). */
+  addStairFlight({ lower, upper, z0, z1, treads }) {
+    this._pushHistory();
+    const f = { id: this._id('F'), lower: lower.map(p => [p[0], p[1]]), upper: upper.map(p => [p[0], p[1]]), z0, z1, treads };
+    this.stairs.set(f.id, f);
+    this._emit();
+    return f;
+  }
+
+  /** What a flight weighs: its two stringers and its treads. */
+  stairFlightWeightLb(f) { return 2 * STAIR_TOWER.stringerLb + (f.treads || 0) * STAIR_TOWER.treadLb; }
+
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads, this.plankPlacements]) {
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements]) {
       if (m.delete(id)) { this._pruneOrphans(); this._emit(); return true; }
     }
     return false;
@@ -682,14 +704,14 @@ export class ScaffoldState {
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.liveLoads, this.plankPlacements]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements]) {
         if (m.delete(id)) { n++; break; }
       }
     }
     if (n) { this._pruneOrphans(); this._emit(); }
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.stairs.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
 
   /**
    * Every connection node, numbered by lift as ScaffoldPro numbers them:
@@ -805,8 +827,9 @@ export class ScaffoldState {
     const brackets = [...this.brackets.values()].map(b => ({ ...b }));
     const trusses = [...this.trusses.values()].map(t => ({ ...t }));
     const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
+    const stairs = [...this.stairs.values()].map(f => ({ ...f }));
     const liveLoads = this.liveLoadPatches();
-    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, liveLoads, nodes: this.nodes() };
+    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, stairs, liveLoads, nodes: this.nodes() };
   }
 
   // --- load takeoff --------------------------------------------------------
@@ -955,6 +978,12 @@ export class ScaffoldState {
     for (const g of this.guardrailPieces()) {
       const w = perFootLedger * g.lengthFt;
       attribute(g.a[0], g.a[1], w / 2); attribute(g.b[0], g.b[1], w / 2);
+    }
+    // A stair flight hangs on a ledger at each end: half its weight to each,
+    // and each ledger passes its half to the standards at its two ends.
+    for (const f of this.stairs.values()) {
+      const w = this.stairFlightWeightLb(f) / 4;
+      for (const p of [...f.lower, ...f.upper]) attribute(p[0], p[1], w);
     }
     // Deck self weight, board by board: a plank bears on the ledgers at its
     // two ends and on nothing else, so that is where its weight goes, and from

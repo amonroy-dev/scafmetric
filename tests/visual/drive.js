@@ -344,7 +344,7 @@ window.__sv = (() => {
       const initial = {
         projection: ws().engine.projection, camDir: camDir(), tool: ws().tools.tool,
         activeButton: (ws().root.querySelector('.sfw-tool.is-active') || {}).dataset?.tool || null,
-        toolOrder: [...ws().root.querySelectorAll('.sfw-tool[data-tool]')].slice(0, 3).map(b => b.dataset.tool),
+        toolOrder: [...ws().root.querySelectorAll('.sfw-tool[data-tool]')].slice(0, 4).map(b => b.dataset.tool),
         blockCard: !ws().$('sfw-blockcard').hidden && !ws().$('sfw-toolcard').hidden,
         home: homeButton(),
         // Teal pixels on an empty model: the old beam line drew a teal bar here.

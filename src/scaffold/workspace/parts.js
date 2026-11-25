@@ -154,6 +154,27 @@ export function tubeBetween(a, b, odIn, material) {
   return m;
 }
 
+/**
+ * A stair flight as it is drawn: a stringer down each side and its treads.
+ * `f` is { lower:[[x,y],[x,y]], upper:[[x,y],[x,y]], z0, z1, treads }.
+ */
+export function buildStairFlight(f, material) {
+  const out = [];
+  for (const i of [0, 1]) out.push(tubeBetween([f.lower[i][0], f.lower[i][1], f.z0], [f.upper[i][0], f.upper[i][1], f.z1], 2.4, material));
+  const n = Math.max(0, Math.round(f.treads || 0));
+  for (let k = 1; k <= n; k++) {
+    const t = k / (n + 1);
+    const p = i => [f.lower[i][0] + (f.upper[i][0] - f.lower[i][0]) * t, f.lower[i][1] + (f.upper[i][1] - f.lower[i][1]) * t];
+    const a = p(0), b = p(1);
+    const run = Math.hypot(f.upper[0][0] - f.lower[0][0], f.upper[0][1] - f.lower[0][1]) || 1;
+    const half = 0.4; // a tread is about 10 in from front to back
+    const rx = ((f.upper[0][0] - f.lower[0][0]) / run) * half, ry = ((f.upper[0][1] - f.lower[0][1]) / run) * half;
+    const z = f.z0 + (f.z1 - f.z0) * t;
+    out.push(plankDeck(Math.min(a[0], b[0]) - Math.abs(rx), Math.min(a[1], b[1]) - Math.abs(ry), Math.max(a[0], b[0]) + Math.abs(rx), Math.max(a[1], b[1]) + Math.abs(ry), z, material));
+  }
+  return out;
+}
+
 // Plank deck covering a rectangle at height z.
 export function plankDeck(x0, y0, x1, y1, z, material) {
   const w = Math.max(Math.abs(x1 - x0), 0.1);

@@ -5,13 +5,14 @@
 // Pure math (no three.js, no DOM) so it is unit-testable.
 
 import { tubeWeightPerFoot, STEEL_DENSITY_LB_FT3 } from '../catalog.js';
+import { STAIR_TOWER } from './planning.js';
 import { SCAFFOLD_EXPORT_NOTE } from '../../scaffold-notice.js';
 import {
   WOOD_SILL, JACK_PLATE, JACK_STEM, HANDLE_NUT, BASE_COLLAR,
   PLANK, inchesToFeet, trussMemberLengthFt, sideBracketTubeLengthFt,
 } from './parts.js';
 
-export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Trusses', 'Diagonals', 'Brackets', 'Guardrails', 'Planks'];
+export const CATEGORY_ORDER = ['Standards', 'Bases', 'Ledgers', 'Trusses', 'Diagonals', 'Brackets', 'Guardrails', 'Stairs', 'Planks'];
 
 // Softwood sill pad; everything else is steel.
 const WOOD_DENSITY_LB_FT3 = 35;
@@ -131,6 +132,13 @@ export function deriveBom(state) {
       const label = g.kind === 'post' ? 'Guardrail post' : 'Guardrail rail';
       add('Guardrails', `${g.kind}${sizeKey(len)}`, `${label} · ${formatFeetInches(len)}`,
         1, perFootLedger * len);
+    }
+  }
+  if (state.stairs) {
+    for (const f of state.stairs.values()) {
+      add('Stairs', 'stringer-left', `Stair stringer, left · 7'-0"`, 1, STAIR_TOWER.stringerLb);
+      add('Stairs', 'stringer-right', `Stair stringer, right · 7'-0"`, 1, STAIR_TOWER.stringerLb);
+      if (f.treads) add('Stairs', 'tread', `Stair tread · 2'-6"`, f.treads, STAIR_TOWER.treadLb);
     }
   }
   if (state.brackets) {

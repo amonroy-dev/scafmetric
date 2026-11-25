@@ -173,6 +173,108 @@ export function framedFaces(faces, { joined, framed }) {
   return faces.filter(f => joined(f.columnIdA, f.columnIdB) || !framed(f.columnIdA) || !framed(f.columnIdB));
 }
 
+// A closed loop of ledgers bigger than this is not a bay but a court the
+// scaffold stands round: its faces are outside faces.
+export const MAX_BAY_AREA_FT2 = 150;
+// A standard is on a ledger's line when it is this near it in plan.
+const ON_MEMBER_FT = 0.1;
+
+/**
+ * The outline of the scaffold, traced along its ledgers and trusses.
+ *
+ * `members` are { a:[x,y,..], b:[x,y,..] } at any lift; only where they run in
+ * plan matters. Each is cut at every standard standing on it, so a ledger that
+ * passes a standard of the block clicked on beside it is two sides, not one.
+ * The sides then divide the plan into regions, and walking round each region
+ * (always turning to the nearest side on the right) names them: the bays, and
+ * the open ground outside. A side with open ground on either hand is on the
+ * outside of the scaffold.
+ *
+ * Unlike pairing up standards that stand near each other and looking for four
+ * that close a square, this needs no bay to be four-cornered: where blocks of
+ * different bay sizes meet, a bay has a fifth standard part-way along a side,
+ * and those were the faces a SHIFT fill braced on the inside and missed on the
+ * outside.
+ *
+ * Returns { faces, framed }: `faces` in buildFaceGraph's shape with `outside`
+ * set true or false, each outside face turned so that its normal points out
+ * of the scaffold; `framed` the ids of the standards some member reaches.
+ */
+export function traceFraming(standards, members, { maxBayAreaFt2 = MAX_BAY_AREA_FT2 } = {}) {
+  const cols = [...standards];
+  const spot = (x, y) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+  const byId = new Map(cols.map(c => [c.id, c]));
+  const idAt = new Map(cols.map(c => [spot(c.x, c.y), c.id]));
+  const next = new Map(); // id -> Set of the ids one side away
+  const link = (a, b) => {
+    if (a === b) return;
+    for (const [p, q] of [[a, b], [b, a]]) { let set = next.get(p); if (!set) next.set(p, set = new Set()); set.add(q); }
+  };
+  for (const m of members) {
+    const a = byId.get(idAt.get(spot(m.a[0], m.a[1]))), b = byId.get(idAt.get(spot(m.b[0], m.b[1])));
+    if (!a || !b || a === b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    if (len < 1e-6) continue;
+    const ux = dx / len, uy = dy / len;
+    const stops = [[0, a.id], [len, b.id]];
+    for (const c of cols) {
+      if (c === a || c === b) continue;
+      const ex = c.x - a.x, ey = c.y - a.y, along = ex * ux + ey * uy;
+      if (along > ON_MEMBER_FT && along < len - ON_MEMBER_FT && Math.abs(ey * ux - ex * uy) <= ON_MEMBER_FT) stops.push([along, c.id]);
+    }
+    stops.sort((p, q) => p[0] - q[0]);
+    for (let i = 0; i < stops.length - 1; i++) link(stops[i][1], stops[i + 1][1]);
+  }
+
+  // Round each standard, its neighbours in order of bearing.
+  const round = new Map();
+  for (const [id, set] of next) {
+    const c = byId.get(id);
+    round.set(id, [...set].sort((p, q) => Math.atan2(byId.get(p).y - c.y, byId.get(p).x - c.x) - Math.atan2(byId.get(q).y - c.y, byId.get(q).x - c.x)));
+  }
+  // Walk each region with it on the left hand. A bay comes out anticlockwise
+  // (positive area); the open ground round a scaffold clockwise.
+  const open = new Map(); // "from>to" -> is the region on its left open ground
+  for (const [from, list] of round) {
+    for (const to of list) {
+      if (open.has(`${from}>${to}`)) continue;
+      const walk = [];
+      let area = 0, u = from, v = to;
+      for (let guard = 0; guard < 100000 && !walk.includes(`${u}>${v}`); guard++) {
+        walk.push(`${u}>${v}`);
+        const p = byId.get(u), q = byId.get(v);
+        area += (p.x * q.y - q.x * p.y) / 2;
+        const turn = round.get(v);
+        const w = turn[(turn.indexOf(u) - 1 + turn.length) % turn.length];
+        u = v; v = w;
+      }
+      const isOpen = area <= 1e-6 || area > maxBayAreaFt2;
+      for (const k of walk) open.set(k, isOpen);
+    }
+  }
+
+  const faces = [];
+  const seen = new Set();
+  for (const [from, list] of round) {
+    for (const to of list) {
+      const key = faceKey(from, to);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const leftOpen = open.get(`${from}>${to}`), rightOpen = open.get(`${to}>${from}`);
+      // First standard to second with the open ground on the left, which is where a face's normal points.
+      const [aId, bId] = leftOpen || !rightOpen ? [from, to] : [to, from];
+      const a = byId.get(aId), b = byId.get(bId);
+      const span = Math.hypot(b.x - a.x, b.y - a.y);
+      const dirX = (b.x - a.x) / span, dirY = (b.y - a.y) / span;
+      faces.push({
+        columnIdA: aId, columnIdB: bId, ax: a.x, ay: a.y, bx: b.x, by: b.y,
+        dirX, dirY, normX: -dirY, normY: dirX, spanFt: span, outside: !!(leftOpen || rightOpen),
+      });
+    }
+  }
+  return { faces, framed: new Set(next.keys()) };
+}
+
 /** The same face seen from its other side: its ends swapped, its normal reversed. */
 function turned(f) {
   return {
@@ -389,9 +491,14 @@ export function planPerimeterBraces(faces, nodes, opts = {}) {
   // one at every bracket.
   const own = faces.filter(f => !f.tipRow && !f.bracketEnd);
   const tipRows = faces.filter(f => f.tipRow);
+  // A face traced along the framing (traceFraming) knows whether it is
+  // outside. Faces between standards with no ledgers yet are judged by the
+  // bays the faces close.
+  const closing = new Set(perimeterFaces(own));
+  const perimeter = own.filter(f => (f.outside === undefined ? closing.has(f) : f.outside));
 
   const out = [];
-  for (const face of [...ordered(perimeterFaces(own)), ...ordered(tipRows)]) {
+  for (const face of [...ordered(perimeter), ...ordered(tipRows)]) {
     if (out.length >= max) break;
     const target = faceBraceTarget(face, byColumn, targetZ, direction, isTaken);
     if (target) out.push(target);
