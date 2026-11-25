@@ -324,6 +324,51 @@ test('the height can be made up one chosen way: buried one or two rosettes, a st
   assert.ok(Math.abs(legs - deriveBom(placed).summary.totalWeightLb) < 0.5);
 });
 
+test('clicked onto a scaffold, a stair tower takes its landings from that scaffold\'s decks', async () => {
+  const { BLOCK_DEFAULTS } = await import('../src/scaffold/workspace/planning.js');
+  const { s, tools } = place(14.5);
+  s.clear();
+  // A 14 x 7 ft scaffold decked at two levels, and another well away decked at a third.
+  tools.tool = 'block';
+  tools.blockSettings = { ...BLOCK_DEFAULTS, widthFt: 14, depthFt: 7, heightFt: 21, plankedLevelsCount: 2, guardrails: false };
+  tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 7, y: 3.5 }, snapped: false, rotationSteps: 0 });
+  const decks = [...new Set(s.plankBays().map(d => Math.round(d.z * 1000) / 1000))].sort((a, b) => a - b);
+  assert.equal(decks.length, 2);
+  tools.blockSettings = { ...tools.blockSettings, heightFt: 34, plankedLevelsCount: 1 };
+  tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 100, y: 3.5 }, snapped: false, rotationSteps: 0 });
+
+  let ground = { x: 0, y: 0 };
+  tools.engine.setPointerFromEvent = () => {};
+  tools.engine.groundPoint = () => ground;
+  tools.tool = 'stair';
+  tools.stairSettings = { heightFt: 40, matchDecks: true };
+  // Off on its own it is the height in the card.
+  ground = { x: 50, y: 40 };
+  const alone = tools._blockPlacement({});
+  assert.equal(alone.snapped, false);
+  assert.equal(alone.matchedDecks, undefined);
+  assert.ok(alone.plan.deckLifts.at(-1) >= 22);
+  // Brought up against the right-hand end of the first scaffold it clicks on, and lands at its two decks.
+  ground = { x: 21.4, y: 3.2 };
+  const on = tools._blockPlacement({});
+  assert.equal(on.snapped, true);
+  assert.deepEqual(on.matchedDecks, decks);
+  assert.deepEqual(on.plan.matched.map(m => Math.round(m.atFt * 1000) / 1000), decks, 'a landing at each deck, and not at the other scaffold\'s');
+  assert.ok(Math.abs(s.liftZ(on.plan.deckLifts.at(-1)) - decks[1]) < 1e-3, 'the top landing is the top deck');
+  // Joined by its end, only the landing at that end is beside the scaffold.
+  assert.deepEqual(on.reach, { beside: 1, of: 2 });
+  tools.placeBlockAt(on);
+  for (const z of decks) assert.ok(s.plankBays().some(d => d.stair && Math.abs(d.z - z) < 1e-3), `a landing at ${z} ft`);
+  assert.equal(s.standards.size, 6 + 6 + 10 - 2, 'it shares the scaffold\'s two end standards');
+  // With the box unticked it keeps the card's height wherever it is put.
+  tools.stairSettings.matchDecks = false;
+  ground = { x: 21.4, y: 3.2 };
+  s.undo();
+  const asTyped = tools._blockPlacement({});
+  assert.equal(asTyped.matchedDecks, undefined);
+  assert.ok(asTyped.plan.deckLifts.at(-1) >= 22);
+});
+
 test('turned a quarter turn it stands 7 ft wide and 14 ft deep, and placing it twice adds nothing', () => {
   const { s, tools } = place(14.5, { x: 0, y: 0 }, 1);
   const xs = [...s.standards.values()].map(c => c.x), ys = [...s.standards.values()].map(c => c.y);

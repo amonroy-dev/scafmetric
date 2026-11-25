@@ -229,6 +229,16 @@ the next is not a whole number of flights. Two wanted heights less than three
 rosettes (4'-11") apart cannot both be landed on: the upper one is left out and
 the hint says so.
 
+**Match the scaffold's decks** (on by default): a stair tower set down so that
+it shares standards with a scaffold takes its landings from that scaffold's
+decks in place of the heights in the card, one landing at each deck level on
+the chain it joins (`_deckLevelsBeside` in `tools.js`). The landings of other
+stair towers and a deck at the foot are not counted. The rails between a
+landing and the deck beside it are left in: erase the ones in the way.
+Landings alternate ends, so a tower joined to a scaffold by one end has only
+every other landing beside it, and the hint says how many; with its long side
+against the scaffold every landing is beside it.
+
 Parts are named for what they are and weighed in round figures for a takeoff.
 No maker's part numbers or catalogue weights are kept here.
 

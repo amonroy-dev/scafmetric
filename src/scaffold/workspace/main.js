@@ -175,6 +175,7 @@ const TEMPLATE = `
               <button type="button" class="sfw-btn ghost" id="sfw-stair-add">Add a level</button>
             </div>
             <label class="sfw-mt">Make up height with<select id="sfw-stair-prefer"><option value="auto">Auto</option><option value="bury">Buried stringer</option><option value="step">Clamp-on step</option><option value="starter">Starter stair</option></select></label>
+            <label class="sfw-check"><input type="checkbox" id="sfw-stair-match" checked><span>Match the scaffold&rsquo;s decks</span></label>
             <p class="sfw-note" id="sfw-stair-sum"></p>
           </div>
           <div data-for="building">
@@ -916,6 +917,7 @@ class Workspace {
       this._readStairHeights();
     });
     this.$('sfw-stair-prefer').addEventListener('change', () => this._readStairHeights());
+    this.$('sfw-stair-match').addEventListener('change', () => this._readStairHeights());
     this.$('sfw-ledger-outside').addEventListener('change', e => {
       this.tools.setPerimeterHandrails(e.target.checked);
       this.$('sfw-hint').textContent = e.target.checked
@@ -1005,7 +1007,13 @@ class Workspace {
       const where = several ? `landings at ${info.matched.map(m => round(m.atFt, 1)).join(', ')} ft` : `top landing at ${round(info.deckZ, 2)} ft`;
       const left = info.missed && info.missed.length ? ` ${info.missed.join(', ')} ft is too close above the landing under it and was left out.` : '';
       hint.textContent = `Click to place the stair tower: ${info.flights} flight${info.flights === 1 ? '' : 's'}${stairAdjustText(info.adjusts)}, ${where}` + left +
-        `${info.rotation ? `, turned ${info.rotation}°` : ''}.` + (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
+        `${info.rotation ? `, turned ${info.rotation}°` : ''}.` +
+        (info.matchedDecks
+          ? ' Clicked onto the scaffold: its landings are at that scaffold’s decks.' +
+            (info.reach && info.reach.beside < info.reach.of
+              ? ` Only ${info.reach.beside} of the ${info.reach.of} is at the end beside the scaffold: landings alternate ends. With its long side against the scaffold (R) every one is.`
+              : '')
+          : info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
       return;
     }
     if (tool === 'block') {
@@ -1770,6 +1778,7 @@ class Workspace {
     k.heightFt = heights.length ? Math.max(...heights) : STAIR_DEFAULTS.heightFt;
     k.landingsFt = heights.length > 1 ? heights : null;
     k.prefer = this.$('sfw-stair-prefer').value;
+    k.matchDecks = this.$('sfw-stair-match').checked;
     // What that makes: said in the card, so it is there before the pointer is on the canvas.
     const plan = this.tools.stairPlan();
     const made = stairAdjustText(plan.adjusts);

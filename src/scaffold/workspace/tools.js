@@ -135,7 +135,8 @@ export class Tools {
     // preview's quarter turns (R).
     this.blockSettings = { ...BLOCK_DEFAULTS };
     // Stair tool: the height of the tower's top landing (its card's one field).
-    this.stairSettings = { ...STAIR_DEFAULTS };
+    // matchDecks: clicked onto a scaffold, its landings come at that scaffold's decks.
+    this.stairSettings = { ...STAIR_DEFAULTS, matchDecks: true };
     // Building tool: the height of the next building traced, how far off its
     // walls scaffold stands, and the corners clicked so far.
     // No shape until one is picked in the card: the card asks for that first.
@@ -1914,9 +1915,9 @@ export class Tools {
   // it, R turns it a quarter turn, and a click places it.
 
   /** The stair tower the Stair card describes. */
-  stairPlan() {
+  stairPlan(settings = this.stairSettings) {
     const s = this.state;
-    return planStairTower(this.stairSettings, {
+    return planStairTower(settings, {
       liftZ: lift => s.liftZ(lift),
       showBaseCollar: s.base.showBaseCollar,
       standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
@@ -1949,7 +1950,74 @@ export class Tools {
       const wall = snapToWall(c, turned ? plan.depthFt : plan.widthFt, turned ? plan.widthFt : plan.depthFt, [...this.state.buildings.values()], this.buildingSettings.wallDistanceFt);
       if (wall) return { plan, center: wall, snapped: false, onWall: true, rotationSteps: this.rotationSteps };
     }
+    // A stair tower clicked onto a scaffold lands at that scaffold's decks.
+    if (plan.stair && c.snapped && this.stairSettings.matchDecks !== false) {
+      const levels = this._deckLevelsBeside(plan, c);
+      if (levels.length) {
+        const matched = this.stairPlan({ ...this.stairSettings, heightFt: Math.max(...levels), landingsFt: levels });
+        return {
+          plan: matched, center: { x: c.x, y: c.y }, snapped: true, matchedDecks: levels, rotationSteps: this.rotationSteps,
+          reach: this._landingsBesideScaffold(matched, c),
+        };
+      }
+    }
     return { plan, center: { x: c.x, y: c.y }, snapped: c.snapped, rotationSteps: this.rotationSteps };
+  }
+
+  /**
+   * How many of a tower's matched landings are beside the scaffold it shares
+   * standards with: { beside, of }. Landings alternate ends, so a tower joined
+   * by one end only has every other one there; joined along a long side, both
+   * ends are against the scaffold and every landing is.
+   */
+  _landingsBesideScaffold(plan, center) {
+    const s = this.state;
+    const ends = new Set();
+    let alongSide = false;
+    const halfL = plan.widthFt / 2;
+    const sharedAt = new Map();
+    for (const o of plan.standards) {
+      const r = rotateOffset90(o, this.rotationSteps);
+      const there = s.standardAt(center.x + r.x, center.y + r.y);
+      if (!there || !s.isLeg(there)) continue;
+      const row = Math.sign(o.y);
+      sharedAt.set(row, [...(sharedAt.get(row) || []), o.x]);
+    }
+    for (const [row, xs] of sharedAt) {
+      // A long side is shared when standards at both ends of that row are.
+      if (row !== 0 && xs.some(x => x < 0) && xs.some(x => x > 0)) alongSide = true;
+      for (const x of xs) if (Math.abs(Math.abs(x) - halfL) < 1e-6) ends.add(Math.sign(x));
+    }
+    const lifts = plan.matched.map(m => m.lift);
+    const beside = lifts.filter(lift => {
+      const i = plan.deckLifts.indexOf(lift);
+      return alongSide || ends.has(i % 2 === 0 ? -1 : 1);
+    }).length;
+    return { beside, of: lifts.length };
+  }
+
+  /**
+   * The heights of the decks of the scaffold a stair tower set down at
+   * `center` would share standards with: every deck on that chain but the
+   * landings of other stair towers and a deck at the foot. Lowest first.
+   */
+  _deckLevelsBeside(plan, center) {
+    const s = this.state;
+    const shared = [];
+    for (const o of plan.standards) {
+      const r = rotateOffset90(o, this.rotationSteps);
+      const there = s.standardAt(center.x + r.x, center.y + r.y);
+      if (there && s.isLeg(there)) shared.push(there.id);
+    }
+    if (!shared.length) return [];
+    const chain = new Set(s.chainOf(shared));
+    const foot = s.liftZ(s.base.showBaseCollar ? 0 : 1);
+    const levels = new Set();
+    for (const d of s.plankBays()) {
+      if (d.stair || !chain.has(d.id) || d.z <= foot + 0.5) continue;
+      levels.add(Math.round(d.z * 1000) / 1000);
+    }
+    return [...levels].sort((a, b) => a - b);
   }
 
   /**
@@ -2111,6 +2179,7 @@ export class Tools {
     const { plan } = placement;
     this.hooks.onPreview?.(plan.stair ? 'stair' : 'block', w.standards.length, {
       flights: plan.flightCount, adjust: plan.adjust, adjusts: plan.adjusts, matched: plan.matched, missed: plan.missed, onWall: !!placement.onWall,
+      matchedDecks: !!placement.matchedDecks, reach: placement.reach || null,
       snapped: placement.snapped,
       widthFt: plan.widthFt, depthFt: plan.depthFt,
       deckZ: plan.deckLifts.length ? s.liftZ(plan.deckLifts[plan.deckLifts.length - 1]) : null,

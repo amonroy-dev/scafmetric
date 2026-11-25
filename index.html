@@ -3,213 +3,146 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0B1220">
-<meta name="description" content="Review selected steel beam sizes for preliminary scaffold and shoring bid estimates.">
-<title>Scafmetric | Preliminary beam checks for bids</title>
-<link rel="preload" href="public/fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="public/fonts/vt323.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="theme-color" content="#07080A">
+<meta name="description" content="For contractors who cannot wait for a full analysis: get close to the real beam size at bid time, so the engineering is not a shock when it comes back.">
+<title>Scafmetric | Get close to the real beam before the engineering comes back</title>
 <link rel="stylesheet" href="landing.css">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
-<header class="site-header"><div class="container header-inner">
-<a class="logo" href="index.html" aria-label="Scafmetric home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#FFA41B" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3DD9C9"/></svg><span>scafmetric<span class="logo-dot">.</span></span></a>
-<nav aria-label="Main navigation"><a href="#how">How it works</a><a href="#sections">Sections</a><a href="#scope">Scope</a><a href="#faq">Questions</a></nav>
-<div class="header-actions"><a class="header-signin" id="account-link" href="signin.html">Sign in</a></div>
-</div><div class="scroll-meter" aria-hidden="true"><span></span></div></header>
+
+<header class="site-header">
+  <a class="brand" href="index.html" aria-label="Scafmetric home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+    <span>SCAFMETRIC</span>
+  </a>
+  <p class="node-status"><i></i>BID CHECK ENGINE: READY <span>· AISC 360-16 ASD ·</span> <span data-clock>00:00:00</span></p>
+  <nav aria-label="Main navigation"><a href="#why">Why</a><a href="#how">How</a><a href="#scope">Scope</a><a href="#faq">Questions</a></nav>
+  <a class="outline-btn" id="account-link" href="signin.html">Sign in</a>
+</header>
 
 <main id="main">
-<section class="hero" data-spotlight>
-  <canvas class="starfield" aria-hidden="true"></canvas>
-  <div class="container hero-grid">
-    <div class="hero-copy">
-      <div class="eyebrow"><span></span> FOR ESTIMATORS &amp; PROJECT MANAGERS</div>
-      <h1><span class="sr-only">Check beam sizes for your bid.</span><span class="type-lines hero-type" data-typewriter data-speed="38" data-pause="260" data-delay="250" aria-hidden="true"><span class="type-line"><span class="type-reserve">CHECK BEAM SIZES</span><span class="type-ink">CHECK BEAM SIZES</span></span><span class="type-line type-accent"><span class="type-reserve">FOR YOUR BID.</span><span class="type-ink">FOR YOUR BID.</span></span></span></h1>
-      <p class="lead">Review a selected W-beam size for your scaffold or shoring bid. Enter the span and loads to see the beam response and available steel checks.</p>
-      <div class="actions"><a class="button primary" href="signin.html">Sign in or create an account <svg class="link-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a><a class="text-link text-link-down" href="#scope">View current scope <svg class="link-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v9M4 8l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a></div>
-      <dl class="hero-stats">
-        <div><dt>W-shapes in the library</dt><dd><span class="sr-only">283</span><span aria-hidden="true" data-count="283">283</span></dd></div>
-        <div><dt>Response diagrams</dt><dd><span class="sr-only">3</span><span aria-hidden="true" data-count="3">3</span></dd></div>
-        <div><dt>AISC ASD bending &amp; shear</dt><dd>F2·G2</dd></div>
-      </dl>
-      <div class="hero-note"><span class="status-dot"></span> Preliminary beam checks for estimating</div>
+<section class="wall" aria-labelledby="wall-heading">
+  <div class="wall-bar">
+    <div><strong>SCAFMETRIC // BID CHECK WALL</strong><span>SCAFFOLD-TO-BEAM LOAD PATH &mdash; LIVE RENDER</span></div>
+    <dl>
+      <div><dt>ASSUMED W8X10</dt><dd class="bad" data-out="assumed">12.8&times; OVER</dd></div>
+      <div><dt>CHECKED W12X30</dt><dd class="good"><i></i>HOLDS</dd></div>
+    </dl>
+  </div>
+  <div class="wall-stage">
+    <canvas class="wall-canvas" data-wall role="img" aria-label="Animated diagram: a scaffold's four legs put their loads on a steel beam. The beam is checked. A W8X10 carried on a guess is 12.8 times over; the W12X30 the check finds holds."></canvas>
+    <div class="wall-copy">
+      <h1 id="wall-heading">Get close to the real beam<br>before the engineering comes back.</h1>
+      <p>Bids cannot wait for a full analysis. Scafmetric gets your beam size close at bid time, so the number you carried is not a shock when the engineer's answer arrives.</p>
+      <div class="wall-actions"><a class="solid-btn" href="signin.html">Sign in or create an account</a><a class="text-btn" href="#why">Why it matters &darr;</a></div>
     </div>
-
-    <figure class="hero-visual beam-lab hud" data-beam-lab data-mode="point">
-      <div class="visual-top">
-        <div><span class="visual-kicker">BEAM LAB · DRAG THE LOAD</span><strong>Response under load</strong></div>
-        <div class="lab-modes" role="group" aria-label="Illustrative load type"><button type="button" data-lab-mode="point" aria-pressed="true">Point</button><button type="button" data-lab-mode="uniform" aria-pressed="false">Uniform</button></div>
-      </div>
-      <div class="beam-illustration" role="img" aria-label="Illustrative simply supported beam on two scaffold towers. Move the point load to see how the support reactions, deflected shape and bending moment diagram change. Deflection exaggerated; not a calculated result.">
-        <svg viewBox="0 0 480 372" aria-hidden="true">
-          <defs>
-            <pattern id="draft-grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#1E2A44" stroke-width="1"/></pattern>
-            <linearGradient id="lab-moment-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3DD9C9" stop-opacity=".38"/><stop offset="1" stop-color="#3DD9C9" stop-opacity=".03"/></linearGradient>
-          </defs>
-          <rect width="480" height="372" fill="url(#draft-grid)"/>
-          <g class="lab-reaction">
-            <text class="lab-label" x="34" y="146" text-anchor="middle">RA</text><rect class="lab-bar-track" x="28" y="155" width="12" height="80"/><rect class="lab-bar" id="lab-ra-bar" x="28" y="195" width="12" height="40"/><text class="lab-value" id="lab-ra-text" x="34" y="252" text-anchor="middle">0.50</text>
-            <text class="lab-label" x="446" y="146" text-anchor="middle">RB</text><rect class="lab-bar-track" x="440" y="155" width="12" height="80"/><rect class="lab-bar" id="lab-rb-bar" x="440" y="195" width="12" height="40"/><text class="lab-value" id="lab-rb-text" x="446" y="252" text-anchor="middle">0.50</text>
-          </g>
-          <g class="lab-tower"><path d="M70 155v80M130 155v80M70 155h60M70 195h60M70 235h60M70 155l60 40m0-40-60 40M70 195l60 40m0-40-60 40M350 155v80M410 155v80M350 155h60M350 195h60M350 235h60M350 155l60 40m0-40-60 40M350 195l60 40m0-40-60 40"/><path class="lab-base" d="M58 239h84M338 239h84"/></g>
-          <g class="lab-support"><path d="M100 127l-12 19h24z"/><path class="lab-support-base" d="M84 150h32"/><path d="M380 127l-12 19h24z"/><circle cx="374" cy="150" r="3"/><circle cx="386" cy="150" r="3"/></g>
-          <g class="lab-uniform"><text class="lab-label" x="240" y="34" text-anchor="middle">UNIFORM LOAD w</text><path class="lab-load" d="M100 46H380M100 46v62M95 100l5 8 5-8M128 46v62M123 100l5 8 5-8M156 46v62M151 100l5 8 5-8M184 46v62M179 100l5 8 5-8M212 46v62M207 100l5 8 5-8M240 46v62M235 100l5 8 5-8M268 46v62M263 100l5 8 5-8M296 46v62M291 100l5 8 5-8M324 46v62M319 100l5 8 5-8M352 46v62M347 100l5 8 5-8M380 46v62M375 100l5 8 5-8"/></g>
-          <path id="lab-beam" class="lab-beam" d="M86 118.4L100 122C160 136 200 146 240 146S320 136 380 122L394 118.4"/>
-          <g id="lab-point" class="lab-point" transform="translate(240 48)"><rect class="lab-handle" x="-8" y="-6" width="16" height="16"/><text class="lab-label lab-label-bright" x="14" y="7">P</text><path class="lab-load lab-point-arrow" d="M0 10v76M-7 76l7 10 7-10"/></g>
-          <g class="lab-dim"><path d="M100 250v16M380 250v16M100 258H380"/><text class="lab-label" x="240" y="284" text-anchor="middle">SPAN L</text></g>
-          <path id="lab-marker" class="lab-marker" transform="translate(240 0)" d="M0 257l-6-9h12z"/>
-          <g class="lab-moment"><path class="lab-axis" d="M100 350H380"/><path id="lab-moment-fill" class="lab-moment-fill" d="M100 350L240 306L380 350Z"/><path id="lab-moment-line" class="lab-moment-line" d="M100 350L240 306L380 350"/><circle id="lab-moment-peak" class="lab-peak" cx="240" cy="306" r="4"/><text id="lab-moment-label" class="lab-value" x="250" y="302">0.250 PL</text><text class="lab-label" x="100" y="368">BENDING MOMENT</text></g>
-        </svg>
-      </div>
-      <div class="lab-controls"><label for="lab-position">Point load position</label><input type="range" id="lab-position" class="pixel-range" min="4" max="96" step="1" value="50"></div>
-      <dl class="lab-readout">
-        <div><dt>Load at</dt><dd data-out="pos">0.50 L</dd></div>
-        <div><dt>R<sub>A</sub></dt><dd data-out="ra">0.50 P</dd></div>
-        <div><dt>R<sub>B</sub></dt><dd data-out="rb">0.50 P</dd></div>
-        <div><dt>M<sub>max</sub></dt><dd data-out="m">0.250 PL</dd></div>
-      </dl>
-      <figcaption class="visual-bottom"><span>Illustrative statics · not a calculated result</span><span>Deflection exaggerated</span></figcaption>
-    </figure>
-  </div>
-
-  <div class="container">
-    <div class="dialogue-frame"><div class="dialogue-panel"><div class="dialogue-title"><span>ANALYSIS LOG</span><span>MODEL / 01</span></div><div class="dialogue-body"><svg class="dialogue-icon" viewBox="0 0 8 8" aria-hidden="true" shape-rendering="crispEdges"><path d="M1 1h6v1H1zM3.5 2h1v4h-1zM1 6h6v1H1z" fill="#FFA41B"/><path d="M0 0h1v1H0zM7 0h1v1H7zM0 7h1v1H0zM7 7h1v1H7z" fill="#3DD9C9"/></svg><div class="dialogue-text"><span class="sr-only">Model: simply supported beam. Loading: full-span uniform dead and live loads and point loads. Results: shear, moment and deflection. Units: pounds and feet, with deflections in inches.</span><span class="type-lines" data-typewriter data-speed="30" data-pause="220" data-delay="1200" aria-hidden="true"><span class="type-line"><span class="type-reserve">&gt; MODEL: SIMPLY SUPPORTED</span><span class="type-ink">&gt; MODEL: SIMPLY SUPPORTED</span></span><span class="type-line"><span class="type-reserve">&gt; LOAD: UNIFORM + POINT</span><span class="type-ink">&gt; LOAD: UNIFORM + POINT</span></span><span class="type-line"><span class="type-reserve">&gt; SHEAR / MOMENT / DEFLECTION</span><span class="type-ink">&gt; SHEAR / MOMENT / DEFLECTION</span></span><span class="type-line"><span class="type-reserve">&gt; UNITS: LBS / FT / IN</span><span class="type-ink">&gt; UNITS: LBS / FT / IN</span></span></span></div></div></div></div>
-    <p class="disclaimer"><span>Preliminary use</span> For preliminary bid planning. Results are not a complete member design or construction approval.</p>
+    <p class="wall-chain">SCAFFOLD &rarr; LEG LOADS &rarr; BEAM &rarr; CHECK &rarr; RECORD</p>
+    <p class="wall-note">Example: 20 ft span, four 4,500 lb legs, no bracing between supports. Worked with Scafmetric's own checks.</p>
   </div>
 </section>
 
-<section class="ticker" aria-labelledby="ticker-heading">
-  <h2 class="sr-only" id="ticker-heading">What the calculator covers</h2>
-  <ul class="sr-only"><li>Shear, moment and deflection diagrams</li><li>Support reactions</li><li>Uniform dead and live loads and point loads</li><li>Beam self-weight included automatically</li><li>Top and bottom flange brace locations</li><li>Moment-gradient factor for each unbraced segment</li><li>Selected AISC 360-16 ASD flexure (F2) and shear (G2) checks</li><li>Lightest passing size screen</li><li>Printable PDF calculation report</li></ul>
-  <div class="ticker-row" aria-hidden="true"><div class="ticker-track">
-    <span>Shear</span><span>Moment</span><span>Deflection</span><span>Reactions</span><span>Uniform D + L</span><span>Point loads</span><span>Self-weight · auto</span><span>Top + bottom flange braces</span><span>Cb per unbraced segment</span><span>AISC 360-16 ASD</span><span>F2 flexure</span><span>G2 shear</span><span>Lightest passing size</span><span>PDF calc report</span>
-    <span>Shear</span><span>Moment</span><span>Deflection</span><span>Reactions</span><span>Uniform D + L</span><span>Point loads</span><span>Self-weight · auto</span><span>Top + bottom flange braces</span><span>Cb per unbraced segment</span><span>AISC 360-16 ASD</span><span>F2 flexure</span><span>G2 shear</span><span>Lightest passing size</span><span>PDF calc report</span>
-  </div></div>
-  <div class="ticker-row ticker-row-shapes" aria-hidden="true"><div class="ticker-track">
-    <span>W8X10</span><span>W10X33</span><span>W12X26</span><span>W14X22</span><span>W16X31</span><span>W18X35</span><span>W21X44</span><span>W24X55</span><span>W27X84</span><span>W30X99</span><span>W33X118</span><span>W36X135</span><span>W40X149</span><span>W44X230</span>
-    <span>W8X10</span><span>W10X33</span><span>W12X26</span><span>W14X22</span><span>W16X31</span><span>W18X35</span><span>W21X44</span><span>W24X55</span><span>W27X84</span><span>W30X99</span><span>W33X118</span><span>W36X135</span><span>W40X149</span><span>W44X230</span>
-  </div></div>
+<section class="ticker" aria-label="What Scafmetric covers">
+  <div class="ticker-track" aria-hidden="true">
+    <span>SCAFFOLD LEG LOADS ///</span><span>SHEAR ///</span><span>MOMENT ///</span><span>DEFLECTION ///</span><span>AISC 360-16 ASD FLEXURE ///</span><span>SHEAR CHECK ///</span><span>LIGHTEST PASSING SIZE ///</span><span>283 W-SHAPES ///</span><span>PRINTABLE RECORD ///</span>
+    <span>SCAFFOLD LEG LOADS ///</span><span>SHEAR ///</span><span>MOMENT ///</span><span>DEFLECTION ///</span><span>AISC 360-16 ASD FLEXURE ///</span><span>SHEAR CHECK ///</span><span>LIGHTEST PASSING SIZE ///</span><span>283 W-SHAPES ///</span><span>PRINTABLE RECORD ///</span>
+  </div>
 </section>
 
-<section class="section" id="how"><div class="container">
-  <div class="section-heading reveal"><div><p class="eyebrow">THE WORKFLOW</p><h2>From bid inputs to a<br>calculation record.</h2></div><p>Check a selected beam against the information available at bid time and keep the assumptions with your estimate.</p></div>
-  <div class="posters" data-spotlight data-spotlight-group>
-    <article class="poster-card spot hud reveal">
-      <div class="poster" data-morph>
-        <svg class="poster-svg" viewBox="0 0 240 150" aria-hidden="true">
-          <path class="morph-axis" d="M144 78H200"/>
-          <path class="morph-dim" d="M134 46.2h8M138 46.2V109.8M134 109.8h8"/>
-          <path class="morph-shape" d="M160.94 46.2h22.12v1.76h-10.36v60.08h10.36v1.76h-22.12v-1.76h10.36v-60.08h-10.36z"/>
-          <text class="poster-pixel" x="16" y="32" data-morph-name>W16X31</text>
-          <text class="poster-term" x="16" y="62"><tspan class="poster-dim">W </tspan><tspan data-morph-weight>31 lb/ft</tspan></text>
-          <text class="poster-term" x="16" y="82"><tspan class="poster-dim">d </tspan><tspan data-morph-depth>15.9 in</tspan></text>
-          <text class="poster-term" x="16" y="102"><tspan class="poster-dim">Ix </tspan><tspan data-morph-ix>375 in⁴</tspan></text>
-          <text class="poster-term poster-hint" x="16" y="134">&lt; SELECT SIZE &gt;</text>
-        </svg>
-      </div>
-      <span class="step-number">01</span><h3>Select a beam</h3><p>Choose a W section and enter the span, loads, and lateral brace locations.</p>
-    </article>
-    <article class="poster-card spot hud reveal" style="--d:.08s">
-      <div class="poster poster-results">
-        <svg class="poster-svg" viewBox="0 0 240 150" aria-hidden="true">
-          <text class="poster-tag" x="224" y="18" text-anchor="end">EXAMPLE</text>
-          <text class="poster-term poster-dim" x="16" y="35">V</text><path class="plot-zero" d="M36 30H224"/><path class="plot-line" pathLength="1" d="M36 16L224 44"/>
-          <text class="poster-term poster-dim" x="16" y="77">M</text><path class="plot-zero" d="M36 78H224"/><path class="plot-line" style="--n:1" pathLength="1" d="M36 78Q130 38 224 78"/>
-          <text class="poster-term poster-dim" x="16" y="106">δ</text><path class="plot-zero" d="M36 100H224"/><path class="plot-line plot-line-warm" style="--n:2" pathLength="1" d="M36 100C80 124 180 124 224 100"/>
-          <text class="poster-term poster-dim" x="16" y="141">RATIO</text>
-          <rect class="ratio-track" x="64" y="130" width="120" height="12"/><rect class="ratio-fill" x="64" y="130" width="86.4" height="12"/><path class="ratio-gaps" d="M70 130v12M76 130v12M82 130v12M88 130v12M94 130v12M100 130v12M106 130v12M112 130v12M118 130v12M124 130v12M130 130v12M136 130v12M142 130v12M148 130v12M154 130v12M160 130v12M166 130v12M172 130v12M178 130v12"/>
-          <text class="poster-term" x="224" y="141" text-anchor="end">0.72</text>
-        </svg>
-      </div>
-      <span class="step-number">02</span><h3>Review the results</h3><p>Review reactions, diagrams, and supported bending, shear and deflection checks.</p>
-    </article>
-    <article class="poster-card spot hud reveal" style="--d:.16s">
-      <div class="poster poster-report">
-        <svg class="poster-svg" viewBox="0 0 240 150" aria-hidden="true">
-          <rect class="sheet-paper" x="66" y="12" width="108" height="128"/>
-          <rect class="sheet-head" x="74" y="20" width="92" height="9"/>
-          <rect class="sheet-line" style="--n:1" x="74" y="38" width="80" height="3"/><rect class="sheet-line" style="--n:2" x="74" y="46" width="64" height="3"/><rect class="sheet-line" style="--n:3" x="74" y="54" width="86" height="3"/>
-          <path class="sheet-axis" d="M78 96H162"/><path class="sheet-plot" pathLength="1" d="M78 96Q120 62 162 96"/>
-          <rect class="sheet-line" style="--n:5" x="74" y="106" width="72" height="3"/><rect class="sheet-line" style="--n:6" x="74" y="114" width="84" height="3"/><rect class="sheet-line" style="--n:7" x="74" y="122" width="56" height="3"/>
-          <g transform="rotate(-9 176 118)"><g class="stamp"><rect x="149" y="106" width="54" height="24"/><text x="176" y="123" text-anchor="middle">PDF</text></g></g>
-        </svg>
-      </div>
-      <span class="step-number">03</span><h3>Keep the calculation</h3><p>Print the preliminary results and assumptions with your bid documents.</p>
-    </article>
+<section class="block" id="why">
+  <header class="block-head reveal"><span class="block-no">01 /</span><h2>The bid goes in before the engineering does.</h2><p>You price the job this week. The stamped analysis comes weeks later. Whatever beam you carried in between is a guess, and a bad guess is paid for twice: once in steel, once in schedule.</p></header>
+  <div class="cards">
+    <article class="card reveal"><span class="card-no">01</span><h3>The common guess</h3><p>A W8X10 is on every yard and in every estimator's head. It goes into the bid because it is familiar, not because anyone checked it.</p></article>
+    <article class="card reveal"><span class="card-no">02</span><h3>The shock</h3><p>Then the analysis comes back calling for something three or four sizes deeper. A W8 was carried where the job needed a W24. The steel, the lift and the lead time were never in the price.</p></article>
+    <article class="card reveal"><span class="card-no">03</span><h3>Close enough to price</h3><p>Scafmetric runs the bending, shear and deflection on your span and your loads in minutes. You carry a size in the right range, with the working behind it.</p></article>
+    <article class="card reveal"><span class="card-no">04</span><h3>Not the final word</h3><p>It does not replace the engineer. It gets you near the answer early, so the engineering confirms your number in place of overturning it.</p></article>
   </div>
-</div></section>
+</section>
 
-<section class="section workspace-section" id="workspace-preview" aria-labelledby="workspace-heading"><div class="container">
-  <div class="section-heading reveal"><div><p class="eyebrow">INSIDE THE WORKSPACE</p><h2 id="workspace-heading">See the beam.<br>Follow the calculation.</h2></div><p>Take a closer look at the actual workspace, from load inputs to preliminary results. Select an image to view it larger.</p></div>
-  <div class="workspace-feature hud">
-    <a class="workspace-image workspace-feature-image" href="public/marketing/screenshots/01-point-load-analysis.webp" target="_blank" rel="noopener" aria-label="Open larger view of point-load analysis in a new tab"><img src="public/marketing/screenshots/01-point-load-analysis.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Beam workspace showing two point loads, support reactions, and preliminary strength results."></a>
-    <div class="workspace-feature-copy"><span class="workspace-index">WORKSPACE / 01</span><h3>From loads to results, in one view.</h3><p>Enter the beam and loading, then review the response, reactions and selected checks together.</p><span class="workspace-badge">PRELIMINARY ANALYSIS</span></div>
-  </div>
-  <div class="workspace-gallery" aria-label="More workspace views">
-    <figure class="workspace-card"><a class="workspace-image" href="public/marketing/screenshots/02-uniform-load-analysis.webp" target="_blank" rel="noopener" aria-label="Open larger view of uniform-load analysis in a new tab"><img src="public/marketing/screenshots/02-uniform-load-analysis.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Uniform-load example in the beam workspace with preliminary analysis results."></a><figcaption><span>02 / LOADING</span><strong>Uniform loads</strong></figcaption></figure>
-    <figure class="workspace-card"><a class="workspace-image" href="public/marketing/screenshots/03-calculation-details.webp" target="_blank" rel="noopener" aria-label="Open larger view of calculation details in a new tab"><img src="public/marketing/screenshots/03-calculation-details.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Detailed bending and shear calculations in the beam workspace."></a><figcaption><span>03 / CHECKS</span><strong>Calculation details</strong></figcaption></figure>
-    <figure class="workspace-card"><a class="workspace-image" href="public/marketing/screenshots/04-deflection-diagram.webp" target="_blank" rel="noopener" aria-label="Open larger view of the deflection diagram in a new tab"><img src="public/marketing/screenshots/04-deflection-diagram.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Deflection diagram and preliminary beam results in the workspace."></a><figcaption><span>04 / RESPONSE</span><strong>Deflection diagram</strong></figcaption></figure>
-    <figure class="workspace-card"><a class="workspace-image workspace-mobile-image" href="public/marketing/screenshots/05-mobile-workspace.webp" target="_blank" rel="noopener" aria-label="Open larger view of the mobile workspace in a new tab"><img src="public/marketing/screenshots/05-mobile-workspace.webp" width="860" height="1864" loading="lazy" decoding="async" alt="The beam workspace displayed on a mobile screen."></a><figcaption><span>05 / MOBILE</span><strong>Review on the go</strong></figcaption></figure>
-  </div>
-  <p class="workspace-caption">Example inputs shown. Results are for preliminary planning and require independent professional review.</p>
-</div></section>
+<section class="block" id="how">
+  <header class="block-head reveal"><span class="block-no">02 /</span><h2>From the scaffold to a beam size.</h2><p>Three steps, all at bid time, with nothing to install.</p></header>
+  <ol class="steps">
+    <li class="reveal"><span>I</span><div><h3>Build the scaffold, or type the loads</h3><p>Lay the scaffold out in the builder and it works out what each leg carries. Or enter your own point loads and uniform loads on the beam.</p></div></li>
+    <li class="reveal"><span>II</span><div><h3>Put the legs on the beam</h3><p>Pick the legs that sit on the beam. Their loads go across as point loads at the right distances, dead and live kept apart.</p></div></li>
+    <li class="reveal"><span>III</span><div><h3>Check the size, or find one</h3><p>See reactions, shear, moment and deflection for the size you had in mind, with selected AISC 360-16 ASD bending and shear checks. Or ask for the lightest size that passes.</p></div></li>
+    <li class="reveal"><span>IV</span><div><h3>Keep the working with the bid</h3><p>Print the result and the assumptions behind it. When the engineering comes back, you can see where the two differ and why.</p></div></li>
+  </ol>
+</section>
 
-<section class="section library-section" id="sections" data-library><div class="container">
-  <div class="section-heading reveal"><div><p class="eyebrow">SECTION LIBRARY</p><h2>Browse the W-shapes<br>behind every check.</h2></div><p>Explore all 283 wide-flange sections in the calculator, drawn to scale within each depth. Sign in to analyze a section.</p></div>
-  <div class="chip-row" role="group" aria-label="Filter sections by nominal depth" data-family-chips>
-    <span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span><span class="chip is-skeleton"></span>
+<section class="block" id="workspace">
+  <header class="block-head reveal"><span class="block-no">03 /</span><h2>Inside the workspace.</h2><p>Loads in, beam response and checks out, on one screen. Select an image to open it larger.</p></header>
+  <div class="shots">
+    <a class="shot shot-wide reveal" href="public/marketing/screenshots/01-point-load-analysis.webp" target="_blank" rel="noopener"><img src="public/marketing/screenshots/01-point-load-analysis.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Beam workspace showing two point loads, support reactions, and preliminary strength results."><span>01 // POINT LOADS AND RESULTS</span></a>
+    <a class="shot reveal" href="public/marketing/screenshots/02-uniform-load-analysis.webp" target="_blank" rel="noopener"><img src="public/marketing/screenshots/02-uniform-load-analysis.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Uniform-load example in the beam workspace with preliminary analysis results."><span>02 // UNIFORM LOADS</span></a>
+    <a class="shot reveal" href="public/marketing/screenshots/03-calculation-details.webp" target="_blank" rel="noopener"><img src="public/marketing/screenshots/03-calculation-details.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Detailed bending and shear calculations in the beam workspace."><span>03 // CALCULATION DETAILS</span></a>
+    <a class="shot reveal" href="public/marketing/screenshots/04-deflection-diagram.webp" target="_blank" rel="noopener"><img src="public/marketing/screenshots/04-deflection-diagram.webp" width="2000" height="1441" loading="lazy" decoding="async" alt="Deflection diagram and preliminary beam results in the workspace."><span>04 // DEFLECTION</span></a>
   </div>
-  <p class="sr-only" role="status" data-library-status></p>
-  <div class="shape-grid" data-shape-grid data-spotlight data-spotlight-group>
-    <span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span><span class="shape-card is-skeleton"></span>
+  <p class="fine">Example inputs shown.</p>
+</section>
+
+<section class="block" id="scope">
+  <header class="block-head reveal"><span class="block-no">04 /</span><h2>What it checks, and what it leaves to the engineer.</h2><p>Enough to carry a sensible size in a bid. Not a member design.</p></header>
+  <div class="scope">
+    <div class="scope-col reveal">
+      <h3><i class="on"></i>CHECKED</h3>
+      <ul>
+        <li><span>Model</span>Simply supported W-beam, one size at a time</li>
+        <li><span>Loads</span>Uniform dead and live, point loads, beam self-weight</li>
+        <li><span>Response</span>Reactions, shear, moment, deflection</li>
+        <li><span>Steel</span>Selected AISC 360-16 ASD bending and shear, and a deflection limit</li>
+        <li><span>Bracing</span>Top and bottom flange brace locations</li>
+        <li><span>Sizing</span>Lightest passing W-shape from 283 sections</li>
+      </ul>
+    </div>
+    <div class="scope-col reveal">
+      <h3><i></i>LEFT TO THE ENGINEER</h3>
+      <ul class="plain">
+        <li>Bearing and local web and flange forces</li>
+        <li>Connections and brace design</li>
+        <li>Scaffold design, ties and wind</li>
+        <li>Anything outside a simply supported beam</li>
+      </ul>
+      <p>Section properties are from a mirrored AISC v15 shapes database. Verify against the official source before use.</p>
+    </div>
   </div>
-  <div class="library-footer"><button type="button" class="button ghost-button" data-library-more hidden>Show all sections</button><p class="library-note">Properties from a mirrored AISC v15 shapes database. Verify against the official source before use.</p></div>
-</div></section>
+</section>
 
-<section class="section scope-section" id="scope"><div class="container scope-grid">
-  <div class="reveal"><p class="eyebrow">BEAM ANALYSIS</p><h2>Check the beam in your estimate.</h2><p class="section-copy">For estimators and project managers: review one selected W section at a time for a simply supported beam with full-span uniform dead and live loads and downward point loads. Beam self-weight is included automatically.</p><a class="text-link text-link-bright" href="signin.html">Sign in for beam analysis <svg class="link-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a></div>
-  <div class="status-panel hud reveal" style="--d:.1s">
-    <div class="status-head"><span>System status</span><span class="status-label"><i></i>Available</span></div>
-    <ul class="status-list">
-      <li><span class="light" aria-hidden="true"></span><span>Input</span><strong>Span, section, uniform and point loads, flange braces</strong></li>
-      <li><span class="light" aria-hidden="true"></span><span>Results</span><strong>Reactions, shear, moment, deflection</strong></li>
-      <li><span class="light" aria-hidden="true"></span><span>Steel checks</span><strong>Selected AISC 360-16 ASD bending and shear, plus a deflection limit</strong></li>
-      <li><span class="light" aria-hidden="true"></span><span>Section library</span><strong>Wide-flange sections</strong></li>
-    </ul>
-    <div class="status-head status-sub"><span>Separate review</span><span>Not included</span></div>
-    <ul class="status-chips"><li>Bearing</li><li>Connections</li><li>Local web &amp; flange forces</li><li>Scaffold-specific checks</li><li>Wind &amp; tie loads</li></ul>
-    <p>Selected AISC 360-16 ASD bending and shear checks and a deflection-limit check are available for supported cases. Bearing, connections, and scaffold-specific checks require separate evaluation. Verify section properties against the official source.</p>
+<section class="block founder" aria-labelledby="founder-heading">
+  <header class="block-head reveal"><span class="block-no">05 /</span><h2 id="founder-heading">Why I built it.</h2></header>
+  <div class="founder-grid">
+    <img class="reveal" src="public/founder.jpg" alt="Antonio Monroy, founder of Scafmetric" width="1200" height="1200" loading="lazy">
+    <div class="reveal">
+      <p>I'm Antonio Monroy, a structural engineer in the scaffold industry. I know that sometimes a bid cannot wait for the engineering.</p>
+      <p>I have seen jobs priced on a beam somebody guessed, and then watched the real analysis come back far heavier. So I built Scafmetric to make that first number easier to get and closer to the real answer, with the working there to see.</p>
+      <p class="sign"><strong>Antonio Monroy</strong><span>Founder, Scafmetric</span></p>
+    </div>
   </div>
-</div></section>
+</section>
 
-<section class="section founder-section" aria-labelledby="founder-heading"><div class="container founder-grid">
-  <div class="founder-portrait reveal"><img src="public/founder.jpg" alt="Antonio Monroy, founder of Scafmetric" width="1200" height="1200" loading="lazy"><span class="portrait-tag" aria-hidden="true">FOUNDER</span></div>
-  <div class="founder-copy reveal" style="--d:.1s"><p class="eyebrow">THE PERSON BEHIND SCAFMETRIC</p><h2 id="founder-heading">Built with the scaffold industry in mind.</h2><p>I'm Antonio Monroy, a structural engineer in the scaffold industry. I created Scafmetric to give estimators and project managers a practical way to check preliminary beam sizes and document their assumptions when preparing bids.</p><div class="founder-signature"><strong>Antonio Monroy</strong><span>Founder, Scafmetric</span></div></div>
-</div></section>
-
-<section class="section faq-section" id="faq"><div class="container faq-grid">
-  <div class="reveal"><p class="eyebrow">QUESTIONS</p><h2>Before you start.</h2></div>
-  <div class="faq reveal" style="--d:.1s">
-    <details><summary>What can I calculate today?<span aria-hidden="true">+</span></summary><p>Analyze a simply supported beam with full-span uniform downward dead and live loads and downward point loads, with beam self-weight included automatically. Selected AISC ASD bending and shear checks are available when their assumptions are confirmed.</p></details>
-    <details><summary>Does it check beam capacity?<span aria-hidden="true">+</span></summary><p>The calculator can check selected AISC 360-16 ASD bending and shear limit states for supported cases. It does not determine complete beam or scaffold adequacy; bearing, connections, brace design, and scaffold-specific requirements need separate review.</p></details>
-    <details><summary>How do I get started?<span aria-hidden="true">+</span></summary><p>Create a Scafmetric account or sign in to access your beam workspace.</p></details>
-    <details><summary>Is this a construction approval?<span aria-hidden="true">+</span></summary><p>No. Scafmetric currently supports preliminary planning, not engineering certification or construction approval.</p></details>
+<section class="block" id="faq">
+  <header class="block-head reveal"><span class="block-no">06 /</span><h2>Before you start.</h2></header>
+  <div class="faq reveal">
+    <details><summary>Who is this for?</summary><p>Contractors, estimators and project managers who have to price a beam under a scaffold or shoring before a full analysis exists.</p></details>
+    <details><summary>How close does it get?</summary><p>It runs the same bending, shear and deflection a first-pass check would on the span and loads you give it. How close that is to the final design depends on what the full analysis adds: bearing, connections, bracing design and anything specific to the scaffold.</p></details>
+    <details><summary>Does it replace the engineering?</summary><p>No. It is for preliminary bid planning. It is not a complete member design, an engineering certification or a construction approval.</p></details>
+    <details><summary>What can I enter?</summary><p>A simply supported beam with full-span uniform dead and live loads and downward point loads. Beam self-weight is added for you. The scaffold builder can work out the leg loads and send them across.</p></details>
+    <details><summary>How do I start?</summary><p>Create a Scafmetric account or sign in to open your workspace.</p></details>
   </div>
-</div></section>
+</section>
 
-<section class="section start-section" id="start"><canvas class="starfield" aria-hidden="true"></canvas><div class="container">
-  <div class="start-frame reveal"><div class="start-panel">
-    <p class="press-start" aria-hidden="true"><span>▶</span> PRESS START</p>
-    <p class="eyebrow">ACCOUNTS &amp; PRICING</p>
-    <h2>Start with the calculator.</h2>
-    <p class="section-copy">Use the beam calculator for preliminary bid planning. Sign in or create an account to get started.</p>
-    <div class="start-actions"><a class="button primary" href="signin.html">Sign in or create an account <svg class="link-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></a></div>
-    <p class="start-note"><strong>Keep the basis with your bid.</strong> Review the selected section, reactions, diagrams, and assumptions before carrying a beam size in your estimate.</p>
-  </div></div>
-</div></section>
+<section class="cage reveal">
+  <span class="block-no">07 /</span>
+  <h2>Carry a number you can stand behind.</h2>
+  <p>Check the beam in your estimate before the bid goes in.</p>
+  <a class="solid-btn" href="signin.html">Sign in or create an account</a>
+</section>
 </main>
 
-<footer><div class="container footer-inner"><a class="logo" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="#FFA41B" stroke-width="2"/><rect x="14" y="14" width="4" height="4" fill="#3DD9C9"/></svg><span>scafmetric<span class="logo-dot">.</span></span></a><p>© 2026 Monroy Labs, LLC, doing business as Scafmetric.<br>Preliminary bid planning only. Not a complete member design.</p><a href="terms.html">Terms of use</a></div></footer>
+<footer>
+  <a class="brand" href="index.html"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 27V5M28 27V5M4 7H28M4 16H28M4 25H28M4 25L28 7M4 7l24 18" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>SCAFMETRIC</span></a>
+  <p>&copy; 2026 Monroy Labs, LLC, doing business as Scafmetric. Preliminary bid planning only. Not a complete member design.</p>
+  <a href="terms.html">Terms of use</a>
+</footer>
 <script type="module" src="landing.js"></script><script type="module" src="account.js"></script>
 </body>
 </html>
