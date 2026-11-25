@@ -212,12 +212,17 @@ number of flights up is reached by one adjustment, chosen from the height:
   off the ground to a first landing two rosettes up, and nothing is decked at
   the ground. Half its weight is on the ground, not on a leg.
 
-So every height is reached to the rosette, and the hint says which it used. A
-flight is never buried more than one rosette by the tool: the three cases cover
-every height without it.
+So every height is reached to the rosette. The card says what the tower will
+be as its settings are changed: how many flights, how many of them adjusted and
+how, and where its landings come.
 
-**Landing heights** in the Stair card takes one height or several, as
-"25, 36, 45". The tower is given a landing within a foot of each (the nearest
+**Make up height with** holds the tower to one way: Auto (the above), Buried
+stringer (one rosette or two, never more: two leaves three treads), Clamp-on
+step, or Starter stair. A way that cannot make the height asked for lands on
+the nearest it can make, over or under.
+
+**Landing heights** in the Stair card is a row for each level, with **Add a
+level** for another. The tower is given a landing within a foot of each (the nearest
 rosette, which is never more than 10 in off), with whole flights between them
 and a buried flight or a step wherever the distance from one wanted landing to
 the next is not a whole number of flights. Two wanted heights less than three

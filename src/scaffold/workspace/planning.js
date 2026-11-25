@@ -740,25 +740,29 @@ export function stairFlightWeightLb(f) {
  * (`first`) a starter stair takes up two, and the lowest flight is never
  * buried: there is nothing under the foot to hang it from. Null when the two
  * are too close to put a flight between.
+ *
+ * `prefer` holds it to one way of making up the difference: 'bury' (one or
+ * two rosettes, never more), 'step' or 'starter'. Null then also means that
+ * way cannot make this rise.
  */
-export function flightsForRise(gap, first = false) {
-  const F = STAIR_TOWER.flightLifts;
+export function flightsForRise(gap, first = false, prefer = 'auto') {
+  const T = STAIR_TOWER, F = T.flightLifts;
   const whole = n => Array.from({ length: n }, () => F);
-  if (first) {
-    if (gap === STAIR_TOWER.starterLifts) return { starter: true, rises: [] };
-    if (gap < F) return null;
-    const k = Math.floor(gap / F), over = gap % F;
-    if (over === 0) return { starter: false, rises: whole(k) };
-    if (over === 1) return { starter: false, rises: [...whole(k - 1), F + 1] };
-    if (over === 2) return { starter: true, rises: whole(k) };
-    return { starter: false, rises: [...whole(k), F - 1] };
-  }
-  if (gap < F - 1) return null;
   const k = Math.floor(gap / F), over = gap % F;
+  const can = way => prefer === 'auto' || prefer === way;
+  if (gap <= 0) return null;
   if (over === 0) return { starter: false, rises: whole(k) };
-  if (over === 1) return { starter: false, rises: [...whole(k - 1), F + 1] };
-  if (over === 2) return { starter: false, rises: [...whole(k - 1), F - 1, F - 1] };
-  return { starter: false, rises: [...whole(k), F - 1] };
+  // Short of a whole number of flights by `F - over`: the top one buried that
+  // far, but not the lowest flight of the tower, which has nothing under its foot.
+  const short = F - over;
+  const buryTop = (!first || k >= 1) && short <= T.maxBuryRosettes ? { starter: false, rises: [...whole(k), over] } : null;
+  if (over === 3) return can('bury') ? buryTop : null;
+  if (over === 1) return can('step') && k >= 1 ? { starter: false, rises: [...whole(k - 1), F + 1] } : null;
+  // Two over, which is also two short.
+  if (prefer === 'bury') return buryTop;
+  if (first) return can('starter') ? { starter: true, rises: whole(k) } : null;
+  if (prefer !== 'auto') return null;
+  return k >= 1 ? { starter: false, rises: [...whole(k - 1), F - 1, F - 1] } : null;
 }
 
 /**
@@ -789,6 +793,7 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
   const T = STAIR_TOWER;
   const heightFt = Math.max(0.1, Number(recipe && recipe.heightFt) || STAIR_DEFAULTS.heightFt);
   const start = showBaseCollar ? 0 : 1;
+  const prefer = ['bury', 'step', 'starter'].includes(recipe && recipe.prefer) ? recipe.prefer : 'auto';
   // The rosettes the wanted landings are on, counted up from the foot.
   const wanted = (Array.isArray(recipe && recipe.landingsFt) ? recipe.landingsFt : [])
     .map(Number).filter(h => Number.isFinite(h) && h > 0).sort((a, b) => a - b);
@@ -800,6 +805,17 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
     // One height: the rosette at or under it, one flight up at the least.
     let rise = T.flightLifts;
     while (rise < 400 && liftZ(start + rise + 1) <= heightFt + 1e-6) rise++;
+    // Held to one way of making up the difference, the landing that way can
+    // make nearest the height asked for, over it or under.
+    if (prefer !== 'auto') {
+      let best = null;
+      for (let n = Math.max(T.flightLifts, rise - T.flightLifts); n <= rise + T.flightLifts; n++) {
+        if (!flightsForRise(n, true, prefer)) continue;
+        const off = Math.abs(liftZ(start + n) - heightFt);
+        if (!best || off < best.off) best = { n, off };
+      }
+      if (best) rise = best.n;
+    }
     targets = [{ wantFt: heightFt, rise }];
   }
   // Flight by flight up to each wanted landing in turn. One too close above the last to reach is left out.
@@ -807,7 +823,8 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
   const rises = [], matched = [], missed = [];
   let reached = 0;
   for (const t of targets) {
-    let part = flightsForRise(t.rise - reached, reached === 0);
+    // The way asked for where it can make the rise, and any way where it cannot.
+    let part = flightsForRise(t.rise - reached, reached === 0, prefer) || flightsForRise(t.rise - reached, reached === 0);
     // The lowest wanted landing, under one flight up and not a starter's height: one flight up it is.
     if (!part && reached === 0 && !matched.length && t === targets[0]) { t.rise = T.flightLifts; part = flightsForRise(T.flightLifts, true); }
     if (!part) { missed.push(t.wantFt); continue; }
@@ -817,8 +834,11 @@ export function planStairTower(recipe, { liftZ, showBaseCollar = true, standardL
     matched.push({ wantFt: t.wantFt, lift: start + t.rise });
   }
   const flightCount = rises.length;
-  const adjusts = { buried: rises.filter(r => r < T.flightLifts).length, step: rises.filter(r => r > T.flightLifts).length, starter };
-  const kinds = ['buried', 'step', 'starter'].filter(k => adjusts[k]);
+  const adjusts = {
+    buried: rises.filter(r => r === T.flightLifts - 1).length, buriedTwo: rises.filter(r => r === T.flightLifts - 2).length,
+    step: rises.filter(r => r > T.flightLifts).length, starter,
+  };
+  const kinds = ['buried', 'step', 'starter'].filter(k => adjusts[k] || (k === 'buried' && adjusts.buriedTwo));
   const adjust = kinds.length === 0 ? 'none' : kinds.length === 1 ? kinds[0] : 'mixed';
 
   const first = start + (starter ? T.starterLifts : 0);

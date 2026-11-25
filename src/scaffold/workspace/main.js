@@ -69,14 +69,12 @@ function stairAdjustText(a) {
   if (!a) return '';
   const bits = [];
   if (a.buried) bits.push(`${a.buried} buried a rosette`);
+  if (a.buriedTwo) bits.push(`${a.buriedTwo} buried two rosettes`);
   if (a.step) bits.push(a.step === 1 ? 'a step' : `${a.step} steps`);
   if (a.starter) bits.push('a starter stair');
   return bits.length ? ` (${bits.join(', ')})` : '';
 }
-/** The heights typed into the Stair card: one, or several with commas or spaces between. */
-function parseHeights(text) {
-  return String(text || '').split(/[\s,;]+/).map(Number).filter(h => Number.isFinite(h) && h > 0);
-}
+
 // A building is a pale mass the scaffold reads against.
 const BUILDING_MASS = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, transparent: true, opacity: 0.55, roughness: 0.9, metalness: 0, depthWrite: false });
 const BUILDING_ROOF = new THREE.MeshStandardMaterial({ color: 0xa1a1aa, transparent: true, opacity: 0.7, roughness: 0.9, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
@@ -170,7 +168,15 @@ const TEMPLATE = `
             <label class="sfw-mt">Build to height<span class="sfw-u"><input type="number" id="sfw-stdh" min="0" step="any" value="0" placeholder="0 = one piece"><i>ft</i></span></label>
             <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
-          <label data-for="stair">Landing heights<span class="sfw-u"><input type="text" id="sfw-stair-h" inputmode="decimal" autocomplete="off" value="${STAIR_DEFAULTS.heightFt}" title="One height, or several with commas between: 25, 36, 45"><i>ft</i></span></label>
+          <div data-for="stair">
+            <label>Landing heights</label>
+            <div id="sfw-stair-levels" class="sfw-levels"></div>
+            <div class="sfw-actions-row">
+              <button type="button" class="sfw-btn ghost" id="sfw-stair-add">Add a level</button>
+            </div>
+            <label class="sfw-mt">Make up height with<select id="sfw-stair-prefer"><option value="auto">Auto</option><option value="bury">Buried stringer</option><option value="step">Clamp-on step</option><option value="starter">Starter stair</option></select></label>
+            <p class="sfw-note" id="sfw-stair-sum"></p>
+          </div>
           <div data-for="building">
             <div class="sfw-grid2">
               <label data-bldg="new">Shape<select id="sfw-bldg-shape"><option value="" hidden>Choose</option><option value="rect">Rectangle</option><option value="round">Round</option><option value="outline">Trace</option></select></label>
@@ -889,7 +895,27 @@ class Workspace {
         : `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.`) +
         (done.skipped ? ` ${done.skipped} wall${done.skipped === 1 ? ' is' : 's are'} not square to the grid and got none.` : '') + ' Ctrl+Z takes it back.';
     });
-    this.$('sfw-stair-h').addEventListener('input', () => { this._readStairHeights(); this.tools._refreshGhost(); });
+    this.$('sfw-stair-add').addEventListener('click', () => {
+      // A new level a flight above the highest there is.
+      const top = Math.max(...this._stairLevels, 0);
+      this._stairLevels.push(Math.round((top + 6.5) * 10) / 10);
+      this._drawStairLevels();
+      this._readStairHeights();
+    });
+    this.$('sfw-stair-levels').addEventListener('input', e => {
+      const i = Number(e.target.dataset.level);
+      if (!Number.isInteger(i)) return;
+      this._stairLevels[i] = Number(e.target.value) || 0;
+      this._readStairHeights();
+    });
+    this.$('sfw-stair-levels').addEventListener('click', e => {
+      const btn = e.target.closest('[data-drop]');
+      if (!btn) return;
+      this._stairLevels.splice(Number(btn.dataset.drop), 1);
+      this._drawStairLevels();
+      this._readStairHeights();
+    });
+    this.$('sfw-stair-prefer').addEventListener('change', () => this._readStairHeights());
     this.$('sfw-ledger-outside').addEventListener('change', e => {
       this.tools.setPerimeterHandrails(e.target.checked);
       this.$('sfw-hint').textContent = e.target.checked
@@ -1345,8 +1371,12 @@ class Workspace {
     }
     const flight = this.state.stairs.get(id);
     if (flight) {
-      return [['Type', 'Stair flight'], ['Rise', `${r(flight.z1 - flight.z0)} ft`], ['Treads', String(flight.treads || 0)],
-        ['Weight', `${Math.round(this.state.stairFlightWeightLb(flight))} lb`]];
+      const rows = [['Type', flight.starter ? 'Starter stair' : 'Stair flight'], ['Foot at', `${r(flight.z0)} ft`], ['Top at', `${r(flight.z1)} ft`]];
+      // Buried: its foot is under the landing it leaves, a rosette for every three treads left off.
+      if (flight.treadFrom) rows.push(['Buried', `${Math.round(flight.treadFrom * 4)} rosette${Math.round(flight.treadFrom * 4) === 1 ? '' : 's'}, with 3 planks under it`]);
+      if (flight.step) rows.push(['Step', '1 plank on 2 clamp-on brackets']);
+      rows.push(['Treads', String(flight.treads || 0)], ['Weight', `${Math.round(this.state.stairFlightWeightLb(flight))} lb`]);
+      return rows;
     }
     const st = this.state.standards.get(id);
     if (st) {
@@ -1734,10 +1764,27 @@ class Workspace {
 
   /** The Stair card's heights: one is the top landing; several are landings the tower must have. */
   _readStairHeights() {
-    const heights = parseHeights(this.$('sfw-stair-h').value);
+    if (!this._stairLevels) { this._stairLevels = [STAIR_DEFAULTS.heightFt]; this._drawStairLevels(); }
+    const heights = this._stairLevels.filter(h => Number.isFinite(h) && h > 0);
     const k = this.tools.stairSettings;
     k.heightFt = heights.length ? Math.max(...heights) : STAIR_DEFAULTS.heightFt;
     k.landingsFt = heights.length > 1 ? heights : null;
+    k.prefer = this.$('sfw-stair-prefer').value;
+    // What that makes: said in the card, so it is there before the pointer is on the canvas.
+    const plan = this.tools.stairPlan();
+    const made = stairAdjustText(plan.adjusts);
+    const at = plan.matched.map(m => round(m.atFt, 2)).join(', ');
+    const left = plan.missed.length ? ` ${plan.missed.join(', ')} ft is too close above the level under it and is left out.` : '';
+    this.$('sfw-stair-sum').textContent = `${plan.flightCount} flight${plan.flightCount === 1 ? '' : 's'}${made || ', none adjusted'}. Landing${plan.matched.length === 1 ? '' : 's'} at ${at} ft.${left}`;
+    this.tools._refreshGhost();
+  }
+
+  /** The rows of the Stair card's levels: a height each, and a way to take one out when there are several. */
+  _drawStairLevels() {
+    const many = this._stairLevels.length > 1;
+    this.$('sfw-stair-levels').innerHTML = this._stairLevels.map((h, i) =>
+      `<div class="sfw-level"><span class="sfw-u"><input type="number" min="1" step="any" data-level="${i}" value="${h}" aria-label="Landing height ${i + 1}"><i>ft</i></span>` +
+      (many ? `<button type="button" class="sfw-icon-btn" data-drop="${i}" aria-label="Remove this level" title="Remove this level">${ICONS.close}</button>` : '') + '</div>').join('');
   }
 
   /** The building "Scaffold round it" works on: the one selected, else the last one traced. */

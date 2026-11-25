@@ -263,6 +263,12 @@ dialog.sfn .sfn-page h1:focus,dialog.sfn .sfn-page h1:focus-visible{outline:0;bo
 .sfw-check{flex-direction:row!important;align-items:center;gap:8px!important;margin-top:10px;cursor:pointer}
 .sfw-check input{width:15px;height:15px;margin:0;accent-color:var(--sfw-ink)}
 .sfw-check span{font-size:13px;color:var(--sfw-ink);font-weight:400}
+/* The Stair card's levels: one height a row, with a way to take a row out. */
+.sfw-levels{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.sfw-level{display:flex;align-items:center;gap:6px}
+.sfw-level .sfw-u{flex:1}
+.sfw-level .sfw-icon-btn{width:26px;height:26px;flex:none}
+.sfw-level .sfw-icon-btn svg{width:14px;height:14px}
 /* A tick box that is the whole of a tool's card sits straight under the title. */
 .sfw-toolcard-body>.sfw-check{margin-top:2px}
 

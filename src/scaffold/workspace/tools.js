@@ -1913,16 +1913,20 @@ export class Tools {
   // of the whole block follows the pointer and snaps onto the standards beside
   // it, R turns it a quarter turn, and a click places it.
 
+  /** The stair tower the Stair card describes. */
+  stairPlan() {
+    const s = this.state;
+    return planStairTower(this.stairSettings, {
+      liftZ: lift => s.liftZ(lift),
+      showBaseCollar: s.base.showBaseCollar,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
+    });
+  }
+
   _blockPlan() {
     const s = this.state;
     // The Stair tool places a stair tower the way the Block tool places a block.
-    if (this.tool === 'stair') {
-      return planStairTower(this.stairSettings, {
-        liftZ: lift => s.liftZ(lift),
-        showBaseCollar: s.base.showBaseCollar,
-        standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt),
-      });
-    }
+    if (this.tool === 'stair') return this.stairPlan();
     return planBlockRecipe(this.blockSettings, {
       liftZ: lift => s.liftZ(lift),
       showBaseCollar: s.base.showBaseCollar,

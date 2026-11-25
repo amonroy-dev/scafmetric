@@ -291,6 +291,39 @@ test('given several heights the tower has a landing within a foot of each', () =
   assert.deepEqual([close.matched.map(m => m.wantFt), close.missed], [[20], [22]]);
 });
 
+test('the height can be made up one chosen way: buried one or two rosettes, a step, or a starter', () => {
+  const s = new ScaffoldState({});
+  const at = (n, prefer) => { const p = planStairTower({ heightFt: s.liftZ(n) + 0.01, prefer }, { liftZ: l => s.liftZ(l), showBaseCollar: true, standardLengthsFt: STD }); return [p.deckLifts.at(-1), p.adjusts]; };
+  // Ten rosettes: a starter and two flights by default; buried, three flights with the top one two rosettes down.
+  assert.deepEqual(at(10, 'auto'), [10, { buried: 0, buriedTwo: 0, step: 0, starter: true }]);
+  assert.deepEqual(at(10, 'bury'), [10, { buried: 0, buriedTwo: 1, step: 0, starter: false }]);
+  assert.deepEqual(at(11, 'bury'), [11, { buried: 1, buriedTwo: 0, step: 0, starter: false }]);
+  // A flight is never buried three, so nine rosettes cannot be made by burying:
+  // it lands on the nearest it can make, ten, with the top flight two rosettes down.
+  assert.deepEqual(at(9, 'bury'), [10, { buried: 0, buriedTwo: 1, step: 0, starter: false }]);
+  // A step makes one over and a starter two over; asked for a height each cannot
+  // make, each lands on the nearest it can, over or under.
+  assert.deepEqual(at(9, 'step')[0], 9);
+  assert.deepEqual(at(11, 'step')[0], 12);
+  assert.deepEqual(at(10, 'starter')[0], 10);
+  assert.deepEqual(at(11, 'starter')[0], 12);
+  assert.deepEqual(at(7, 'step')[0], 8);
+  assert.equal(flightsForRise(6, true, 'bury').rises.join(), '4,2');
+  assert.equal(flightsForRise(2, true, 'bury'), null, 'the lowest flight is never the buried one');
+  assert.equal(flightsForRise(5, false, 'bury'), null);
+
+  // Buried two: three treads, half-way up before they start, and its foot two rosettes under the landing.
+  const { s: placed, tools } = place(14.5);
+  placed.clear();
+  tools.stairSettings = { heightFt: placed.liftZ(10) + 0.01, prefer: 'bury' };
+  tools.placeBlockAt({ plan: tools._blockPlan(), center: { x: 0, y: 0 }, snapped: false, rotationSteps: 0 });
+  const top = [...placed.stairs.values()].sort((a, b) => a.z0 - b.z0).at(-1);
+  assert.deepEqual([top.treads, top.treadFrom], [3, 0.5]);
+  assert.ok(Math.abs(top.z0 - placed.liftZ(6)) < 1e-9 && Math.abs(top.z1 - placed.liftZ(10)) < 1e-9);
+  const legs = placed.takeoff().legs.reduce((sum, l) => sum + l.deadLb, 0);
+  assert.ok(Math.abs(legs - deriveBom(placed).summary.totalWeightLb) < 0.5);
+});
+
 test('turned a quarter turn it stands 7 ft wide and 14 ft deep, and placing it twice adds nothing', () => {
   const { s, tools } = place(14.5, { x: 0, y: 0 }, 1);
   const xs = [...s.standards.values()].map(c => c.x), ys = [...s.standards.values()].map(c => c.y);
