@@ -142,7 +142,7 @@ const CHECKS = {
       && `the builder must stay shut until both statements are ticked and agreed: ${JSON.stringify(r.notice)}`,
     !(r.notice.goneAfterAgreeing && !r.notice.askedAgain) && `the notice should be asked once, then never in the way again: ${JSON.stringify(r.notice)}`,
     r.initial.tool !== 'block' && `the Block tool should be in hand on open, got ${r.initial.tool}`,
-    r.initial.toolOrder.join() !== 'select,block,stair,standard' && `the toolbar should run Select, Block, Stair, Standard; it runs ${r.initial.toolOrder}`,
+    r.initial.toolOrder.join() !== 'select,building,block,stair' && `the toolbar should run Select, Building, Block, Stair; it runs ${r.initial.toolOrder}`,
     !r.initial.blockCard && 'the block card should be up on open, the Block tool being in hand',
     !r.initial.home.icon && 'the home button should be a house icon',
     !(r.initial.home.flat && r.initial.home.label === '3D view' && r.initial.home.pulsing)

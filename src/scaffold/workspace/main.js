@@ -160,18 +160,18 @@ const TEMPLATE = `
           <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
           <div data-for="building">
             <div class="sfw-grid2">
-              <label>Shape<select id="sfw-bldg-shape"><option value="outline">Outline</option><option value="rect">Rectangle</option><option value="round">Round</option></select></label>
-              <label>Roof<select id="sfw-bldg-roof"><option value="flat">Flat</option><option value="gable">Gable</option><option value="hip">Hip</option><option value="shed">Shed</option><option value="cone">Cone</option><option value="dome">Dome</option></select></label>
-              <label>Roof rise<span class="sfw-u"><input type="number" id="sfw-bldg-rise" min="0" step="any" value="6"><i>ft</i></span></label>
-              <label>Overhang<span class="sfw-u"><input type="number" id="sfw-bldg-over" min="0" step="any" value="0"><i>ft</i></span></label>
-              <label>Ridge<select id="sfw-bldg-ridge"><option value="">Long side</option><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
-              <label>Raised<span class="sfw-u"><input type="number" id="sfw-bldg-raise" min="0" step="any" value="0" title="Lifted off what it stands on: a balcony or a canopy. 0 to stand on the ground or the roof under it."><i>ft</i></span></label>
-              <label>Hollow radius<span class="sfw-u"><input type="number" id="sfw-bldg-inner" min="0" step="any" value="0" title="For a round building: the radius of an open middle. 0 for none."><i>ft</i></span></label>
-              <label>Parapet<span class="sfw-u"><input type="number" id="sfw-bldg-par" min="0" step="any" value="0"><i>ft</i></span></label>
-              <label>Height<span class="sfw-u"><input type="number" id="sfw-bldg-h" min="1" step="any" value="${BUILDING_DEFAULTS.heightFt}"><i>ft</i></span></label>
-              <label>Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
+              <label>Shape<select id="sfw-bldg-shape"><option value="" hidden>Choose</option><option value="rect">Rectangle</option><option value="round">Round</option><option value="outline">Trace</option></select></label>
+              <label data-bldg="rect round">Roof<select id="sfw-bldg-roof"><option value="flat">Flat</option><option value="gable">Gable</option><option value="hip">Hip</option><option value="shed">Shed</option><option value="cone">Cone</option><option value="dome">Dome</option></select></label>
+              <label data-bldg="roofed">Roof rise<span class="sfw-u"><input type="number" id="sfw-bldg-rise" min="0" step="any" value="6"><i>ft</i></span></label>
+              <label data-bldg="roofed">Overhang<span class="sfw-u"><input type="number" id="sfw-bldg-over" min="0" step="any" value="0"><i>ft</i></span></label>
+              <label data-bldg="ridged">Ridge<select id="sfw-bldg-ridge"><option value="">Long side</option><option value="x">Left to right</option><option value="y">Front to back</option></select></label>
+              <label data-bldg="any">Raised<span class="sfw-u"><input type="number" id="sfw-bldg-raise" min="0" step="any" value="0" title="Lifted off what it stands on: a balcony or a canopy. 0 to stand on the ground or the roof under it."><i>ft</i></span></label>
+              <label data-bldg="round">Hollow radius<span class="sfw-u"><input type="number" id="sfw-bldg-inner" min="0" step="any" value="0" title="For a round building: the radius of an open middle. 0 for none."><i>ft</i></span></label>
+              <label data-bldg="flatroof">Parapet<span class="sfw-u"><input type="number" id="sfw-bldg-par" min="0" step="any" value="0"><i>ft</i></span></label>
+              <label data-bldg="any">Height<span class="sfw-u"><input type="number" id="sfw-bldg-h" min="1" step="any" value="${BUILDING_DEFAULTS.heightFt}"><i>ft</i></span></label>
+              <label data-bldg="any">Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
             </div>
-            <div class="sfw-actions-row sfw-mt">
+            <div class="sfw-actions-row sfw-mt" data-bldg="any">
               <button type="button" class="sfw-btn" id="sfw-bldg-auto" disabled>Scaffold round it</button>
             </div>
           </div>
@@ -832,9 +832,16 @@ class Workspace {
       if (picked) this.state.updateBuilding(picked, { raisedFt: this.tools.buildingSettings.raisedFt });
     });
     this.$('sfw-bldg-inner').addEventListener('change', e => { this.tools.buildingSettings.innerRadiusFt = Math.max(0, Number(e.target.value) || 0); });
-    this.$('sfw-bldg-shape').addEventListener('change', e => { this.tools.buildingSettings.shape = e.target.value; this.tools.outline = []; this.tools._refreshGhost(); });
+    this.$('sfw-bldg-shape').addEventListener('change', e => {
+      this.tools.buildingSettings.shape = e.target.value;
+      this.tools.outline = [];
+      this._syncBuildingFields();
+      this.tools._refreshGhost();
+    });
+    this._syncBuildingFields();
     this.$('sfw-bldg-roof').addEventListener('change', e => {
       this.tools.buildingSettings.roofType = e.target.value;
+      this._syncBuildingFields();
       const id = selectedBuilding();
       if (id) this.state.updateBuilding(id, { roof: roofNow() });
     });
@@ -933,6 +940,7 @@ class Workspace {
         : `${count > 0 ? 'Add' : 'Take away'} ${n} bay${n === 1 ? '' : 's'} (${round(n * info.depthFt, 2)} ft). Let go to do it.`;
       return;
     }
+    if (tool === 'building' && !info.shape) { hint.textContent = 'Pick the building’s shape in the card.'; return; }
     if (tool === 'building' && info.shape !== 'outline') {
       hint.textContent = info.shape === 'round'
         ? (!count ? 'Click the centre of the building.' : `Radius ${round(info.lengthFt, 2)} ft. Click to set the wall.`)
@@ -1708,6 +1716,27 @@ class Workspace {
     if (picked) return picked;
     return this.state.buildings.has(this._lastBuilding) ? this._lastBuilding : ([...this.state.buildings.keys()].pop() || null);
   }
+  /**
+   * The Building card asks for the shape first and nothing else. Once one is
+   * picked it shows what that shape can have: a roof for a rectangle or a
+   * round building, and then the rise, overhang and ridge only when there is
+   * a roof to have them, a parapet only on a flat one, a hollow only when round.
+   */
+  _syncBuildingFields() {
+    const k = this.tools.buildingSettings;
+    const shape = k.shape;
+    const roofs = shape === 'rect' ? ['flat', 'gable', 'hip', 'shed'] : shape === 'round' ? ['flat', 'cone', 'dome'] : ['flat'];
+    const roof = this.$('sfw-bldg-roof');
+    if (!roofs.includes(k.roofType)) { k.roofType = 'flat'; roof.value = 'flat'; }
+    for (const o of roof.options) o.hidden = !roofs.includes(o.value);
+    const roofed = k.roofType !== 'flat';
+    const show = {
+      any: !!shape, rect: shape === 'rect', round: shape === 'round',
+      roofed: !!shape && roofed, ridged: shape === 'rect' && roofed, flatroof: !!shape && !roofed,
+    };
+    for (const el of this.root.querySelectorAll('#sfw-toolcard [data-bldg]')) el.hidden = !el.dataset.bldg.split(' ').some(key => show[key]);
+  }
+
   _syncBuildingCard() {
     const btn = this.$('sfw-bldg-auto');
     if (btn) btn.disabled = !this._buildingInHand();

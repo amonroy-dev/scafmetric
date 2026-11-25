@@ -66,7 +66,8 @@ const RAIL_ON_LIFT_FT = 0.05;
 // A leg stands where a bracket hangs when it is this near in plan.
 const BRACKET_HOST_FT = 0.05;
 // In toolbar order. Block comes straight after Select: most scaffolds start as one.
-export const TOOLS = ['select', 'block', 'stair', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'building', 'erase'];
+// The building comes first: it is what the scaffold is built against.
+export const TOOLS = ['select', 'building', 'block', 'stair', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
 // A click this near the first corner of an outline being traced closes it.
 const OUTLINE_CLOSE_FT = 1;
 const OUTLINE_LINE = new THREE.LineBasicMaterial({ color: 0x2563eb });
@@ -137,7 +138,8 @@ export class Tools {
     this.stairSettings = { ...STAIR_DEFAULTS };
     // Building tool: the height of the next building traced, how far off its
     // walls scaffold stands, and the corners clicked so far.
-    this.buildingSettings = { ...BUILDING_DEFAULTS, shape: 'outline', roofType: 'flat', riseFt: 6, overhangFt: 0, ridge: '', parapetFt: 0, innerRadiusFt: 0, raisedFt: 0 };
+    // No shape until one is picked in the card: the card asks for that first.
+    this.buildingSettings = { ...BUILDING_DEFAULTS, shape: '', roofType: 'flat', riseFt: 6, overhangFt: 0, ridge: '', parapetFt: 0, innerRadiusFt: 0, raisedFt: 0 };
     this.outline = [];
     this.rotationSteps = 0;
     // Live load tool: a load spans along the boards of the deck it sits on,
@@ -508,6 +510,7 @@ export class Tools {
   }
 
   _outlineGhost(e) {
+    if (!this.buildingSettings.shape) { this.hooks.onPreview?.('building', 0, { shape: '' }); return; }
     const p = this._outlinePoint(e);
     const twoClick = this.buildingSettings.shape !== 'outline';
     let pts = this.outline.map(q => new THREE.Vector3(q[0], q[1], 0.04));
@@ -918,7 +921,7 @@ export class Tools {
       if (g && this.groundHook({ x: g.x, y: g.y })) return;
     }
     if (this.tool === 'building') {
-      const p = this._outlinePoint(e);
+      const p = this.buildingSettings.shape ? this._outlinePoint(e) : null;
       if (!p) return;
       if (this.buildingSettings.shape !== 'outline') {
         if (!this.outline.length) { this.outline.push([p.x, p.y]); return; }

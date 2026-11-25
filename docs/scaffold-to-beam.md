@@ -210,8 +210,11 @@ corner, or Enter, closes it into a building of the height in the card. A
 building is drawn as a pale mass. It carries nothing and weighs nothing: it is
 there to build against.
 
-- **Shape.** Outline (corner by corner), Rectangle (two opposite corners) or
-  Round (the centre, then a point on the wall; drawn as 48 straight walls).
+- The Building tool is second in the toolbar, under Select. Its card asks for
+  the **Shape** first and shows nothing else; once one is picked it shows what
+  that shape can have, and the roof's own settings only when there is a roof.
+- **Shape.** Rectangle (two opposite corners), Round (the centre, then a point
+  on the wall; drawn as 48 straight walls) or Trace (corner by corner).
 - **Roof** on a rectangle: flat, gable, hip or shed, with a rise; the ridge runs
   along the longer side. **Parapet** is a height of wall above a flat roof.
   These are drawn only (`src/scaffold/workspace/buildings.js`).

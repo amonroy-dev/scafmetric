@@ -115,6 +115,10 @@ test('the Building tool traces an outline corner by corner and closes on the fir
   tools.hooks.onBuilding = b => said.push(b.id);
   tools.setTool('building');
   tools.buildingSettings.heightFt = 24;
+  // Nothing is traced until a shape is picked in the card.
+  ground = { x: 5, y: 5 }; tools._act({});
+  assert.deepEqual(tools.outline, []);
+  tools.buildingSettings.shape = 'outline';
   const click = (x, y, shiftKey = false) => { ground = { x, y }; tools._act({ shiftKey }); };
   click(0, 0);
   click(28, 0.4, true);  // SHIFT: held square to the last corner
