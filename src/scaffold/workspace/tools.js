@@ -10,13 +10,15 @@
 
 import * as THREE from 'three';
 import { buildStairFlight } from './parts.js';
+import { findEnd, pullEnd } from './pull.js';
 import { MATERIALS, verticalTube, tubeBetween, buildBaseAssembly, buildSideBracket, sideBracketWorldMembers, trussWorldMembers, buildTruss, plankBoard, liveLoadPatch, liveLoadGhostMaterial, liveLoadArrows, liveLoadGhostArrowMaterial, STANDARD_TUBE_OD_IN } from './parts.js';
 import { legColumn } from './parts.js';
 import { getPart, CATEGORY_TOOL, CATALOG } from './catalog.js';
 import {
   findClosestUnoccupiedTarget, computeBatchPlan, planStandardSegmentsForHeight, liftFrame, planLiftOutline,
   planBlockRecipe, planStandardSegmentsForLift, rotateOffset90, snapBlockCenter, BLOCK_DEFAULTS,
-  planStairTower, STAIR_DEFAULTS,
+  planStairTower, STAIR_DEFAULTS, BLOCK_SNAP_RADIUS_FT,
+  BUILDING_DEFAULTS, planScaffoldRoundBuilding, snapToWall,
 } from './planning.js';
 import { hitData, instanceMeshes, clearGroup } from './instancing.js';
 import {
@@ -63,7 +65,15 @@ const RAIL_ON_LIFT_FT = 0.05;
 // A leg stands where a bracket hangs when it is this near in plan.
 const BRACKET_HOST_FT = 0.05;
 // In toolbar order. Block comes straight after Select: most scaffolds start as one.
-export const TOOLS = ['select', 'block', 'stair', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'erase'];
+export const TOOLS = ['select', 'block', 'stair', 'standard', 'ledger', 'brace', 'truss', 'bracket', 'plank', 'liveload', 'building', 'erase'];
+// A click this near the first corner of an outline being traced closes it.
+const OUTLINE_CLOSE_FT = 1;
+const OUTLINE_LINE = new THREE.LineBasicMaterial({ color: 0x2563eb });
+// Pulling an end: its handle shows when the pointer is this near the end on
+// the ground, and is taken hold of within this many pixels of it.
+const PULL_NEAR_FT = 4;
+const PULL_GRAB_PX = 22;
+const PULL_REMOVE_LINE = new THREE.LineBasicMaterial({ color: 0xb91c1c });
 
 const MARKER_GEO = new THREE.SphereGeometry(0.2, 12, 10);
 // The block ghost's footprint: blue, and green once snapped (ScaffoldPro's cue).
@@ -124,6 +134,10 @@ export class Tools {
     this.blockSettings = { ...BLOCK_DEFAULTS };
     // Stair tool: the height of the tower's top landing (its card's one field).
     this.stairSettings = { ...STAIR_DEFAULTS };
+    // Building tool: the height of the next building traced, how far off its
+    // walls scaffold stands, and the corners clicked so far.
+    this.buildingSettings = { ...BUILDING_DEFAULTS };
+    this.outline = [];
     this.rotationSteps = 0;
     // Live load tool: a load spans along the boards of the deck it sits on,
     // until R turns it across them. Picking the tool again puts it back.
@@ -152,6 +166,7 @@ export class Tools {
     on('pointerdown', e => this._onDown(e));
     on('pointermove', e => this._onMove(e));
     on('pointerup', e => this._onUp(e));
+    on('dblclick', e => this._selectChain(e));
     // Hover ends, preview ends (ScaffoldPro clears its hover on pointer-out).
     on('pointerleave', () => { this._hoverAt = null; this._pendingBatch = null; this._clearGhost(); this._setCursor(''); });
     this._onKey = e => this._key(e);
@@ -190,7 +205,264 @@ export class Tools {
     this._refreshGhost();
   }
 
+  // --- pulling an end ---------------------------------------------------------------
+  // In Select, a straight outside face shows a handle when the pointer comes
+  // near it. Dragged out it adds whole bays, each a repeat of the last one;
+  // dragged in it takes bays away (see pull.js).
+
+  /** The end whose handle the pointer is near, or null. With `grab`, only when it is on the handle itself. */
+  _endUnderPointer(e, grab = false) {
+    if (this.tool !== 'select' || this.carry || this.groundHook || !this.state.ledgers.size) return null;
+    this.engine.setPointerFromEvent(e);
+    const g = this.engine.groundPoint();
+    if (!g) return null;
+    const faces = this._framing().faces;
+    let best = null, bd = PULL_NEAR_FT;
+    for (const f of faces) {
+      if (!f.outside) continue;
+      const out = (g.x - f.ax) * f.normX + (g.y - f.ay) * f.normY;
+      const along = (g.x - f.ax) * f.dirX + (g.y - f.ay) * f.dirY;
+      if (out < -0.75 || out > PULL_NEAR_FT) continue;
+      const d = Math.hypot(Math.max(0, -along, along - f.spanFt), out);
+      if (d < bd) { bd = d; best = f; }
+    }
+    const end = best ? findEnd(faces, best) : null;
+    if (!end) return null;
+    if (grab) {
+      const { camera, renderer } = this.engine;
+      const p = new THREE.Vector3(end.handle.x, end.handle.y, 0).project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      const px = Math.hypot(((p.x + 1) / 2) * r.width - (e.clientX - r.left), ((1 - p.y) / 2) * r.height - (e.clientY - r.top));
+      if (!(px <= PULL_GRAB_PX)) return null;
+    }
+    return end;
+  }
+
+  /** The handle on an end, and with a pull under way the bays it would add or take. */
+  _pullGhost(end, bays = 0, held = false) {
+    const mat = held ? MATERIALS.braceGhost : MATERIALS.ghost;
+    const { n, t, origin, span, depthFt: L } = end;
+    const at = (u, v, z = 0.12) => [origin.x + n.x * u + t.x * v, origin.y + n.y * u + t.y * v, z];
+    const mid = (span[0] + span[1]) / 2, out = 1.5 + bays * L;
+    // An arrow pointing each way along the pull.
+    this.ghostGroup.add(tubeBetween(at(out - 0.9, mid), at(out + 0.9, mid), 3, mat));
+    for (const s of [-1, 1]) for (const w of [-1, 1]) this.ghostGroup.add(tubeBetween(at(out + s * 0.9, mid), at(out + s * 0.45, mid + w * 0.45), 3, mat));
+    for (let i = 1; i <= Math.abs(bays); i++) {
+      const [u0, u1] = bays > 0 ? [(i - 1) * L, i * L] : [-i * L, -(i - 1) * L];
+      const pts = [at(u0, span[0], 0.05), at(u1, span[0], 0.05), at(u1, span[1], 0.05), at(u0, span[1], 0.05)].map(p => new THREE.Vector3(...p));
+      const box = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), bays > 0 ? OUTLINE_LINE : PULL_REMOVE_LINE);
+      box.userData.ownsGeometry = true;
+      this.ghostGroup.add(box);
+    }
+    this.hooks.onPreview?.('pull', bays, { depthFt: L, held });
+  }
+
+  /** Pull an end by whole bays (out is positive), as one undo step. Returns how many were done. */
+  pullEndBy(end, bays) {
+    const way = Math.sign(bays);
+    if (!way) return 0;
+    const mid = (end.span[0] + end.span[1]) / 2;
+    let done = 0, at = end, u = 0;
+    this.state.batch(() => {
+      for (let i = 0; i < Math.abs(bays); i++) {
+        if (!at || !pullEnd(this.state, at, way)) break;
+        done++;
+        u += at.depthFt * way;
+        // The same end, where it stands now.
+        const px = end.origin.x + end.n.x * u + end.t.x * mid, py = end.origin.y + end.n.y * u + end.t.y * mid;
+        const faces = this._framing().faces;
+        const face = faces.find(f => f.outside && f.normX * end.n.x + f.normY * end.n.y > 0.99
+          && Math.abs((px - f.ax) * f.normX + (py - f.ay) * f.normY) < 0.3
+          && (px - f.ax) * f.dirX + (py - f.ay) * f.dirY > -0.3 && (px - f.ax) * f.dirX + (py - f.ay) * f.dirY < f.spanFt + 0.3);
+        at = face ? findEnd(faces, face) : null;
+      }
+    });
+    return done * way;
+  }
+
+  // --- carrying a selection ------------------------------------------------------
+  // Move and Copy pick the selection up: it follows the pointer as a ghost,
+  // held by the standard that was nearest the pointer, R turns it a quarter
+  // turn about that standard, and a click sets it down. Near another standard
+  // it snaps onto it, as a block does, and what lands on parts already there
+  // becomes one with them: that is how a chain is clicked onto another.
+
+  /** Pick these parts up. False when there is no standard among them to hold them by. */
+  beginCarry(ids, copy = false) {
+    const s = this.state;
+    const cols = ids.map(id => s.standards.get(id)).filter(c => c && s.isLeg(c));
+    if (!cols.length) return false;
+    this.setTool('select');
+    let hold = cols[0];
+    if (this._hoverAt) {
+      this.engine.setPointerFromEvent(this._hoverAt);
+      const g = this.engine.groundPoint();
+      if (g) for (const c of cols) if (Math.hypot(c.x - g.x, c.y - g.y) < Math.hypot(hold.x - g.x, hold.y - g.y)) hold = c;
+    }
+    const has = new Set(ids);
+    const lines = [];
+    for (const map of [s.ledgers, s.trusses, s.braces, s.guardrails]) for (const m of map.values()) if (has.has(m.id)) lines.push({ a: m.a, b: m.b });
+    this.carry = {
+      ids: [...ids], copy, steps: 0, pivot: { x: hold.x, y: hold.y },
+      cols: cols.map(c => ({ x: c.x, y: c.y, top: s.standardTopZ(c) })), lines,
+    };
+    this._refreshGhost();
+    return true;
+  }
+
+  cancelCarry() {
+    if (!this.carry) return;
+    this.carry = null;
+    this._clearGhost();
+  }
+
+  /** Where the carried parts would be set down with the pointer at `e`: { dx, dy, steps, pivot, snapped }. */
+  _carryPlacement(e) {
+    const c = this.carry;
+    this.engine.setPointerFromEvent(e);
+    const g = this.engine.groundPoint();
+    if (!c || !g) return null;
+    const turns = c.steps % 4;
+    const turn = (x, y) => (turns === 1 ? [-y, x] : turns === 2 ? [-x, -y] : turns === 3 ? [y, -x] : [x, y]);
+    let dx = this.state.snap(g.x) - c.pivot.x, dy = this.state.snap(g.y) - c.pivot.y;
+    const at = p => { const [rx, ry] = turn(p.x - c.pivot.x, p.y - c.pivot.y); return { x: c.pivot.x + rx + dx, y: c.pivot.y + ry + dy }; };
+    // Onto the nearest standard that is staying where it is.
+    const carried = new Set(c.ids);
+    let best = null;
+    for (const other of this.state.standards.values()) {
+      if (!c.copy && carried.has(other.id)) continue;
+      for (const col of c.cols) {
+        const p = at(col);
+        const d = Math.hypot(other.x - p.x, other.y - p.y);
+        if (d <= BLOCK_SNAP_RADIUS_FT && (!best || d < best.d)) best = { d, ox: other.x - p.x, oy: other.y - p.y };
+      }
+    }
+    if (best) { dx += best.ox; dy += best.oy; }
+    return { dx, dy, steps: c.steps, pivot: c.pivot, snapped: !!best, at };
+  }
+
+  _carryGhost(e) {
+    const c = this.carry;
+    const p = this._carryPlacement(e);
+    if (!p) return;
+    const mat = MATERIALS.ghost;
+    const base = this.state.baseOffsetFt();
+    const meshes = [];
+    for (const col of c.cols) { const q = p.at(col); meshes.push(verticalTube(q.x, q.y, base, col.top, STANDARD_TUBE_OD_IN, mat)); }
+    for (const l of c.lines) {
+      const a = p.at({ x: l.a[0], y: l.a[1] }), b = p.at({ x: l.b[0], y: l.b[1] });
+      meshes.push(tubeBetween([a.x, a.y, l.a[2]], [b.x, b.y, l.b[2]], 1.9, mat));
+    }
+    for (const m of instanceMeshes(meshes)) this.ghostGroup.add(m);
+    this.hooks.onPreview?.('carry', c.ids.length, { copy: c.copy, snapped: p.snapped, rotation: (c.steps % 4) * 90, standards: c.cols.length });
+  }
+
+  /** Set the carried parts down where the pointer is. */
+  _dropCarry(e) {
+    const c = this.carry;
+    const p = this._carryPlacement(e);
+    if (!c || !p) return;
+    this.carry = null;
+    const ids = this.state.transformParts(c.ids, { dx: p.dx, dy: p.dy, steps: p.steps, pivot: p.pivot }, c.copy);
+    this.selection = new Set(ids);
+    this.hooks.onSelectionChange?.(ids);
+    this.hooks.onCarried?.(c.cols.length, c.copy, p.snapped);
+  }
+
+  /** Double-click in Select: the whole chain the part under the pointer belongs to. */
+  _selectChain(e) {
+    if (this.tool !== 'select' || this.carry) return;
+    this.engine.setPointerFromEvent(e);
+    const ids = this._pickCandidates(e);
+    if (!ids.length) return;
+    const chain = this.state.chainOf([ids[0]]);
+    this.selection = new Set(chain);
+    this.hooks.onSelectionChange?.(chain);
+    this.hooks.onChainSelected?.(chain);
+  }
+
+  // --- buildings -------------------------------------------------------------------
+  // The Building tool traces an outline corner by corner on the ground. SHIFT
+  // holds the next wall square to the last corner. A click back on the first
+  // corner, or Enter, closes it into a building of the height in the card.
+
+  /** The corner a click at `e` would add: on the grid, and with SHIFT square to the last one. */
+  _outlinePoint(e) {
+    const g = this._groundSnap(e);
+    if (!g) return null;
+    const last = this.outline[this.outline.length - 1];
+    if (last && e.shiftKey) {
+      if (Math.abs(g.x - last[0]) >= Math.abs(g.y - last[1])) g.y = last[1]; else g.x = last[0];
+    }
+    const first = this.outline[0];
+    const closes = this.outline.length >= 3 && Math.hypot(g.x - first[0], g.y - first[1]) <= OUTLINE_CLOSE_FT;
+    return { x: g.x, y: g.y, closes };
+  }
+
+  /** Close the outline traced so far into a building. */
+  finishOutline() {
+    if (this.outline.length < 3) return null;
+    const b = this.state.addBuilding(this.outline, this.buildingSettings.heightFt);
+    this.outline = [];
+    this._clearGhost();
+    if (b) this.hooks.onBuilding?.(b);
+    return b;
+  }
+
+  _outlineGhost(e) {
+    const p = this._outlinePoint(e);
+    const pts = this.outline.map(q => new THREE.Vector3(q[0], q[1], 0.04));
+    if (p) pts.push(p.closes ? pts[0].clone() : new THREE.Vector3(p.x, p.y, 0.04));
+    if (pts.length >= 2) {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), OUTLINE_LINE);
+      line.userData.ownsGeometry = true;
+      this.ghostGroup.add(line);
+    }
+    if (p) {
+      const marker = new THREE.Mesh(MARKER_GEO, MATERIALS.ghost);
+      marker.position.set(p.closes ? this.outline[0][0] : p.x, p.closes ? this.outline[0][1] : p.y, 0.1);
+      this.ghostGroup.add(marker);
+    }
+    const last = this.outline[this.outline.length - 1];
+    this.hooks.onPreview?.('building', this.outline.length, {
+      closes: !!(p && p.closes),
+      lengthFt: p && last ? Math.hypot(p.x - last[0], p.y - last[1]) : 0,
+    });
+  }
+
+  /**
+   * Scaffold round a building: blocks of the Block card's recipe, as deep as
+   * it says and decked under the building's height, off its walls by the
+   * distance in the Building card. One undo step. Returns { blocks, skipped }.
+   */
+  scaffoldRoundBuilding(buildingId) {
+    const b = this.state.buildings.get(buildingId);
+    if (!b) return null;
+    const s = this.state;
+    const plan = planScaffoldRoundBuilding(b.points, { offsetFt: this.buildingSettings.wallDistanceFt, depthFt: this.blockSettings.depthFt });
+    const ctx = {
+      liftZ: lift => s.liftZ(lift), showBaseCollar: s.base.showBaseCollar,
+      standardLengthsFt: CATALOG.standards.parts.map(p => p.lengthFt), ledgerLengthsFt: CATALOG.ledgers.parts.map(p => p.lengthFt),
+    };
+    // The face that looks at the wall is left open: no rails within the
+    // stand-off of this building's walls, now or when a later block re-lays them.
+    b.openWithinFt = Math.max(0, Number(this.buildingSettings.wallDistanceFt) || 0) + 0.25;
+    const heard = this.hooks.onBulkFill;
+    this.hooks.onBulkFill = null; // one message for the lot, not one a block
+    try {
+      s.batch(() => {
+        for (const k of plan.blocks) {
+          const recipe = { ...this.blockSettings, widthFt: k.widthFt, depthFt: k.depthFt, heightFt: b.heightFt };
+          this.placeBlockAt({ plan: planBlockRecipe(recipe, ctx), center: k.center, snapped: false, rotationSteps: k.rotationSteps });
+        }
+      });
+    } finally { this.hooks.onBulkFill = heard; }
+    return { blocks: plan.blocks.length, skipped: plan.skipped };
+  }
+
   setTool(name) {
+    this.carry = null;
+    this.outline = [];
     this.tool = name;
     this.pending = null;
     this.liveLoadAcross = false;
@@ -295,6 +567,15 @@ export class Tools {
   _onDown(e) {
     if (e.button !== 0 || this._navGesture(e)) return;
     this._down = { x: e.clientX, y: e.clientY, moved: 0, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
+    // A press on an end's handle starts a pull, not a selection box.
+    const end = this._endUnderPointer(e, true);
+    if (end) {
+      this.engine.setPointerFromEvent(e);
+      const g = this.engine.groundPoint();
+      this.pull = { end, bays: 0, from: { x: g.x, y: g.y } };
+      this._marquee = null;
+      return;
+    }
     // A left-drag draws a selection box in any tool and any view; a click
     // without a drag still belongs to the tool.
     this._marquee = { startClientX: e.clientX, startClientY: e.clientY, currentClientX: e.clientX, currentClientY: e.clientY };
@@ -302,6 +583,18 @@ export class Tools {
 
   _onMove(e) {
     if (this._down) this._down.moved = Math.max(Math.abs(e.clientX - this._down.x), Math.abs(e.clientY - this._down.y));
+    if (this.pull) {
+      if (!(e.buttons & 1)) { this.pull = null; } else {
+        this.engine.setPointerFromEvent(e);
+        const g = this.engine.groundPoint();
+        const { end, from } = this.pull;
+        if (g) this.pull.bays = Math.max(-30, Math.min(60, Math.round(((g.x - from.x) * end.n.x + (g.y - from.y) * end.n.y) / end.depthFt)));
+        this._clearGhost();
+        this._pullGhost(end, this.pull.bays, true);
+        this.engine.invalidate?.();
+        return;
+      }
+    }
     if (this._marquee && (e.buttons & 1)) {
       this._marquee.currentClientX = e.clientX;
       this._marquee.currentClientY = e.clientY;
@@ -321,6 +614,15 @@ export class Tools {
     this._down = null;
     this._marquee = null;
     this._clearOverlay();
+    if (this.pull) {
+      const { end, bays } = this.pull;
+      this.pull = null;
+      this._clearGhost();
+      const done = bays ? this.pullEndBy(end, bays) : 0;
+      this.hooks.onPulled?.(done, bays, end.depthFt);
+      this._updateGhost(e);
+      return;
+    }
     if (!down) return;
     const dragged = down.moved >= DRAG_PX;
     if (marquee && dragged) {
@@ -427,6 +729,20 @@ export class Tools {
 
   _act(e) {
     const s = this.state;
+    if (this.carry) { this._dropCarry(e); return; }
+    // A click wanted by something outside the tools (setting a drawing to
+    // scale): the point on the ground exactly as clicked, not on the grid.
+    if (this.groundHook) {
+      this.engine.setPointerFromEvent(e);
+      const g = this.engine.groundPoint();
+      if (g && this.groundHook({ x: g.x, y: g.y })) return;
+    }
+    if (this.tool === 'building') {
+      const p = this._outlinePoint(e);
+      if (!p) return;
+      if (p.closes) this.finishOutline(); else this.outline.push([p.x, p.y]);
+      return;
+    }
     // Move/copy capture: ground clicks drive the anchor/destination steps.
     if (this.transformHook) {
       const g = this._groundSnap(e);
@@ -1432,6 +1748,12 @@ export class Tools {
     const plan = this._blockPlan();
     const g = this._blockCenterOnGrid(p, plan);
     const c = snapBlockCenter(g, plan, this.rotationSteps, this._legs());
+    // With no standards to join, it stands off the wall it is beside.
+    if (!c.snapped && this.state.buildings.size) {
+      const turned = this.rotationSteps % 2 === 1;
+      const wall = snapToWall(c, turned ? plan.depthFt : plan.widthFt, turned ? plan.widthFt : plan.depthFt, [...this.state.buildings.values()], this.buildingSettings.wallDistanceFt);
+      if (wall) return { plan, center: wall, snapped: false, onWall: true, rotationSteps: this.rotationSteps };
+    }
     return { plan, center: { x: c.x, y: c.y }, snapped: c.snapped, rotationSteps: this.rotationSteps };
   }
 
@@ -1570,7 +1892,7 @@ export class Tools {
     this.ghostGroup.add(outline);
     const { plan } = placement;
     this.hooks.onPreview?.(plan.stair ? 'stair' : 'block', w.standards.length, {
-      flights: plan.flightCount,
+      flights: plan.flightCount, onWall: !!placement.onWall,
       snapped: placement.snapped,
       widthFt: plan.widthFt, depthFt: plan.depthFt,
       deckZ: plan.deckLifts.length ? s.liftZ(plan.deckLifts[plan.deckLifts.length - 1]) : null,
@@ -1617,7 +1939,8 @@ export class Tools {
       this._clearGhost();
       return;
     }
-    if (e.key === 'Escape') { this.pending = null; this._pendingBatch = null; this._clearGhost(); }
+    if (e.key === 'Enter' && this.tool === 'building' && this.outline.length >= 3 && !typing) { e.preventDefault(); this.finishOutline(); return; }
+    if (e.key === 'Escape') { this.pending = null; this._pendingBatch = null; this.outline = []; this._clearGhost(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && this.selection.size) {
       const target = e.target;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.isContentEditable)) return;
@@ -1639,6 +1962,10 @@ export class Tools {
   rotate() {
     // Redraw first, then report: what R did is the news, not the usual hover hint.
     const done = (tool, value) => { this._refreshGhost(); this.hooks.onRotate?.(tool, value); return value; };
+    if (this.carry) {
+      this.carry.steps = (this.carry.steps + 1) % 4;
+      return done('carry', this.carry.steps);
+    }
     if (this.tool === 'block' || this.tool === 'stair') {
       this.rotationSteps = (this.rotationSteps + 1) % 4;
       return done(this.tool, this.rotationSteps);
@@ -1704,7 +2031,15 @@ export class Tools {
   _buildGhost(e) {
     this._clearGhost();
     this._pendingBatch = null;
-    if (this.tool === 'select' || this.tool === 'erase') return;
+    if (this.carry) { this._carryGhost(e); return; }
+    if (this.tool === 'building') { this._outlineGhost(e); return; }
+    if (this.tool === 'select') {
+      const end = this._endUnderPointer(e);
+      if (end) this._pullGhost(end, 0, !!this._endUnderPointer(e, true));
+      this._setCursor(end && this._endUnderPointer(e, true) ? 'grab' : '');
+      return;
+    }
+    if (this.tool === 'erase') return;
     if (this.tool === 'beam') { this._legHoverGhost(e); return; }
     if (this.tool === 'block' || this.tool === 'stair') { this._blockGhost(e); return; }
     // Live loads: ghost the patch and its span arrows on the hovered deck, or

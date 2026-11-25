@@ -12,7 +12,7 @@ import {
   MATERIALS, verticalTube, tubeBetween, buildBaseAssembly,
   STANDARD_TUBE_OD_IN, rosetteDisk, plankBoard, PLANK_MATERIAL, liveLoadPatch, liveLoadArrows, nodePickProxy, tubePickProxy, NODE_MATERIALS } from './parts.js';
 import { CATALOG, CATEGORIES, DEFAULT_PART, CATEGORY_TOOL } from './catalog.js';
-import { BLOCK_DEFAULTS, STAIR_DEFAULTS } from './planning.js';
+import { BLOCK_DEFAULTS, STAIR_DEFAULTS, BUILDING_DEFAULTS } from './planning.js';
 import { beamUnderPickedLegs, toBeamPointLoads, forBeamForm, wholePoundsOnLeg, loadOnBeamFromLeg } from '../legloads.js';
 import { deriveBom, bomToCsv, TRUSS_FAMILY_LABEL } from './bom.js';
 import { KEYS, RETENTION_NOTICE, save as saveWip, load as loadWip, purgeExpired, debounce, formatSavedAt, loadServerWorkspace, saveServerWorkspace, pickNewer } from '../store.js';
@@ -20,6 +20,7 @@ import { buildSideBracket, buildTruss, buildStairFlight, GUARDRAIL_OD_IN, SHARED
 import { exportScaffoldDxf, buildCenterlineModel, LAYERS } from './dxf.js';
 import { instanceMeshes, mergeLineSegments, clearGroup } from './instancing.js';
 import { createUseNotice } from './usenotice.js';
+import { UnderlayLayer, readUnderlayFile, sheetWidthFt, UNDERLAY_DEFAULTS } from './underlay.js';
 
 // Line icons, 20px grid, drawn in currentColor.
 const svg = d => `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -29,6 +30,7 @@ const ICONS = {
   standard: svg('<path d="M10 3v12.5M6.5 16.5h7M8.2 3h3.6M7.8 8h4.4M7.8 12h4.4"/>'),
   block: svg('<rect x="3.5" y="3.5" width="13" height="13" rx="1.5"/><path d="M3.5 10h13M10 3.5v13"/>'),
   stair: svg('<path d="M3 16.5h3.5v-3.5H10V9.5h3.5V6H17"/>'),
+  building: svg('<path d="M4 16.5V5.5l6-2.5v13.5M10 7.5l6 2v7M2.5 16.5h15M6.5 8v0M6.5 11v0M6.5 14v0M13 12v0M13 14.5v0"/>'),
   ledger: svg('<path d="M5 10h10"/><circle cx="3.6" cy="10" r="1.4"/><circle cx="16.4" cy="10" r="1.4"/>'),
   brace: svg('<path d="M4 3.5v13M16 3.5v13M4 15L16 5"/>'),
   truss: svg('<path d="M3 14.5h14M4 6h12M4 6l3 8.5L10 6l3 8.5L16 6"/>'),
@@ -55,11 +57,14 @@ const TOOL_META = {
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
   plank: { label: 'Plank', icon: ICONS.plank, hint: 'Click a ledger to deck the bay on that side with best-fit 9 in and 6 in boards. R turns the boards to run the other way. Shift+click decks the whole run.' },
   liveload: { label: 'Live load', icon: ICONS.liveload, hint: 'Click a planked bay to load it. The load runs along the planks; R turns it across them. Shift+click loads the whole platform.' },
+  building: { label: 'Building', icon: ICONS.building, hint: 'Click the corners of the building in turn; SHIFT keeps a wall square. Click the first corner again, or press Enter, to close it.' },
   erase: { label: 'Erase', icon: ICONS.erase, hint: 'Click a component to remove it.' },
   // Not in the run of placing tools (TOOLS): its button stands apart at the foot of the bar.
   beam: { label: 'Send to beam', icon: ICONS.beam, hint: 'Click the legs that sit on the beam.' },
 };
 const OFF_TOLERANCE_FT = 0.5;
+// A building is a pale mass the scaffold reads against.
+const BUILDING_MASS = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, transparent: true, opacity: 0.55, roughness: 0.9, metalness: 0, depthWrite: false });
 
 // Send to beam, as drawn. The beam is a flat bar on the ground under the legs
 // picked for it, drawn over the model (no depth test) so that it shows from
@@ -151,6 +156,15 @@ const TEMPLATE = `
             <label class="sfw-check"><input type="checkbox" id="sfw-std-brackets"><span>On side brackets</span></label>
           </div>
           <label data-for="stair">Top landing height<span class="sfw-u"><input type="number" id="sfw-stair-h" min="1" step="any" value="${STAIR_DEFAULTS.heightFt}"><i>ft</i></span></label>
+          <div data-for="building">
+            <div class="sfw-grid2">
+              <label>Height<span class="sfw-u"><input type="number" id="sfw-bldg-h" min="1" step="any" value="${BUILDING_DEFAULTS.heightFt}"><i>ft</i></span></label>
+              <label>Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
+            </div>
+            <div class="sfw-actions-row sfw-mt">
+              <button type="button" class="sfw-btn" id="sfw-bldg-auto" disabled>Scaffold round it</button>
+            </div>
+          </div>
           <label data-for="ledger" class="sfw-check"><input type="checkbox" id="sfw-ledger-outside"><span>Perimeter handrails</span></label>
           <div data-for="brace">
             <div class="sfw-grid2 sfw-mt">
@@ -204,6 +218,30 @@ const TEMPLATE = `
       <div class="sfw-hint" id="sfw-hint"></div>
     </div>
     <aside class="sfw-side">
+      <details class="sfw-group sfw-fold">
+        <summary>Drawing underlay</summary>
+        <input type="file" id="sfw-ul-file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp" hidden>
+        <div class="sfw-actions-row">
+          <button type="button" class="sfw-btn" id="sfw-ul-load">Load PDF or image</button>
+        </div>
+        <div id="sfw-ul-opts" hidden>
+          <p class="sfw-note" id="sfw-ul-name"></p>
+          <div class="sfw-grid2 sfw-mt">
+            <label>Page<input type="number" id="sfw-ul-page" min="1" step="1" value="1"></label>
+            <label>1 in on sheet<span class="sfw-u"><input type="number" id="sfw-ul-scale" min="0" step="any" value="${UNDERLAY_DEFAULTS.feetPerSheetInch}"><i>ft</i></span></label>
+          </div>
+          <label class="sfw-mt">Known distance<span class="sfw-u"><input type="number" id="sfw-ul-dist" min="0" step="any" value="10"><i>ft</i></span></label>
+          <div class="sfw-actions-row">
+            <button type="button" class="sfw-btn ghost" id="sfw-ul-cal" title="Click the two ends of the known distance on the drawing">Scale by 2 points</button>
+            <button type="button" class="sfw-btn ghost" id="sfw-ul-move" title="Click a point on the drawing, then where it belongs">Move</button>
+          </div>
+          <label class="sfw-mt">Opacity<input type="range" id="sfw-ul-op" min="0.1" max="1" step="0.05" value="${UNDERLAY_DEFAULTS.opacity}"></label>
+          <div class="sfw-actions-row">
+            <button type="button" class="sfw-btn ghost" id="sfw-ul-hide">Hide</button>
+            <button type="button" class="sfw-btn ghost" id="sfw-ul-remove">Remove</button>
+          </div>
+        </div>
+      </details>
       <details class="sfw-group sfw-fold">
         <summary>Base</summary>
         <label class="sfw-mt">Screw jack extension<span class="sfw-u"><input type="number" id="sfw-jack" min="0" max="12" step="0.25" value="6"><i>in</i></span></label>
@@ -292,6 +330,7 @@ class Workspace {
         this._transform = null;
         if (this.tools) {
           this.tools.transformHook = null;
+          this.tools.groundHook = null;
           this.tools.cancelMarquee();
           this.tools.setTool('select');
           // Esc also lets go of whatever is selected, as in ScaffoldPro.
@@ -454,6 +493,24 @@ class Workspace {
       onLegBox: (ids, modifiers) => this._boxBeamLegs(ids, modifiers),
       onSelectionChange: ids => { this.selection = ids; this._rebuildContent(); this._refreshProps(); },
       onToolChange: name => this._applyToolUi(name),
+      onBuilding: b => {
+        this._lastBuilding = b.id;
+        this._syncBuildingCard();
+        this.$('sfw-hint').textContent = 'Building traced. "Scaffold round it" lays scaffold along its walls, or place blocks beside it: they stand off the wall.';
+      },
+      onPulled: (done, asked, depthFt) => {
+        const n = Math.abs(done);
+        this.$('sfw-hint').textContent = !asked ? ''
+          : !n ? 'Nothing to take: the last bay stays.'
+          : `${done > 0 ? 'Added' : 'Took away'} ${n} bay${n === 1 ? '' : 's'} (${round(n * depthFt, 2)} ft).${n < Math.abs(asked) ? ' That is as far as it goes.' : ''} Ctrl+Z takes it back.`;
+      },
+      onChainSelected: ids => {
+        const n = ids.filter(id => this.state.standards.has(id)).length;
+        this.$('sfw-hint').textContent = `Whole chain selected: ${n} standard${n === 1 ? '' : 's'} and everything on them. Move or Copy picks it up.`;
+      },
+      onCarried: (n, copy, snapped) => {
+        this.$('sfw-hint').textContent = `${copy ? 'Copied' : 'Moved'} ${n} standard${n === 1 ? '' : 's'} and what is on them${snapped ? ', joined onto the standards beside them' : ''}. Ctrl+Z takes it back.`;
+      },
       onPreview: (tool, count, info) => this._onToolPreview(tool, count, info),
       onRotate: (tool, value) => this._onToolRotate(tool, value),
       onBulkFill: (n, tool) => {
@@ -718,6 +775,7 @@ class Workspace {
     this.$('sfw-jack').addEventListener('input', e => this.state.setBase({ jackExtensionIn: Math.max(0, Number(e.target.value) || 0) }));
     this.$('sfw-sill').addEventListener('change', e => this.state.setBase({ showWoodSill: e.target.checked }));
     this.$('sfw-collar').addEventListener('change', e => this.state.setBase({ showBaseCollar: e.target.checked }));
+    this._bindUnderlay();
     this.$('sfw-clear').addEventListener('click', () => { this.beamLegs.clear(); this.selection = []; this.state.clear(); });
     // Moving the first leg along the beam slides the beam under the legs.
     this.$('sfw-first').addEventListener('input', () => this._beamChanged());
@@ -742,6 +800,15 @@ class Workspace {
         : '';
       // The sockets that can take a standard light up, as rosettes do for the other tools.
       this._rebuildNodes();
+    });
+    this.$('sfw-bldg-h').addEventListener('input', e => { this.tools.buildingSettings.heightFt = Math.max(1, Number(e.target.value) || BUILDING_DEFAULTS.heightFt); });
+    this.$('sfw-bldg-off').addEventListener('input', e => { this.tools.buildingSettings.wallDistanceFt = Math.max(0, Number(e.target.value) || 0); });
+    this.$('sfw-bldg-auto').addEventListener('click', () => {
+      const id = this._buildingInHand();
+      const done = id ? this.tools.scaffoldRoundBuilding(id) : null;
+      if (!done) return;
+      this.$('sfw-hint').textContent = `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.` +
+        (done.skipped ? ` ${done.skipped} wall${done.skipped === 1 ? ' is' : 's are'} not square to the grid and got none.` : '') + ' Ctrl+Z takes it back.';
     });
     this.$('sfw-stair-h').addEventListener('input', e => {
       this.tools.stairSettings.heightFt = Math.max(1, Number(e.target.value) || STAIR_DEFAULTS.heightFt);
@@ -800,6 +867,24 @@ class Workspace {
         : `Click to deck this bay${info.crossed ? ', boards turned with R' : ''}. R turns the boards; SHIFT decks the whole run.`;
       return;
     }
+    if (tool === 'pull') {
+      const n = Math.abs(count);
+      hint.textContent = !info.held ? 'Drag the arrow to make the scaffold longer or shorter, a bay at a time.'
+        : !n ? 'Drag out to add bays, in to take them away.'
+        : `${count > 0 ? 'Add' : 'Take away'} ${n} bay${n === 1 ? '' : 's'} (${round(n * info.depthFt, 2)} ft). Let go to do it.`;
+      return;
+    }
+    if (tool === 'building') {
+      hint.textContent = !count ? 'Click the first corner of the building.'
+        : info.closes ? 'Click to close the outline.'
+        : `${round(info.lengthFt, 2)} ft. Click the next corner; SHIFT keeps the wall square.${count >= 3 ? ' Enter closes it.' : ''}`;
+      return;
+    }
+    if (tool === 'carry') {
+      hint.textContent = `Click to set ${info.copy ? 'the copy' : 'it'} down${info.rotation ? `, turned ${info.rotation}°` : ''}.` +
+        (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it. Esc cancels.');
+      return;
+    }
     if (tool === 'stair') {
       hint.textContent = `Click to place the stair tower: ${info.flights} flight${info.flights === 1 ? '' : 's'}, top landing at ${round(info.deckZ, 2)} ft` +
         `${info.rotation ? `, turned ${info.rotation}°` : ''}.` + (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
@@ -809,7 +894,7 @@ class Workspace {
       const deck = info.deckZ === null ? 'no deck fits under that height' : `deck at ${round(info.deckZ, 2)} ft`;
       hint.textContent = `Click to place the ${round(info.widthFt, 2)} × ${round(info.depthFt, 2)} ft block, ${deck}` +
         `${info.rotation ? `, turned ${info.rotation}°` : ''}.` +
-        (info.snapped ? ' Snapped onto the standards beside it.' : ' R turns it.');
+        (info.snapped ? ' Snapped onto the standards beside it.' : info.onWall ? ' Standing off the wall. R turns it.' : ' R turns it.');
       return;
     }
     if (tool === 'truss') {
@@ -906,7 +991,7 @@ class Workspace {
     if (!hint) return;
     // The refreshed preview usually writes its own hint; these are for when it
     // has nothing to show.
-    if (tool === 'block' || tool === 'stair') return;
+    if (tool === 'block' || tool === 'stair' || tool === 'carry') return;
     if (tool === 'brace') {
       const sel = this.$('sfw-brace-dir');
       if (sel) sel.value = value;
@@ -974,10 +1059,14 @@ class Workspace {
   _rebuildContent() {
     clearGroup(this.contentGroup);
     const meshes = [];
+    this._buildingMeshes = [];
     if (this.skeleton) this._buildSkeleton();
     else this._buildSolids(meshes);
     this._buildLiveLoads(meshes);
     for (const m of instanceMeshes(meshes)) this.contentGroup.add(m);
+    // Each building is a shape of its own: drawn as it is, not instanced.
+    for (const m of this._buildingMeshes) this.contentGroup.add(m);
+    this._syncBuildingCard();
     this._rebuildLabels();
     this._rebuildBeam();
     this.engine?.invalidate({ shadows: true });
@@ -1018,6 +1107,12 @@ class Workspace {
     for (const t of g.trusses || []) {
       const mat = this._matFor(t.id, MATERIALS.ledger);
       for (const m of buildTruss(t.a, t.b, mat, t.family)) add(m, { id: t.id, kind: 'truss' });
+    }
+    for (const b of g.buildings || []) {
+      const shape = new THREE.Shape(b.points.map(p => new THREE.Vector2(p[0], p[1])));
+      const mesh = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: b.heightFt, bevelEnabled: false }), this.selection.includes(b.id) ? MATERIALS.selected : BUILDING_MASS);
+      mesh.userData = { id: b.id, kind: 'building', ownsGeometry: true };
+      this._buildingMeshes.push(mesh);
     }
     for (const f of g.stairs || []) {
       const mat = this._matFor(f.id, MATERIALS.ledger);
@@ -1123,12 +1218,15 @@ class Workspace {
     if (this.state.trusses.has(id)) return 'truss';
     if (this.state.guardrails.has(id)) return 'guardrail';
     if (this.state.stairs.has(id)) return 'stair';
+    if (this.state.buildings.has(id)) return 'building';
     if (this.state.liveLoads.has(id)) return 'live load';
     return 'item';
   }
 
   _describe(id) {
     const r = v => Math.round(v * 100) / 100;
+    const bldg = this.state.buildings.get(id);
+    if (bldg) return [['Type', 'Building'], ['Height', `${r(bldg.heightFt)} ft`], ['Walls', String(bldg.points.length)]];
     const flight = this.state.stairs.get(id);
     if (flight) {
       return [['Type', 'Stair flight'], ['Rise', `${r(flight.z1 - flight.z0)} ft`], ['Treads', String(flight.treads || 0)],
@@ -1429,35 +1527,113 @@ class Workspace {
   }
 
   /** Move/copy: pick an anchor, then a destination, and shift the selected stacks. */
-  _beginTransform(copy) {
-    const ids = this.selection.filter(id => this.state.standards.has(id));
-    if (!ids.length) {
-      this.$('sfw-hint').textContent = 'Select one or more standards first (drag a marquee).';
-      return;
-    }
-    this._transform = { ids, copy, anchor: null };
-    this.$('sfw-hint').textContent = `${copy ? 'Copy' : 'Move'}: click the anchor point, then the destination. Esc cancels.`;
-    this.tools.setTool('select');
-    this.tools.transformHook = pt => this._transformClick(pt);
+  // --- drawing underlay ----------------------------------------------------------
+  // A PDF page or an image laid on the ground to build over. It is not part
+  // of the model: it is not saved with it and goes when the page is reloaded.
+
+  _bindUnderlay() {
+    const hint = text => { this.$('sfw-hint').textContent = text; };
+    this.underlay = new UnderlayLayer(this.engine);
+    const file = this.$('sfw-ul-file');
+    const load = async () => {
+      const f = this._underlayFile;
+      if (!f) return;
+      hint(`Reading ${f.name}…`);
+      try {
+        const r = await readUnderlayFile(f, Number(this.$('sfw-ul-page').value) || 1);
+        this._underlaySheet = r;
+        const keep = this.underlay.layout;
+        // A PDF knows its paper size, so the sheet's scale sets it; an image is laid 100 ft wide until it is scaled.
+        const widthFt = r.isPdf ? sheetWidthFt(r.widthPt, this.$('sfw-ul-scale').value) : 100;
+        this.underlay.set(r.canvas, widthFt, { x: keep ? keep.x : 0, y: keep ? keep.y : 0, opacity: Number(this.$('sfw-ul-op').value) });
+        this.$('sfw-ul-opts').hidden = false;
+        this.$('sfw-ul-page').max = String(r.pageCount);
+        this.$('sfw-ul-page').value = String(r.page);
+        this.$('sfw-ul-page').disabled = r.pageCount < 2;
+        this.$('sfw-ul-scale').disabled = !r.isPdf;
+        this.$('sfw-ul-hide').textContent = 'Hide';
+        this.$('sfw-ul-name').textContent = r.isPdf ? `${f.name} · page ${r.page} of ${r.pageCount}` : f.name;
+        hint(r.isPdf
+          ? `Drawing laid down at 1 in = ${this.$('sfw-ul-scale').value} ft. Change the scale, or set it from two points a known distance apart.`
+          : 'Image laid down. Set its scale from two points a known distance apart.');
+      } catch (err) {
+        hint(err && err.message ? err.message : 'That file could not be read.');
+      }
+    };
+    this.$('sfw-ul-load').addEventListener('click', () => file.click());
+    file.addEventListener('change', () => {
+      if (!file.files || !file.files[0]) return;
+      this._underlayFile = file.files[0];
+      this.$('sfw-ul-page').value = '1';
+      file.value = '';
+      load();
+    });
+    this.$('sfw-ul-page').addEventListener('change', load);
+    this.$('sfw-ul-scale').addEventListener('input', e => {
+      const sheet = this._underlaySheet;
+      if (sheet && sheet.isPdf && Number(e.target.value) > 0) this.underlay.setWidth(sheetWidthFt(sheet.widthPt, e.target.value));
+    });
+    this.$('sfw-ul-op').addEventListener('input', e => this.underlay.setOpacity(e.target.value));
+    this.$('sfw-ul-hide').addEventListener('click', e => {
+      this.underlay.setVisible(!this.underlay.visible);
+      e.target.textContent = this.underlay.visible ? 'Hide' : 'Show';
+    });
+    this.$('sfw-ul-remove').addEventListener('click', () => {
+      this.underlay.remove();
+      this._underlayFile = null; this._underlaySheet = null;
+      this.tools.groundHook = null;
+      this.$('sfw-ul-opts').hidden = true;
+      hint('Drawing removed.');
+    });
+    // Two clicks on the ground, then `done(first, second)`.
+    const twoClicks = (first, second, done) => {
+      if (!this.underlay.loaded) return;
+      this.tools.setTool('select');
+      let a = null;
+      hint(first);
+      this.tools.groundHook = p => {
+        if (!a) { a = p; hint(second); return true; }
+        this.tools.groundHook = null;
+        done(a, p);
+        return true;
+      };
+    };
+    this.$('sfw-ul-cal').addEventListener('click', () => {
+      const real = Number(this.$('sfw-ul-dist').value);
+      if (!(real > 0)) { hint('Type the known distance first.'); return; }
+      twoClicks(`Click one end of the ${real} ft distance on the drawing. Esc cancels.`, 'Now the other end.', (a, b) => {
+        hint(this.underlay.calibrate(a, b, real)
+          ? `Drawing scaled: those two points are now ${real} ft apart.`
+          : 'Those two points are the same spot. Try again.');
+      });
+    });
+    this.$('sfw-ul-move').addEventListener('click', () => {
+      twoClicks('Click a point on the drawing. Esc cancels.', 'Now click where that point belongs.', (a, b) => {
+        // Set down on the grid, so a corner of the drawing can be put on a grid line.
+        this.underlay.moveBy(this.state.snap(b.x) - a.x, this.state.snap(b.y) - a.y);
+        hint('Drawing moved.');
+      });
+    });
   }
 
-  _transformClick(pt) {
-    const t = this._transform;
-    if (!t) return false;
-    if (!t.anchor) {
-      t.anchor = pt;
-      this.$('sfw-hint').textContent = 'Now click the destination.';
-      return true;
+  /** The building "Scaffold round it" works on: the one selected, else the last one traced. */
+  _buildingInHand() {
+    const picked = this.selection.find(id => this.state.buildings.has(id));
+    if (picked) return picked;
+    return this.state.buildings.has(this._lastBuilding) ? this._lastBuilding : ([...this.state.buildings.keys()].pop() || null);
+  }
+  _syncBuildingCard() {
+    const btn = this.$('sfw-bldg-auto');
+    if (btn) btn.disabled = !this._buildingInHand();
+  }
+
+  _beginTransform(copy) {
+    // Picked up, the selection follows the pointer until a click sets it down.
+    if (!this.tools.beginCarry(this.selection, copy)) {
+      this.$('sfw-hint').textContent = 'Select what to move first: drag a box, or double-click a part to take its whole chain.';
+      return;
     }
-    const dx = pt.x - t.anchor.x, dy = pt.y - t.anchor.y;
-    const ids = this.state.transformStacks(t.ids, dx, dy, t.copy);
-    this.selection = ids;
-    this._transform = null;
-    this.tools.transformHook = null;
-    this._rebuildContent();
-    this._refreshProps();
-    this.$('sfw-hint').textContent = `${ids.length} stack(s) ${t.copy ? 'copied' : 'moved'}.`;
-    return true;
+    this.$('sfw-hint').textContent = `${copy ? 'Copy' : 'Move'}: click where it goes. R turns it 90°. Esc cancels.`;
   }
 
   _saveView() {

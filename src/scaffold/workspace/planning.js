@@ -558,6 +558,104 @@ export function planBlockRecipe(recipe, { liftZ, showBaseCollar = true, standard
 
 export const BLOCK_SNAP_RADIUS_FT = 1.25;
 
+// --- buildings ---------------------------------------------------------------------
+// A building is its outline in plan and a height. Scaffold goes round it at a
+// set distance off the wall (ScaffoldPro's autoScaffoldAroundBuilding.ts): a
+// run of bays along each wall, and a square block the depth of the scaffold
+// at each corner to carry it round.
+
+export const BUILDING_DEFAULTS = { heightFt: 20, wallDistanceFt: 1 };
+// A wall counts as square to the grid when it is this near it; scaffold runs
+// are laid along those and no others, since blocks turn in quarter turns.
+const WALL_SQUARE_FT = 0.05;
+// A stretch of wall shorter than this, once its corners are taken off, gets no run of its own.
+const MIN_RUN_FT = 2;
+
+function polygonArea(points) {
+  let a = 0;
+  for (let i = 0; i < points.length; i++) { const p = points[i], q = points[(i + 1) % points.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  return a / 2;
+}
+
+/**
+ * The walls of an outline: [{ a, b, lengthFt, tx, ty, nx, ny, square }], t
+ * along the wall and n pointing out of the building.
+ */
+export function buildingWalls(points) {
+  if (!points || points.length < 3) return [];
+  const ccw = polygonArea(points) > 0;
+  return points.map((a, i) => {
+    const b = points[(i + 1) % points.length];
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    const tx = dx / len, ty = dy / len;
+    const [nx, ny] = ccw ? [ty, -tx] : [-ty, tx];
+    return { a, b, lengthFt: len, tx, ty, nx: nx + 0, ny: ny + 0, square: Math.abs(dx) <= WALL_SQUARE_FT || Math.abs(dy) <= WALL_SQUARE_FT };
+  });
+}
+
+/**
+ * Blocks that carry a scaffold `depthFt` deep round a building, `offsetFt` off
+ * its walls: [{ center:{x,y}, widthFt, depthFt, rotationSteps, corner }], and
+ * how many walls were left out for not being square to the grid.
+ *
+ * Along each wall one block runs the length of it. At a corner that turns
+ * outward the two runs stop at the corner and a square block fills the gap
+ * between their ends; at one that turns inward (a notch) each run stops short
+ * by the offset and the depth, and the square goes in the angle. Either way
+ * the runs and the square share their end standards, so the whole is one
+ * chain.
+ */
+export function planScaffoldRoundBuilding(points, { offsetFt = BUILDING_DEFAULTS.wallDistanceFt, depthFt = 3 } = {}) {
+  const walls = buildingWalls(points);
+  const off = Math.max(0, Number(offsetFt) || 0), depth = Math.max(0.5, Number(depthFt) || 3);
+  const face = off + depth / 2;
+  const blocks = [];
+  let skipped = 0;
+  const n = walls.length;
+  // A corner turns outward when the next wall leaves on the far side from the building.
+  const outward = i => { const w = walls[(i - 1 + n) % n], v = walls[i]; return w.nx * v.tx + w.ny * v.ty < 0; };
+  walls.forEach((w, i) => {
+    const prev = walls[(i - 1 + n) % n], next = walls[(i + 1) % n];
+    if (w.square && prev.square) {
+      const [cx, cy] = w.a;
+      blocks.push({ center: { x: cx + (prev.nx + w.nx) * face, y: cy + (prev.ny + w.ny) * face }, widthFt: depth, depthFt: depth, rotationSteps: 0, corner: true });
+    }
+    if (!w.square) { skipped++; return; }
+    // Where the run starts and stops along the wall, measured from its first corner.
+    const start = prev.square ? (outward(i) ? -off : off + depth) : 0;
+    const end = w.lengthFt - (next.square ? (outward((i + 1) % n) ? -off : off + depth) : 0);
+    if (end - start < MIN_RUN_FT) return;
+    const mid = (start + end) / 2;
+    blocks.push({
+      center: { x: w.a[0] + w.tx * mid + w.nx * face, y: w.a[1] + w.ty * mid + w.ny * face },
+      widthFt: end - start, depthFt: depth, rotationSteps: Math.abs(w.tx) > 0.5 ? 0 : 1, corner: false,
+    });
+  });
+  return { blocks, skipped };
+}
+
+/**
+ * Where a block centred at `center`, `alongFt` by `acrossFt` in world x and y,
+ * should sit to stand `offsetFt` off the nearest wall it is beside: the same
+ * centre moved square to that wall, or null when no wall is within reach.
+ */
+export function snapToWall(center, sizeX, sizeY, buildings, offsetFt, reachFt = 3) {
+  let best = null;
+  for (const b of buildings) {
+    for (const w of buildingWalls(b.points)) {
+      if (!w.square) continue;
+      const half = Math.abs(w.nx) > 0.5 ? sizeX / 2 : sizeY / 2;
+      const along = (center.x - w.a[0]) * w.tx + (center.y - w.a[1]) * w.ty;
+      if (along < -half || along > w.lengthFt + half) continue;
+      const out = (center.x - w.a[0]) * w.nx + (center.y - w.a[1]) * w.ny;
+      const move = offsetFt + half - out;
+      if (Math.abs(move) > reachFt || (best && Math.abs(move) >= Math.abs(best.move))) continue;
+      best = { move, x: center.x + w.nx * move, y: center.y + w.ny * move };
+    }
+  }
+  return best ? { x: best.x, y: best.y } : null;
+}
+
 // --- the stair tower -------------------------------------------------------------
 // A 14 x 7 ft switchback tower on ten standards: a 3'-6" landing at each end,
 // the full 7 ft wide, and between them a 7 ft bay holding two 3'-6" flights

@@ -80,6 +80,9 @@ export class ScaffoldState {
     // upper:[[x,y],[x,y]], z0, z1, treads }: the standards at the two ends of
     // each of those ledgers, and the heights of the two.
     this.stairs = new Map();
+    // A building the scaffold stands beside: id -> { id, points:[[x,y],..], heightFt }.
+    // Drawn, snapped to and scaffolded round; it carries nothing and weighs nothing here.
+    this.buildings = new Map();
     // A live load sits on a deck: id -> { id, deckId, psf, across }. Models
     // saved before that hold ledger-anchored patches, { id, ledgerId, sideSign, psf }.
     // These are ALL the live load there is: a deck carries none of its own, so
@@ -128,7 +131,7 @@ export class ScaffoldState {
       standards: [...this.standards], ledgers: [...this.ledgers],
       braces: [...this.braces], planks: [...this.planks], brackets: [...this.brackets],
       trusses: [...this.trusses], guardrails: [...this.guardrails],
-      stairs: [...this.stairs],
+      stairs: [...this.stairs], buildings: [...this.buildings],
       liveLoads: [...this.liveLoads],
       plankPlacements: [...this.plankPlacements],
       seq: this._seq, base: { ...this.base },
@@ -144,6 +147,7 @@ export class ScaffoldState {
     this.trusses = new Map(d.trusses || []);
     this.guardrails = new Map(d.guardrails || []);
     this.stairs = new Map(d.stairs || []);
+    this.buildings = new Map(d.buildings || []);
     this.liveLoads = new Map(d.liveLoads || []);
     this.plankPlacements = new Map(d.plankPlacements || []);
     // Older saves also carry a liveLoadMode ('uniform' put a blanket load on
@@ -337,7 +341,8 @@ export class ScaffoldState {
    * there before, so two blocks side by side share one perimeter and get no
    * rail down the face between them. Where a ledger already runs along an
    * edge at a rail's height (a handrail put on with the Ledger tool), that
-   * ledger is the rail and none is laid over it.
+   * ledger is the rail and none is laid over it. And none along the face of a
+   * scaffold laid round a building that looks at the building's wall.
    */
   setDeckGuardrails(deckZ, railHeights) {
     this._pushHistory();
@@ -376,6 +381,20 @@ export class ScaffoldState {
       if (Math.abs(offA - line) > RAIL_ON_LINE_FT || Math.abs(offB - line) > RAIL_ON_LINE_FT) continue;
       const [p, q] = horizontal ? [l.a[0], l.b[0]] : [l.a[1], l.b[1]];
       taken.push([Math.min(p, q), Math.max(p, q)]);
+    }
+    // Nor along a building's wall, where scaffold was laid round it: that face
+    // is left open to the wall. The scaffold's inside edge runs the length of
+    // the wall and the stand-off past each end of it.
+    for (const b of this.buildings.values()) {
+      const gap = Number(b.openWithinFt) || 0;
+      if (!(gap > 0)) continue;
+      for (let i = 0; i < b.points.length; i++) {
+        const a = b.points[i], c = b.points[(i + 1) % b.points.length];
+        const [offA, offB] = horizontal ? [a[1], c[1]] : [a[0], c[0]];
+        if (Math.abs(offA - offB) > RAIL_ON_LINE_FT || Math.abs(offA - line) > gap) continue;
+        const [p, q] = horizontal ? [a[0], c[0]] : [a[1], c[1]];
+        taken.push([Math.min(p, q) - gap, Math.max(p, q) + gap]);
+      }
     }
     taken.sort((p, q) => p[0] - q[0]);
     const open = [];
@@ -666,6 +685,206 @@ export class ScaffoldState {
     return out;
   }
 
+  // --- chains ------------------------------------------------------------------
+  // A chain is one connected scaffold: every standard a walk along ledgers,
+  // trusses, braces, rails, decks, brackets and stair flights reaches, and
+  // every part that hangs on them. Blocks that click onto each other share
+  // standards and so are one chain; so is anything built by hand onto them.
+
+  /** The plan points a part is held at, for telling which standards it hangs on. */
+  _anchorsOf(id) {
+    const s = this.standards.get(id);
+    if (s) return [[s.x, s.y]];
+    for (const map of [this.ledgers, this.trusses, this.braces, this.guardrails]) {
+      const m = map.get(id);
+      if (m) return [[m.a[0], m.a[1]], [m.b[0], m.b[1]]];
+    }
+    const p = this.planks.get(id);
+    if (p) return [[p.x0, p.y0], [p.x1, p.y0], [p.x1, p.y1], [p.x0, p.y1]];
+    const k = this.brackets.get(id);
+    if (k) return [[k.x, k.y]];
+    const f = this.stairs.get(id);
+    if (f) return [...f.lower, ...f.upper];
+    const pp = this.plankPlacements.get(id);
+    if (pp) return this._anchorsOf(typeof pp.ledgerId === 'string' && pp.ledgerId.startsWith(ARM_PREFIX) ? pp.ledgerId.slice(ARM_PREFIX.length) : pp.ledgerId) || [];
+    const load = this.liveLoads.get(id);
+    if (load && load.deckId) return this._anchorsOf(load.deckId) || [];
+    return null;
+  }
+
+  /**
+   * The ids of every part of the chain these parts belong to (see above).
+   * A part that hangs on nothing (a lone standard) is a chain of one.
+   */
+  chainOf(seedIds) {
+    const cols = [...this.standards.values()];
+    // A brace is set a little off its face, so its ends are near, not on, a standard.
+    const NEAR = 0.4;
+    const standardAt = (x, y) => {
+      let best = null, bd = NEAR * NEAR;
+      for (const c of cols) { const d = (c.x - x) ** 2 + (c.y - y) ** 2; if (d <= bd) { bd = d; best = c; } }
+      return best;
+    };
+    const parent = new Map(cols.map(c => [c.id, c.id]));
+    const find = id => { let r = id; while (parent.get(r) !== r) r = parent.get(r); parent.set(id, r); return r; };
+    const join = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+    const everything = [this.ledgers, this.trusses, this.braces, this.guardrails, this.planks, this.brackets, this.stairs, this.plankPlacements, this.liveLoads];
+    const held = new Map(); // part id -> the standards it hangs on
+    for (const map of everything) {
+      for (const id of map.keys()) {
+        const on = (this._anchorsOf(id) || []).map(p => standardAt(p[0], p[1])).filter(Boolean);
+        held.set(id, on);
+        for (let i = 1; i < on.length; i++) join(on[0].id, on[i].id);
+      }
+    }
+    // A standard seated in a bracket is on the standard the bracket hangs on.
+    for (const c of cols) {
+      const k = this.standardBracket(c);
+      const host = k ? standardAt(k.x, k.y) : null;
+      if (host) join(c.id, host.id);
+    }
+    const roots = new Set();
+    const out = new Set();
+    for (const id of seedIds) {
+      if (this.standards.has(id)) { roots.add(find(id)); continue; }
+      const on = held.get(id);
+      if (on && on.length) roots.add(find(on[0].id));
+      else if (on) out.add(id);
+    }
+    for (const c of cols) if (roots.has(find(c.id))) out.add(c.id);
+    for (const [id, on] of held) if (on.length && roots.has(find(on[0].id))) out.add(id);
+    return [...out];
+  }
+
+  /**
+   * Move parts, or copy them: turned `steps` quarter turns about `pivot`, then
+   * shifted by (dx, dy). Parts that only make sense with another (a deck on a
+   * ledger, a load on a deck, a standard in a bracket) go when that one is
+   * among them. Whatever lands exactly on a part already there becomes one
+   * with it, which is how a chain set down against another joins it. One undo
+   * step. Returns the ids of the moved parts, or of the copies.
+   */
+  transformParts(ids, { dx = 0, dy = 0, steps = 0, pivot = { x: 0, y: 0 } } = {}, copy = false) {
+    const turns = ((Math.round(steps) % 4) + 4) % 4;
+    // (+ 0: a turned zero is not to come out as minus zero.)
+    const turn = (x, y) => (turns === 1 ? [-y + 0, x] : turns === 2 ? [-x + 0, -y + 0] : turns === 3 ? [y, -x + 0] : [x, y]);
+    const tidy = v => Math.round(v * 1e6) / 1e6;
+    const at = (x, y) => { const [rx, ry] = turn(x - pivot.x, y - pivot.y); return [tidy(pivot.x + rx + dx), tidy(pivot.y + ry + dy)]; };
+    const p3 = p => [...at(p[0], p[1]), p[2]];
+    const want = new Set(ids);
+    const renamed = new Map(); // old id -> the copy's id
+    const idFor = (prefix, old) => { if (!copy) return old; const n = this._id(prefix); renamed.set(old, n); return n; };
+    const out = [];
+    return this.batch(() => {
+      this._pushHistory();
+      const put = (map, prefix, old, changes) => {
+        const item = copy ? { ...JSON.parse(JSON.stringify(map.get(old))), ...changes, id: idFor(prefix, old) } : Object.assign(map.get(old), changes);
+        map.set(item.id, item);
+        out.push(item.id);
+        return item;
+      };
+      for (const [id, k] of [...this.brackets]) {
+        if (!want.has(id)) continue;
+        const [x, y] = at(k.x, k.y);
+        const [ux, uy] = turn(k.dir[0], k.dir[1]);
+        put(this.brackets, 'K', id, { x, y, dir: [ux, uy] });
+      }
+      for (const [id, c] of [...this.standards]) {
+        if (!want.has(id)) continue;
+        // One standing in a bracket goes where its bracket goes, and nowhere without it.
+        if (c.bracketId && !want.has(c.bracketId)) continue;
+        const [x, y] = at(c.x, c.y);
+        const item = put(this.standards, 'S', id, { x, y });
+        if (c.bracketId && copy) item.bracketId = renamed.get(c.bracketId);
+      }
+      for (const [map, prefix] of [[this.ledgers, 'L'], [this.trusses, 'T'], [this.braces, 'B'], [this.guardrails, 'G']]) {
+        for (const [id, m] of [...map]) if (want.has(id)) put(map, prefix, id, { a: p3(m.a), b: p3(m.b) });
+      }
+      for (const [id, p] of [...this.planks]) {
+        if (!want.has(id)) continue;
+        const [ax, ay] = at(p.x0, p.y0), [bx, by] = at(p.x1, p.y1);
+        put(this.planks, 'P', id, { x0: Math.min(ax, bx), y0: Math.min(ay, by), x1: Math.max(ax, bx), y1: Math.max(ay, by) });
+      }
+      for (const [id, f] of [...this.stairs]) {
+        if (want.has(id)) put(this.stairs, 'F', id, { lower: f.lower.map(p => at(p[0], p[1])), upper: f.upper.map(p => at(p[0], p[1])) });
+      }
+      // A deck on a ledger or a bracket arm: it is wherever that is. A copy needs the copy's.
+      const supportOf = ledgerId => (typeof ledgerId === 'string' && ledgerId.startsWith(ARM_PREFIX) ? ledgerId.slice(ARM_PREFIX.length) : ledgerId);
+      for (const [id, pp] of [...this.plankPlacements]) {
+        const support = supportOf(pp.ledgerId);
+        if (!want.has(support) && !want.has(id)) continue;
+        if (!copy) { out.push(id); continue; }
+        const now = renamed.get(support);
+        if (!now) continue;
+        put(this.plankPlacements, 'D', id, { ledgerId: pp.ledgerId === support ? now : `${ARM_PREFIX}${now}` });
+      }
+      for (const [id, load] of [...this.liveLoads]) {
+        if (!copy || !renamed.has(load.deckId)) continue;
+        put(this.liveLoads, 'LL', id, { deckId: renamed.get(load.deckId) });
+      }
+      this._mergeCoincident();
+      this._pruneOrphans();
+      this._emit();
+      return out.filter(id => this._has(id));
+    });
+  }
+
+  _has(id) {
+    return [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements].some(m => m.has(id));
+  }
+
+  /**
+   * Make one of every pair of parts that stand in exactly the same place: two
+   * standards on one spot (the taller is kept), two ledgers, trusses, braces
+   * or rails between the same two points, two decks over the same rectangle,
+   * two flights on the same ledgers. A deck hung on a ledger that goes is hung
+   * on the one that stays.
+   */
+  _mergeCoincident() {
+    const pt = p => `${Math.round(p[0] * 100)},${Math.round(p[1] * 100)},${Math.round((p[2] || 0) * 100)}`;
+    const pair = (a, b) => { const ka = pt(a), kb = pt(b); return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`; };
+    const bySpot = new Map();
+    for (const [id, c] of [...this.standards]) {
+      if (c.bracketId) continue;
+      const k = pt([c.x, c.y]);
+      const first = bySpot.get(k);
+      if (!first) { bySpot.set(k, c); continue; }
+      const keep = this.standardHeightFt(c) > this.standardHeightFt(first) ? c : first;
+      const drop = keep === c ? first : c;
+      this.standards.delete(drop.id);
+      bySpot.set(k, keep);
+      void id;
+    }
+    const kept = new Map(); // dropped ledger id -> the one kept
+    for (const map of [this.ledgers, this.trusses, this.braces, this.guardrails]) {
+      const seen = new Map();
+      for (const [id, m] of [...map]) {
+        const k = pair(m.a, m.b);
+        if (seen.has(k)) { map.delete(id); kept.set(id, seen.get(k)); } else seen.set(k, id);
+      }
+    }
+    for (const pp of this.plankPlacements.values()) if (kept.has(pp.ledgerId)) pp.ledgerId = kept.get(pp.ledgerId);
+    const decks = new Map();
+    for (const [id, p] of [...this.planks]) {
+      const k = `${pair([p.x0, p.y0, p.z], [p.x1, p.y1, p.z])}`;
+      if (decks.has(k)) {
+        this.planks.delete(id);
+        for (const load of this.liveLoads.values()) if (load.deckId === id) load.deckId = decks.get(k);
+      } else decks.set(k, id);
+    }
+    const flights = new Set();
+    for (const [id, f] of [...this.stairs]) {
+      const k = `${pair([...f.lower[0], f.z0], [...f.lower[1], f.z0])}>${pair([...f.upper[0], f.z1], [...f.upper[1], f.z1])}`;
+      if (flights.has(k)) this.stairs.delete(id); else flights.add(k);
+    }
+    // Two decks hung on the same side of the same ledger are one deck.
+    const hung = new Set();
+    for (const [id, pp] of [...this.plankPlacements]) {
+      const k = `${pp.ledgerId}:${pp.sideSign}`;
+      if (hung.has(k)) this.plankPlacements.delete(id); else hung.add(k);
+    }
+  }
+
   addBracket(node, dir, lengthFt) {
     this._pushHistory();
     const b = { id: this._id('K'), x: node.x, y: node.y, z: node.z, dir: [dir[0], dir[1]], lengthFt };
@@ -683,6 +902,16 @@ export class ScaffoldState {
     this.planks.set(p.id, p); this._emit(); return p;
   }
 
+  /** A building from its outline in plan (three points or more) and its height. */
+  addBuilding(points, heightFt) {
+    if (!points || points.length < 3) return null;
+    this._pushHistory();
+    const b = { id: this._id('H'), points: points.map(p => [p[0], p[1]]), heightFt: Math.max(1, Number(heightFt) || 1) };
+    this.buildings.set(b.id, b);
+    this._emit();
+    return b;
+  }
+
   /** A stair flight between the ledger on `lower` at z0 and the one on `upper` at z1 (see this.stairs). */
   addStairFlight({ lower, upper, z0, z1, treads }) {
     this._pushHistory();
@@ -696,7 +925,7 @@ export class ScaffoldState {
   stairFlightWeightLb(f) { return 2 * STAIR_TOWER.stringerLb + (f.treads || 0) * STAIR_TOWER.treadLb; }
 
   remove(id) { this._pushHistory();
-    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements]) {
+    for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.buildings, this.liveLoads, this.plankPlacements]) {
       if (m.delete(id)) { this._pruneOrphans(); this._emit(); return true; }
     }
     return false;
@@ -704,14 +933,14 @@ export class ScaffoldState {
   removeMany(ids) { this._pushHistory();
     let n = 0;
     for (const id of ids) {
-      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.liveLoads, this.plankPlacements]) {
+      for (const m of [this.standards, this.ledgers, this.braces, this.planks, this.brackets, this.trusses, this.guardrails, this.stairs, this.buildings, this.liveLoads, this.plankPlacements]) {
         if (m.delete(id)) { n++; break; }
       }
     }
     if (n) { this._pruneOrphans(); this._emit(); }
     return n;
   }
-  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.stairs.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
+  clear() { this._pushHistory(); this.standards.clear(); this.ledgers.clear(); this.braces.clear(); this.planks.clear(); this.brackets.clear(); this.trusses.clear(); this.guardrails.clear(); this.stairs.clear(); this.buildings.clear(); this.liveLoads.clear(); this.plankPlacements.clear(); this._emit(); }
 
   /**
    * Every connection node, numbered by lift as ScaffoldPro numbers them:
@@ -828,8 +1057,9 @@ export class ScaffoldState {
     const trusses = [...this.trusses.values()].map(t => ({ ...t }));
     const guardrails = [...this.guardrails.values()].map(g => ({ ...g }));
     const stairs = [...this.stairs.values()].map(f => ({ ...f }));
+    const buildings = [...this.buildings.values()].map(b => ({ ...b }));
     const liveLoads = this.liveLoadPatches();
-    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, stairs, liveLoads, nodes: this.nodes() };
+    return { standards, bases, ledgers, braces, planks, brackets, trusses, guardrails, stairs, buildings, liveLoads, nodes: this.nodes() };
   }
 
   // --- load takeoff --------------------------------------------------------

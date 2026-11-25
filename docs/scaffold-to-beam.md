@@ -202,6 +202,104 @@ landing (`planStairTower` in `src/scaffold/workspace/planning.js`).
 No live load is put on a stair. The Live load tool loads its landings like any
 other deck; it does not yet load a flight.
 
+## Buildings
+
+The Building tool traces a building's outline on the ground, corner by corner.
+Shift keeps the next wall square to the last corner; a click back on the first
+corner, or Enter, closes it into a building of the height in the card. A
+building is drawn as a pale mass. It carries nothing and weighs nothing: it is
+there to build against.
+
+- **Standing off a wall.** A block or stair tower placed beside a wall that is
+  square to the grid stands off it by **Scaffold off wall** (`snapToWall` in
+  `src/scaffold/workspace/planning.js`). Joining standards already there comes
+  first.
+- **Scaffold round it** lays blocks round the selected building, or the last one
+  traced, as ScaffoldPro's auto scaffold does: one run along each wall and a
+  square block at each corner, as deep as the Block card says, with its planked
+  levels, rails and bracing, decked under the building's height
+  (`planScaffoldRoundBuilding`). At a corner that turns inward the runs stop
+  short and the square goes in the angle. Runs and squares share their end
+  standards, so the result is one chain and one undo step.
+- Walls that are not square to the grid get no run: blocks turn in quarter
+  turns only.
+- The face of that scaffold that looks at the wall gets no rails, then or when
+  a later block re-lays the rails round that deck height. The outside face and
+  the ends are railed as any block's.
+
+## Drawing underlay
+
+**Drawing underlay**, in the side panel, lays a page of a PDF or an image
+(PNG, JPEG, WebP) flat on the ground to build over, as ScaffoldPro's underlay
+does (`src/scaffold/workspace/underlay.js`).
+
+- A PDF knows its paper size, so **1 in on sheet** sets its scale directly: 8
+  for a sheet drawn at 1/8 in to the foot. **Page** picks the page.
+- **Scale by 2 points** brings any drawing to scale from two points a **Known
+  distance** apart: type the distance, press the button, click its two ends.
+  The first point stays put.
+- **Move** takes a point on the drawing to where it belongs; the second click
+  lands on the grid, so a building's corner can be put on a grid line.
+- Opacity, Hide and Remove do what they say.
+
+The drawing is not part of the model. It is not saved with it, is not in the
+parts list or the DXF, and goes when the page is reloaded.
+
+pdf.js (the same release ScaffoldPro uses, pinned) is copied to `dist/pdfjs/`
+by the build and fetched the first time a PDF is opened. It is not in the
+builder's bundle.
+
+## Chains: moving, turning and copying a whole scaffold
+
+A chain is one connected scaffold: every standard that a walk along ledgers,
+trusses, braces, rails, decks, brackets and stair flights reaches, and every
+part on them (`chainOf` in `src/scaffold/workspace/state.js`). Blocks that
+click onto each other share standards, so they are one chain, and so is
+anything built onto them by hand. Nothing is stored for it; it is read from the
+parts, so it holds for models saved before.
+
+- **Double-click** a part with Select to take its whole chain. A box, or
+  Shift-click, still takes single parts.
+- **Move** or **Copy** in the Select card picks the selection up. It follows the
+  pointer, held by the standard that was nearest it; **R** turns it a quarter
+  turn about that standard; a click sets it down; Esc lets go.
+- Within 1.25 ft of a standard that is staying put it snaps onto it, as a block
+  does. Whatever lands exactly on a part already there becomes one with it (two
+  standards on a spot, two ledgers between the same rosettes, two decks over the
+  same bay), so a chain set down against another joins it.
+- Every kind of part goes: standards, ledgers, braces, trusses, rails, decks,
+  brackets with the standards in them, stair flights, and the live loads on the
+  decks. It is one undo step.
+
+Move and Copy used to shift the standards alone and leave everything on them
+behind.
+
+## Pulling an end
+
+With Select, a straight outside face of a scaffold shows an arrow when the
+pointer comes near it. Dragged out, it adds whole bays; dragged in, it takes
+them away. The bays to be added are outlined in blue, those to go in red, with
+the count and the length in the hint; letting go does it, as one undo step
+(`src/scaffold/workspace/pull.js`).
+
+- A bay added is the last bay repeated as it stands: its ledgers, decks,
+  braces, stair flights and the live loads on its decks. What makes the end an
+  end (its rails, its braces, brackets pointing out of it and the standards in
+  them) is carried out to the new end and not left across the deck.
+- An end makes a run longer; a long side pulled out makes it a bay deeper.
+- It works on any scaffold, placed as a block or built by hand, because nothing
+  is laid out again: every standard that stays is exactly where it was. Pulled
+  to a size, a block-built scaffold is what a block of that size would have
+  been, part for part and pound for pound.
+- The last bay is never taken. A standard another run still stands on stays.
+- A face is not offered a handle when the standards along it do not all have
+  one straight behind them at the same distance.
+
+ScaffoldPro stretches a block by a handle on its side and lays its bays out
+again, with a rule for the odd bay left over. That needs the scaffold to still
+be the block it was placed as, and moves standards under whatever was built on
+them since.
+
 ## Picking legs and importing
 
 **To beam** in the toolbar opens the Send to beam card. With it open, a click on a

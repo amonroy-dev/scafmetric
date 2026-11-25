@@ -27,5 +27,11 @@ await build({ entryPoints: ['app.js'], bundle:true, format:'esm', platform:'brow
 // Scaffold-to-beam 3D workspace (three.js). Bundled so the site needs no CDN, and
 // kept private like app.js because calculator.html loads it.
 await build({ entryPoints: ['src/scaffold/workspace/main.js'], bundle:true, format:'esm', platform:'browser', target:['es2020'], outfile:'workspace-private/scaffold-app.js', minify:true });
+// pdf.js, for a PDF drawing laid under the scaffold. Copied beside the site,
+// not bundled: the builder fetches it the first time a PDF is opened. It is a
+// public library, so it needs no access check.
+await mkdir('dist/pdfjs', { recursive: true });
+for (const file of ['pdf.min.mjs', 'pdf.worker.min.mjs']) await cp(`node_modules/pdfjs-dist/build/${file}`, `dist/pdfjs/${file}`);
+for (const dir of ['cmaps', 'standard_fonts', 'wasm']) await cp(`node_modules/pdfjs-dist/${dir}`, `dist/pdfjs/${dir}`, { recursive: true });
 await writeFile('dist/auth-config.json', JSON.stringify(firebaseConfig));
 console.log('Static site built in dist/');
