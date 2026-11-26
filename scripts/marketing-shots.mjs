@@ -52,7 +52,7 @@ const EXAMPLE = {
 
 // Device pixels per CSS pixel, for the larger of each pair.
 const SCALE = 2;
-// WebP quality. Type on flat colour is unforgiving below about 80; above 90
+// WebP quality. Type on flat color is unforgiving below about 80; above 90
 // the files double for nothing the eye can find.
 const QUALITY = 86;
 // The builder: tall enough that the Send to beam card shows all four legs

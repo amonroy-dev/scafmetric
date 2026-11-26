@@ -39,10 +39,10 @@ function sourceGeometry(r) {
  const s = r.sectionProperties || r.checks?.section || {};
  const entries = [
   ['W','Weight','lb/ft'],['A','Area','in²'],['d','Depth','in'],['bf','Flange width','in'],['tf','Flange thickness','in'],['tw','Web thickness','in'],['kdes','k (design)','in'],
-  ['Ix','Iₓ (catalogue)','in⁴'],['Sx','Sₓ','in³'],['Zx','Zₓ','in³'],['Iy','Iᵧ','in⁴'],['ry','rᵧ','in'],['rts','rₜₛ','in'],['J','J','in⁴'],['ho','hₒ','in']
+  ['Ix','Iₓ (catalog)','in⁴'],['Sx','Sₓ','in³'],['Zx','Zₓ','in³'],['Iy','Iᵧ','in⁴'],['ry','rᵧ','in'],['rts','rₜₛ','in'],['J','J','in⁴'],['ho','hₒ','in']
  ];
  const rows = entries.map(([key,label,unit]) => [label, n(s[key]), unit]);
- return table('Selected section properties — AISC Shapes Database v15 mirror', ['Property','Value','Unit'], rows) + `<p class="report-note">Catalogue section properties are reproduced from the application’s third-party AISC v15 data mirror. Verify against the authoritative AISC source. Analysis Iₓ = ${n(r.I)} in⁴${s.Ix !== r.I ? ' (overrides the catalogue value)' : ''}. Strength checks use the selected catalogue section properties.</p>`;
+ return table('Selected section properties — AISC Shapes Database v15 mirror', ['Property','Value','Unit'], rows) + `<p class="report-note">Catalog section properties are reproduced from the application’s third-party AISC v15 data mirror. Verify against the authoritative AISC source. Analysis Iₓ = ${n(r.I)} in⁴${s.Ix !== r.I ? ' (overrides the catalog value)' : ''}. Strength checks use the selected catalog section properties.</p>`;
 }
 function loadSchedule(r) {
  const uniforms = r.uniformLoads || [{id:'U1',deadKipFt:r.dead,liveKipFt:r.live}];

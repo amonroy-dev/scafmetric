@@ -52,7 +52,7 @@ const TOOL_META = {
   block: { label: 'Block', icon: ICONS.block, hint: 'Set the block in the card, then click the grid to place it. It snaps onto the standards beside it. R turns it 90°.' },
   stair: { label: 'Stair', icon: ICONS.stair, hint: 'Set the top landing height in the card, then click the grid to place a 14 x 7 ft stair tower. It snaps onto the standards beside it. R turns it 90°.' },
   standard: { label: 'Standard', icon: ICONS.standard, hint: 'Click the ground to set a standard. Enter a target height in the panel and one click builds the whole planned stack.' },
-  ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level, or with Perimeter handrails ticked, only the outside of it.' },
+  ledger: { label: 'Ledger', icon: ICONS.ledger, hint: 'Click a rosette node to run a ledger to the nearest open standard. Shift+click fills every bay at that level, or with Perimeter handrails checked, only the outside of it.' },
   brace: { label: 'Brace', icon: ICONS.brace, hint: 'Hover a bay face; the height under the cursor picks the lift. R flips the direction. Shift+click braces every perimeter face at that height.' },
   truss: { label: 'Truss', icon: ICONS.truss, hint: 'Pick Light truss, Heavy truss or Truss and a size in the panel, then click a rosette: the truss runs to the rosette its own length away. R turns it to the next one. Shift+click fills the face.' },
   bracket: { label: 'Bracket', icon: ICONS.bracket, hint: 'Hover a rosette to preview a side bracket pointing out of the scaffold, then click. R turns it to the next free direction.' },
@@ -122,7 +122,7 @@ const UNSUPPORTED_TEMPLATE = `
   <div class="sfw-notice-body">
     <div class="sfw-notice-ico">${ICONS.monitor}</div>
     <h3>Open this on a desktop browser</h3>
-    <p>The scaffold builder is a 3D modelling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, SHIFT+middle-drag to orbit, the wheel to zoom, and SHIFT and R while placing.</p>
+    <p>The scaffold builder is a 3D modeling workspace. It needs a wide screen and a mouse or trackpad: navigation uses middle-drag to pan, SHIFT+middle-drag to orbit, the wheel to zoom, and SHIFT and R while placing.</p>
     <p class="sfw-notice-sub">For the best experience and accurate results, open Scafmetric on a laptop or desktop. Beam analysis itself works fine on this device &mdash; you can keep entering loads by hand, and your work is saved for 30 days either way.</p>
     <button type="button" class="sfw-btn primary" data-sfw-close>Back to beam analysis</button>
   </div>
@@ -192,7 +192,7 @@ const TEMPLATE = `
               <label data-bldg="any">Scaffold off wall<span class="sfw-u"><input type="number" id="sfw-bldg-off" min="0" step="any" value="${BUILDING_DEFAULTS.wallDistanceFt}"><i>ft</i></span></label>
             </div>
             <div class="sfw-actions-row sfw-mt" data-bldg="any">
-              <button type="button" class="sfw-btn" id="sfw-bldg-auto" disabled>Scaffold round it</button>
+              <button type="button" class="sfw-btn" id="sfw-bldg-auto" disabled>Scaffold around it</button>
             </div>
           </div>
           <label data-for="ledger" class="sfw-check"><input type="checkbox" id="sfw-ledger-outside"><span>Perimeter handrails</span></label>
@@ -233,7 +233,7 @@ const TEMPLATE = `
               <label>Planked levels<input type="number" data-block="plankedLevelsCount" min="0" max="20" step="1"></label>
             </div>
             <label class="sfw-check"><input type="checkbox" data-block="includeBaseDeck"><span>Include base deck (lift 0)</span></label>
-            <label class="sfw-check"><input type="checkbox" data-block="guardrails"><span>Guardrails round every deck</span></label>
+            <label class="sfw-check"><input type="checkbox" data-block="guardrails"><span>Guardrails around every deck</span></label>
             <div class="sfw-grid2 sfw-mt">
               <label>Front/back braces<select data-block="braceFrontBack"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
               <label>Left/right braces<select data-block="braceLeftRight"><option value="off">Off</option><option value="slash">/</option><option value="backslash">\\</option></select></label>
@@ -280,7 +280,7 @@ const TEMPLATE = `
       </details>
       <details class="sfw-group sfw-fold">
         <summary>Guardrails</summary>
-        <p class="sfw-note">Blocks come with their rails. This adds rails round every deck you placed by hand.</p>
+        <p class="sfw-note">Blocks come with their rails. This adds rails around every deck you placed by hand.</p>
         <div class="sfw-actions-row">
           <button type="button" class="sfw-btn" id="sfw-rails">Add to decks</button>
           <button type="button" class="sfw-btn ghost" id="sfw-rails-clear">Clear</button>
@@ -526,7 +526,7 @@ class Workspace {
       onBuilding: b => {
         this._lastBuilding = b.id;
         this._syncBuildingCard();
-        this.$('sfw-hint').textContent = 'Building traced. "Scaffold round it" lays scaffold along its walls, or place blocks beside it: they stand off the wall.';
+        this.$('sfw-hint').textContent = 'Building traced. "Scaffold around it" lays scaffold along its walls, or place blocks beside it: they stand off the wall.';
       },
       onPulled: (done, asked, depthFt) => {
         const n = Math.abs(done);
@@ -563,7 +563,7 @@ class Workspace {
             : tool === 'bracket standard'
               ? `Stood ${n} standard${n === 1 ? '' : 's'} along the row of brackets. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.`
             : tool === 'handrail'
-              ? (n ? `Added ${n} handrail${n === 1 ? '' : 's'} round the outside of that level. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.` : 'The outside of that level already has its rails.')
+              ? (n ? `Added ${n} handrail${n === 1 ? '' : 's'} around the outside of that level. Ctrl+Z takes ${n === 1 ? 'it' : 'them'} back.` : 'The outside of that level already has its rails.')
             : n
               ? `Added ${n} ${tool}${n > 1 ? 's' : ''} across every bay at that level.`
               : 'Nothing to add at that level — place more standards first.';
@@ -892,8 +892,8 @@ class Workspace {
       const done = id ? this.tools.scaffoldRoundBuilding(id) : null;
       if (!done) return;
       this.$('sfw-hint').textContent = (done.round
-        ? `Scaffold laid round the building: ${done.blocks} bays in a ring, its depth and levels set by the Block card.`
-        : `Scaffold laid round the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.`) +
+        ? `Scaffold laid around the building: ${done.blocks} bays in a ring, its depth and levels set by the Block card.`
+        : `Scaffold laid around the building: ${done.blocks} block${done.blocks === 1 ? '' : 's'}, set by the Block card.`) +
         (done.skipped ? ` ${done.skipped} wall${done.skipped === 1 ? ' is' : 's are'} not square to the grid and got none.` : '') + ' Ctrl+Z takes it back.';
     });
     this.$('sfw-stair-add').addEventListener('click', () => {
@@ -921,7 +921,7 @@ class Workspace {
     this.$('sfw-ledger-outside').addEventListener('change', e => {
       this.tools.setPerimeterHandrails(e.target.checked);
       this.$('sfw-hint').textContent = e.target.checked
-        ? 'A click adds a handrail along an outside face. SHIFT adds them round the outside of that level.'
+        ? 'A click adds a handrail along an outside face. SHIFT adds them around the outside of that level.'
         : '';
       // Only the rosettes on an outside face that still wants its rail stay lit.
       this._rebuildNodes();
@@ -987,7 +987,7 @@ class Workspace {
     if (tool === 'building' && !info.shape) { hint.textContent = 'Pick the building’s shape in the card.'; return; }
     if (tool === 'building' && info.shape !== 'outline') {
       hint.textContent = info.shape === 'round'
-        ? (!count ? 'Click the centre of the building.' : `Radius ${round(info.lengthFt, 2)} ft. Click to set the wall.`)
+        ? (!count ? 'Click the center of the building.' : `Radius ${round(info.lengthFt, 2)} ft. Click to set the wall.`)
         : (!count ? 'Click one corner of the building.' : 'Click the opposite corner.');
       return;
     }
@@ -1076,14 +1076,14 @@ class Workspace {
         return;
       }
       if (!count) { hint.textContent = 'The outside of this level already has its rails.'; return; }
-      hint.textContent = `SHIFT: ${count} handrail${count === 1 ? '' : 's'} round the outside of this level — click or press Enter.`;
+      hint.textContent = `SHIFT: ${count} handrail${count === 1 ? '' : 's'} around the outside of this level — click or press Enter.`;
       return;
     }
     if (tool === 'ledger') {
       if (!info.batch) {
         hint.textContent = count
           ? 'Click to add this ledger. Hold SHIFT to preview every bay at this level.'
-          : 'This node already has a ledger to each neighbour. Hold SHIFT to fill the level.';
+          : 'This node already has a ledger to each neighbor. Hold SHIFT to fill the level.';
         return;
       }
       if (!count) { hint.textContent = 'Every bay at this level already has its ledgers.'; return; }

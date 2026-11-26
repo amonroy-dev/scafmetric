@@ -127,7 +127,7 @@ window.__shots = (() => {
       dist *= Math.max((b.x1 - b.x0) / region.width, (b.y1 - b.y0) / region.height);
       place();
       b = bounds();
-      // Slide the camera across its own view plane until the model is centred.
+      // Slide the camera across its own view plane until the model is centered.
       const dx = (region.x + region.width / 2) - (b.x0 + b.x1) / 2;
       const dy = (region.y + region.height / 2) - (b.y0 + b.y1) / 2;
       const feetPerPixel = 2 * dist * Math.tan((cam.fov * Math.PI / 180) / 2) / canvas().getBoundingClientRect().height;
@@ -312,7 +312,7 @@ window.__shots = (() => {
     const figures = box(need('#results .result-grid'));
     const pad = verdict.x - panel.x; // the panel's own padding, so every edge gets the same
     // The results are cut out of the middle of the panel. Its edges stop half
-    // way to whatever is above and below, so that neither neighbour's border
+    // way to whatever is above and below, so that neither neighbor's border
     // shows as a stray line along the edge of the picture.
     const saved = $('project-save-status');
     const above = saved && !saved.hidden ? box(saved).y + box(saved).height : panel.y;

@@ -102,7 +102,7 @@ export function presentNotice({ onAgree, onCancel }) {
 
   const boxes = [];
   const confirm = el('fieldset', 'sfn-confirm');
-  confirm.append(el('legend', 'sfn-legend', 'Tick both to continue'));
+  confirm.append(el('legend', 'sfn-legend', 'Check both to continue'));
   for (const item of SCAFFOLD_NOTICE.confirmations) {
     const label = el('label');
     const box = el('input');

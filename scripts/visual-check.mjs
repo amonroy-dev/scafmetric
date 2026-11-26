@@ -336,11 +336,11 @@ const CHECKS = {
     !/Click to add this handrail/.test(r.oneHint) && `over the end standard the hint should offer one handrail, said: ${r.oneHint}`,
     !(r.afterClick.returns === 1 && r.afterClick.row === 0 && r.afterClick.elsewhere === 0)
       && `a click on the end standard of the row should add the short return to the scaffold: ${JSON.stringify(r.afterClick)}`,
-    !(r.preview.pending === 4 && r.preview.here === 4 && /4 handrails round the outside of this level/.test(r.preview.hint))
+    !(r.preview.pending === 4 && r.preview.here === 4 && /4 handrails around the outside of this level/.test(r.preview.hint))
       && `SHIFT should preview the four handrails still missing round the outside of this run, and none on another: ${JSON.stringify(r.preview)}`,
     !(r.filled.row === 3 && r.filled.returns === 2 && r.filled.elsewhere === 0 && /already has its rails/.test(r.filled.hint))
       && `the fill should rail the row of bracket standards and its two ends, with nothing across the decks: ${JSON.stringify(r.filled)}`,
-    !(r.top.pending === 5 && r.top.row === 3 && r.top.returns === 2 && r.top.elsewhere === 0 && /Added 5 handrails round the outside of that level/.test(r.top.hint))
+    !(r.top.pending === 5 && r.top.row === 3 && r.top.returns === 2 && r.top.elsewhere === 0 && /Added 5 handrails around the outside of that level/.test(r.top.hint))
       && `one lift up, Enter should add the same five with the rails below already in, and say so: ${JSON.stringify(r.top)}`,
     !(r.inside.ghosts <= 1 && /No outside face runs from this rosette/.test(r.inside.hint))
       && `a rosette between the two decks should offer no handrail: ${JSON.stringify(r.inside)}`,
