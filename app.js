@@ -5,7 +5,7 @@ import { beamSelfWeight } from './src/beam-self-weight.js';
 import { summarizeChecks, formatUtilization, describeUtilization } from './src/check-verdict.js';
 import { checkDeflection } from './src/deflection-check.js';
 import { suggestBeamSize } from './src/suggest-beam-size.js';
-import { canConsiderLateralBracing } from './src/bracing-suggestion.js';
+import { canConsiderLateralBracing, suggestBraceSpacing } from './src/bracing-suggestion.js';
 import { initializeBracingHelp } from './src/bracing-help.js';
 import { checkFlexure } from './src/strength-flexure.js';
 import { checkMajorAxisShear } from './src/strength-shear.js';
@@ -22,7 +22,7 @@ import { getAnalysisAccess } from './src/analysis-access.js';
 
 const $ = id => document.getElementById(id);
 const projectSaver = createProjectSaver({ status:$('project-save-status'), message:$('project-save-message'), retry:$('project-save-retry'), signIn:$('project-save-signin') });
-const bracingHelp = initializeBracingHelp();
+initializeBracingHelp();
 const fmt = (n, digits = 3) => Number(n).toLocaleString('en-US', { maximumFractionDigits: digits });
 const ratio = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 // Display units: forces in lbs, moments in lb-ft, distributed loads in lb/ft and
@@ -318,29 +318,53 @@ function verdictHtml(check) {
  }
  return `<div class="verdict-card verdict-pass"><span class="verdict-label">Steel check</span><strong class="verdict-title">PASS — strength and deflection</strong><p class="verdict-detail"><strong>${escape(describeUtilization(result.governing, d))}</strong></p>${meters}</div>`;
 }
+// "5, 10 and 15"
+function listOf(values) {
+ return values.length < 2 ? values.join('') : `${values.slice(0, -1).join(', ')} and ${values[values.length - 1]}`;
+}
+// Lateral bracing that makes this beam pass, or null. Worked only when every
+// failure is bending that closer bracing can cure; see bracing-suggestion.js.
+function bracingFor(r) {
+ if (!canConsiderLateralBracing(r.checks)) return null;
+ try {
+  return suggestBraceSpacing({section:r.sectionProperties, Iin4:r.I, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
+   cbMethod:r.checks.cbMethod, Eksi:r.E, safetyFactor:r.comparison ? r.comparison.numerator : null,
+   deflectionLimitRatio:r.checks.deflection.limitRatio, stiffnessFactor:r.factor,
+   confirmedLateralBracing:true, confirmedScope:true});
+ } catch { return null; }
+}
+function bracingHtml(bracing, sectionName) {
+ const at = bracing.locationsFt.map(x => fmt(x, 2));
+ const where = at.length === 1 ? `A brace at ${at[0]} ft from the left support.`
+  : at.length <= 6 ? `Braces at ${listOf(at)} ft from the left support.`
+  : `Braces every ${fmt(bracing.spacingFt, 2)} ft from the left support, ${at.length} on each flange.`;
+ const spacing = bracing.midspan ? 'At midspan' : `${fmt(bracing.spacingFt, 2)}' O.C.`;
+ return `<span class="suggestion-label">Suggested bracing</span><strong>${spacing} <small>· top and bottom flanges</small></strong><p>${where} The ${escape(sectionName)} then passes the listed checks.</p><div class="suggestion-actions"><button type="button" class="suggestion-button" data-use-bracing="${bracing.locationsFt.join(',')}">Add these braces →</button><button type="button" class="bracing-help-trigger" data-open-bracing-help>What is lateral bracing?</button></div>`;
+}
+// First, lateral bracing for the beam in hand, and only when it makes the beam
+// pass. Then, or instead, the lightest section that passes as the beam is braced now.
 function renderSuggestion(r) {
  const status = summarizeChecks(r.checks);
  if (status.status === 'incomplete' || status.unavailable?.length) { $('suggestion').innerHTML = ''; return; }
- const bracingOption = canConsiderLateralBracing(r.checks)
-  ? '<div class="suggestion-bracing-actions"><button type="button" class="suggestion-bracing" data-review-bracing>Consider adding lateral bracing?</button><button type="button" class="bracing-help-trigger" data-open-bracing-help>What is lateral bracing?</button></div><div class="suggestion-or"><span>OR</span></div>'
-  : '';
- let found;
+ const bracing = bracingFor(r);
+ let found = null;
  try {
   found = suggestBeamSize({sections, spanFt:r.span, deadLoadKipFt:r.dead, liveLoadKipFt:r.live, pointLoads:r.pointLoads,
    topBracesFt:r.braces.top.locations, bottomBracesFt:r.braces.bottom.locations, cbMethod:r.checks.cbMethod, Eksi:r.E,
    safetyFactor:r.comparison ? r.comparison.numerator : null,
    deflectionLimitRatio:r.checks.deflection.limitRatio, stiffnessFactor:r.factor,
    confirmedLateralBracing:true, confirmedScope:true});
- } catch {
-  $('suggestion').innerHTML = ''; return;
+ } catch { found = null; }
+ const options = [];
+ if (bracing) options.push(bracingHtml(bracing, r.section));
+ if (found?.status === 'suggested') {
+  const name = found.section.AISC_Manual_Label;
+  const button = name === r.section ? '<span class="suggestion-current">Currently selected</span>' : `<button type="button" class="suggestion-button" data-use-suggestion="${escape(name)}">Use ${escape(name)} →</button>`;
+  options.push(`<span class="suggestion-label">Suggested size</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}`);
+ } else if (found && !bracing) {
+  options.push('<span class="suggestion-label">Suggested size</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p>');
  }
- if (found.status !== 'suggested') {
-  $('suggestion').innerHTML = `<div class="suggestion-card">${bracingOption}<span class="suggestion-label">Suggested size</span><strong>No supported passing size found</strong><p>Review the loads and brace locations or consult an engineer.</p></div>`;
-  return;
- }
- const name = found.section.AISC_Manual_Label;
- const button = name === r.section ? '<span class="suggestion-current">Currently selected</span>' : `<button type="button" class="suggestion-button" data-use-suggestion="${escape(name)}">Use ${escape(name)} →</button>`;
- $('suggestion').innerHTML = `<div class="suggestion-card">${bracingOption}<span class="suggestion-label">Suggested size</span><strong>${escape(name)} <small>· ${fmt(found.section.W, 3)} lb/ft</small></strong><p>Lowest weight among supported library sections passing the listed checks.</p>${button}</div>`;
+ $('suggestion').innerHTML = options.length ? `<div class="suggestion-card">${options.join('<div class="suggestion-or"><span>OR</span></div>')}</div>` : '';
 }
 function render(r) {
  const a = r.analysis; const max = a.maxDeflection;
@@ -531,12 +555,17 @@ $('verdict').addEventListener('click', e => {
  $('capacity-confirmed').focus();
 });
 $('suggestion').addEventListener('click', e => {
- if (e.target.closest('[data-review-bracing]')) {
-  const target = document.querySelector('.brace-editor[data-flange="top"] .next-brace');
-  bracingHelp.highlight();
-  revealField(target);
-  target.focus({preventScroll:true});
-  target.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
+ const braces = e.target.closest('[data-use-bracing]');
+ if (braces) {
+  const at = braces.dataset.useBracing.split(',').map(Number).filter(x => Number.isFinite(x) && x > 0);
+  if (!at.length) return;
+  const name = record?.section || $('section').value;
+  setBraces(at);
+  $('verdict').innerHTML = `<div class="verdict-card verdict-incomplete"><strong class="verdict-title">Braces added</strong><p class="verdict-detail">At ${listOf(at.map(x => fmt(x, 2)))} ft from the left support, on the top and bottom flanges. Run the analysis again to check the ${escape(name)} with them.</p></div>`;
+  persistBeam();
+  revealField($('capacity-confirmed'));
+  $('capacity-confirmed').focus({preventScroll:true});
+  $('capacity-confirmed').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'center'});
   return;
  }
  const button = e.target.closest('[data-use-suggestion]');
@@ -562,25 +591,37 @@ fetch('./public/data/aisc-w-shapes-v15.json').then(r=>{if(!r.ok) throw Error('Se
  setLibraryStatus(true, `AISC v15 library · ${sections.length} W-shapes`);
 }).catch(err=>{$('error').textContent = err.message + ' Run the app through a local web server.'; setLibraryStatus(false, 'Section library offline');});
 
-for (const editor of document.querySelectorAll('.brace-editor')) {
+function syncBraces(editor) {
+ $(`${editor.dataset.flange}-brace-locations`).value = [...editor.querySelectorAll('.brace-list input')].map(input => input.value).filter(value => value !== '').join(', ');
+ invalidate(); drawSchematic();
+}
+// One brace position in a flange's list: a field in feet and a button to take it out.
+function addBraceRow(editor, value = '') {
  const flange = editor.dataset.flange;
- const list = editor.querySelector('.brace-list');
- const sync = () => {
-  $(`${flange}-brace-locations`).value = [...list.querySelectorAll('input')].map(input => input.value).filter(value => value !== '').join(', ');
-  invalidate(); drawSchematic();
- };
- const next = () => {
-  const row = document.createElement('div'); row.className = 'brace-entry';
-  const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.placeholder = 'e.g. 5'; input.setAttribute('aria-label', `${flange} flange brace position from left support in feet`);
-  const field = document.createElement('div'); field.className = 'input-unit';
-  const unit = document.createElement('span'); unit.textContent = 'ft'; unit.setAttribute('aria-hidden', 'true'); field.append(input, unit);
-  const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove brace');
-  remove.addEventListener('click', () => { row.remove(); sync(); }); input.addEventListener('input', sync);
-  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); if (input.value !== '') next(); } });
-  row.append(field, remove); list.append(row); input.focus();
-  $('brace-cleared').textContent = '';
- };
- editor.querySelector('.next-brace').addEventListener('click', next);
+ const row = document.createElement('div'); row.className = 'brace-entry';
+ const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.placeholder = 'e.g. 5'; input.setAttribute('aria-label', `${flange} flange brace position from left support in feet`);
+ if (value !== '') input.value = String(value);
+ const field = document.createElement('div'); field.className = 'input-unit';
+ const unit = document.createElement('span'); unit.textContent = 'ft'; unit.setAttribute('aria-hidden', 'true'); field.append(input, unit);
+ const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.setAttribute('aria-label', 'Remove brace');
+ remove.addEventListener('click', () => { row.remove(); syncBraces(editor); }); input.addEventListener('input', () => syncBraces(editor));
+ input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); if (input.value !== '') nextBrace(editor); } });
+ row.append(field, remove); editor.querySelector('.brace-list').append(row);
+ return input;
+}
+function nextBrace(editor) {
+ addBraceRow(editor).focus();
+ $('brace-cleared').textContent = '';
+}
+for (const editor of document.querySelectorAll('.brace-editor')) editor.querySelector('.next-brace').addEventListener('click', () => nextBrace(editor));
+/** The same braces on both flanges, in place of whatever was entered. */
+function setBraces(locationsFt) {
+ for (const editor of document.querySelectorAll('.brace-editor')) {
+  editor.querySelector('.brace-list').replaceChildren();
+  for (const x of locationsFt) addBraceRow(editor, x);
+  syncBraces(editor);
+ }
+ $('brace-cleared').textContent = '';
 }
 // Brace stations are positions along one particular span, so a new span clears
 // them instead of keeping stale or out-of-range positions. This listener runs on

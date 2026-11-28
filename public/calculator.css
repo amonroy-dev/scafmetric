@@ -332,9 +332,8 @@
   .meter-over .meter-track { border-color:rgba(220,38,38,0.6); box-shadow:none; }
   .suggestion:not(:empty) { padding:14px 18px 0; }
   .suggestion-card { height:100%; padding:16px 18px; border:1px solid rgba(37,99,235,0.38); border-radius:0; background:linear-gradient(135deg,rgba(37,99,235,0.09),rgba(37,99,235,0.01)); animation:ws-pop .35s var(--ease) .08s both; }
-  .suggestion-bracing { display:block; width:100%; padding:0; border:0; background:transparent; color:var(--ws-aqua-2); font:650 16px/1.45 var(--sans); text-align:left; cursor:pointer; }
-  .suggestion-bracing:hover { color:var(--ws-aqua); text-decoration:underline; text-underline-offset:4px; }
-  .suggestion-bracing-actions { display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
+  .suggestion-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:2px 0 4px; }
+  .suggestion-actions .suggestion-button { margin:0; }
   .suggestion-or { display:flex; align-items:center; gap:14px; margin:24px 0; color:var(--ws-dim); font:500 12px/1 var(--sans); letter-spacing:normal; }
   .suggestion-or::before,.suggestion-or::after { content:''; flex:1; border-top:1px solid var(--ws-line-2); }
   .suggestion-label { display:block; margin-bottom:10px; color:var(--ws-aqua); font:500 12px/1 var(--sans); letter-spacing:normal; }
